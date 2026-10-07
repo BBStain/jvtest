@@ -1,0 +1,134 @@
+extends Node
+## Test automatique : lance la partie avec des commandes simulées et vérifie les règles.
+
+class Scripted extends InputSource:
+	var fn: Callable
+	var frame := 0
+	func _init(f: Callable) -> void:
+		fn = f
+	func poll() -> InputState:
+		var s := InputState.new()
+		fn.call(s, frame)
+		frame += 1
+		return s
+
+var game: Node
+var shot_dir := ""
+var failures := 0
+
+func check(cond: bool, msg: String) -> void:
+	print(("OK   " if cond else "FAIL ") + msg)
+	if not cond:
+		failures += 1
+
+func new_game() -> void:
+	if game:
+		game.queue_free()
+		await get_tree().process_frame
+	game = load("res://scenes/main.tscn").instantiate()
+	add_child(game)
+
+func step(n: int) -> void:
+	for i in n:
+		await get_tree().physics_frame
+
+func shot(name: String) -> void:
+	if shot_dir == "":
+		return
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(shot_dir + "/" + name + ".png")
+
+func _ready() -> void:
+	shot_dir = OS.get_environment("SHOT_DIR")
+	var p1: Fighter
+	var p2: Fighter
+
+	# 1) Les joueurs atterrissent sur le sol
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(60)
+	check(p1.is_on_floor() and absf(p1.position.y - (570 - 42)) < 3, "J1 au sol (y=%.1f)" % p1.position.y)
+	await shot("01_debut")
+
+	# 2) J1 marche vers J2 et attaque : J2 perd une vie
+	p1.input_source = Scripted.new(func(s, f):
+		s.stick.x = 1.0 if f < 50 else 0.0
+		s.attack_pressed = f == 60)
+	await step(63)
+	await shot("02_attaque")
+	await step(10)
+	check(p2.lives == 2, "J2 touché, vies = %d" % p2.lives)
+	check(p2.is_invincible(), "J2 invincible après le coup")
+	check(not p2.can_attack(), "J2 ne peut pas attaquer pendant l'invincibilité")
+
+	# 3) Attaque de loin = dans le vide
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 60)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(80)
+	check(p2.lives == 3, "Attaque de loin rate, J2 vies = %d" % p2.lives)
+
+	# 4) Choc d'attaques : personne ne perd de vie
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 590; p2.position.x = 690
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	await step(42)
+	check(p1.lives == 3 and p2.lives == 3, "Choc : vies %d / %d" % [p1.lives, p2.lives])
+	check(p1.position.x < 570 and p2.position.x > 710, "Choc : les deux repoussés (x = %.0f / %.0f)" % [p1.position.x, p2.position.x])
+	check(p1.can_attack(), "Choc : J1 peut ré-attaquer vite")
+
+	# 5) Dash = intouchable
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 680
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f):
+		s.stick = Vector2(0, -1)
+		s.dash_pressed = f == 29)
+	await step(36)
+	check(p2.lives == 3, "Pendant le dash J2 n'est pas touché (vies = %d)" % p2.lives)
+
+	# 6) Saut + double saut + dash vers le haut jusqu'à la plateforme du haut
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 640
+	p1.input_source = Scripted.new(func(s, f):
+		s.jump_pressed = f == 30 or f == 48
+		s.jump_held = f >= 30 and f < 70
+		if f >= 62 and f < 64:
+			s.stick = Vector2(0, -1)
+		s.dash_pressed = f == 62)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	var min_y := 1000.0
+	for i in 140:
+		await step(1)
+		min_y = minf(min_y, p1.position.y)
+		if i == 70:
+			await shot("03_triple_saut")
+	check(p1.is_on_floor() and absf(p1.position.y - (282 - 42)) < 3, "Arrivé sur la plateforme du haut (y=%.1f, plus haut=%.1f)" % [p1.position.y, min_y])
+
+	# 7) Descendre avec bas
+	p1.input_source = Scripted.new(func(s, f):
+		s.stick.y = 1.0 if f < 3 else 0.0
+		s.down_pressed = f == 0)
+	await step(40)
+	check(p1.is_on_floor() and absf(p1.position.y - (432 - 42)) < 3, "Descendu sur la plateforme du milieu (y=%.1f)" % p1.position.y)
+
+	# 8) Tomber de la map coûte une vie, puis réapparition au milieu ; 3 chutes = fin
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = -1.0 if not p1.is_invincible() else 0.0)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(150)
+	check(p1.lives < 3, "Chute : J1 a perdu une vie (vies = %d)" % p1.lives)
+	await step(600)
+	check(p1.eliminated and game._match_over, "J1 éliminé après 3 chutes, partie finie")
+	await shot("04_fin")
+
+	print("ECHECS: %d" % failures)
+	get_tree().quit(1 if failures > 0 else 0)
