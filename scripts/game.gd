@@ -116,6 +116,7 @@ func _closest_opponent(fighter: Fighter) -> Fighter:
 
 
 ## Deux attaques qui se touchent s'annulent et repoussent les deux joueurs.
+## Si une attaque légère contre une attaque lourde, celui qui a contré a une recharge doublée.
 func _resolve_clashes() -> void:
 	for i in fighters.size():
 		for j in range(i + 1, fighters.size()):
@@ -123,15 +124,15 @@ func _resolve_clashes() -> void:
 			var b := fighters[j]
 			if not (a.is_attack_active() and b.is_attack_active()):
 				continue
-			if a.attack_center().distance_to(b.attack_center()) > Fighter.ATTACK_RADIUS * 2.0:
+			if a.attack_center().distance_to(b.attack_center()) > a.attack_radius() + b.attack_radius():
 				continue
 			var push := a.global_position - b.global_position
 			if push.length() < 1.0:
 				push = Vector2(-1.0, 0.0)
 			push.y = 0.0
 			push = push.normalized()
-			a.clash(push)
-			b.clash(-push)
+			a.clash(push, b.is_heavy_attack() and not a.is_heavy_attack())
+			b.clash(-push, a.is_heavy_attack() and not b.is_heavy_attack())
 
 
 func _resolve_hits() -> void:
@@ -141,8 +142,11 @@ func _resolve_hits() -> void:
 		for victim in fighters:
 			if victim == attacker or not victim.can_be_hit():
 				continue
-			if _circle_hits_rect(attacker.attack_center(), Fighter.ATTACK_RADIUS, victim.body_rect()):
-				victim.take_hit(attacker.attack_direction())
+			if _circle_hits_rect(attacker.attack_center(), attacker.attack_radius(), victim.body_rect()):
+				var hit_dir := (victim.global_position - attacker.global_position).normalized()
+				if not attacker.is_heavy_attack():
+					hit_dir = attacker.attack_direction()
+				victim.take_hit(hit_dir, attacker.attack_knockback())
 				attacker.mark_attack_hit()
 				break
 

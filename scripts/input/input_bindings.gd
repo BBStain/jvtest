@@ -7,35 +7,39 @@ extends RefCounted
 ##   {"type": "keyboard", "layout": 1}  -> clavier, côté droit (flèches)
 ##   {"type": "joypad", "id": 2}        -> la manette n°2 connectée
 ##
-## Manette : stick gauche ou croix pour bouger, A sauter, X attaquer, gâchette gauche (ou LB) dash.
+## Manette : stick gauche ou croix pour bouger, A sauter, X attaque légère, Y attaque lourde,
+## gâchette gauche (ou LB) dash.
 ## Les touches clavier sont des touches PHYSIQUES : "W A S D" ici = "Z Q S D" sur un clavier AZERTY.
 
 const KEYBOARD_LAYOUTS := [
-	# Clavier gauche : Z Q S D pour bouger, Espace saut, F attaque, G dash
+	# Clavier gauche : Z Q S D pour bouger, Espace saut, F attaque légère, R attaque lourde, G dash
 	{
 		"name": "Clavier (Z Q S D)",
 		"left": [KEY_A], "right": [KEY_D], "up": [KEY_W], "down": [KEY_S],
-		"jump": [KEY_SPACE], "attack": [KEY_F], "dash": [KEY_G],
+		"jump": [KEY_SPACE], "attack": [KEY_F], "heavy": [KEY_R], "dash": [KEY_G],
 	},
-	# Clavier droit : flèches pour bouger, L saut, K attaque, J dash (ou pavé numérique 0 / 1 / 2)
+	# Clavier droit : flèches pour bouger, L saut, K attaque légère, I attaque lourde, J dash
+	# (ou pavé numérique 0 / 1 / 3 / 2)
 	{
 		"name": "Clavier (flèches)",
 		"left": [KEY_LEFT], "right": [KEY_RIGHT], "up": [KEY_UP], "down": [KEY_DOWN],
-		"jump": [KEY_L, KEY_KP_0], "attack": [KEY_K, KEY_KP_1], "dash": [KEY_J, KEY_KP_2],
+		"jump": [KEY_L, KEY_KP_0], "attack": [KEY_K, KEY_KP_1], "heavy": [KEY_I, KEY_KP_3],
+		"dash": [KEY_J, KEY_KP_2],
 	},
 ]
 
 const GAMEPAD_BUTTONS := {
 	"left": [JOY_BUTTON_DPAD_LEFT], "right": [JOY_BUTTON_DPAD_RIGHT],
 	"up": [JOY_BUTTON_DPAD_UP], "down": [JOY_BUTTON_DPAD_DOWN],
-	"jump": [JOY_BUTTON_A], "attack": [JOY_BUTTON_X], "dash": [JOY_BUTTON_LEFT_SHOULDER],
+	"jump": [JOY_BUTTON_A], "attack": [JOY_BUTTON_X], "heavy": [JOY_BUTTON_Y],
+	"dash": [JOY_BUTTON_LEFT_SHOULDER],
 }
 const GAMEPAD_AXES := {
 	"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0],
 	"up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0],
 	"dash": [JOY_AXIS_TRIGGER_LEFT, 1.0],
 }
-const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "dash"]
+const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "heavy", "dash"]
 const DEADZONE := 0.35
 
 

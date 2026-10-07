@@ -21,8 +21,10 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - 2 joueurs (le code est prêt pour 4), chacun a **3 vies**.
 - Un coup reçu = une vie perdue. Tomber hors de la map = une vie perdue, et on réapparaît au milieu.
 - Après un coup, on clignote : on est invincible un court instant et on ne peut pas attaquer.
-- L'attaque part toujours vers l'adversaire le plus proche. S'il est trop loin, elle frappe dans le vide.
+- L'attaque légère part toujours vers l'adversaire le plus proche. S'il est trop loin, elle frappe dans le vide.
 - Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés.
+- L'**attaque lourde** part du dessus de la tête et fait un arc de cercle jusqu'aux pieds, devant soi. Elle est plus lente et projette plus fort.
+- Contrer une attaque lourde avec une attaque légère annule les deux, mais le temps de recharge de celui qui a contré est doublé pour cette fois.
 - Pendant un dash, on ne peut pas être touché, mais on ne peut pas attaquer.
 - La partie s'arrête quand il ne reste qu'un joueur en vie.
 
@@ -32,7 +34,8 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 |---|---|---|---|
 | Se déplacer | Stick gauche ou croix | Z Q S D | Flèches |
 | Sauter (2 fois en l'air) | A | Espace | L |
-| Attaquer | X | F | K |
+| Attaque légère | X | F | K |
+| Attaque lourde | Y | R | I |
 | Dash (dans la direction du stick) | Gâchette gauche (ou LB) | G | J |
 | Descendre d'une plateforme | Bas | S | Flèche bas |
 | Rejouer à la fin | Start ou A | Entrée | Entrée |
