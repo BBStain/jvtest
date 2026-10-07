@@ -24,6 +24,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - Un coup reçu = une vie perdue. Tomber hors de la map = une vie perdue, et on réapparaît au milieu.
 - Après un coup, on clignote : on est invincible un court instant et on ne peut pas attaquer.
 - L'attaque légère part toujours vers l'adversaire le plus proche. S'il est trop loin, elle frappe dans le vide.
+- Si deux coups touchent exactement en même temps sans se croiser, les deux joueurs perdent une vie.
 - Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés. Une marque apparaît à l'endroit du choc et s'efface en quelques secondes (orange si une attaque lourde a été contrée).
 - L'**attaque lourde** part du dessus de la tête et fait un arc de cercle jusqu'aux pieds, devant soi. Elle est plus lente et projette plus fort.
 - **Charger l'attaque lourde** : garde Y appuyé. Plus tu charges, plus l'arme grandit (jusqu'à 2 fois plus longue), frappe loin et projette fort. Tu frappes en lâchant Y, ou tout seul au bout d'1 seconde. Pendant la charge tu avances lentement, et pendant la frappe tu es immobilisé.
@@ -105,9 +106,15 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 - **La map** : ouvre `scenes/main.tscn`. Dans l'arbre à gauche, sous `Map`, clique sur `Sol`, `PlateformeMilieu`, `PlateformeHaut`, `MurGauche`, `MurDroit`
   ou une pièce de `ZoneAerienne` / `ZoneDuel`, et déplace-les avec la souris dans la vue du milieu. Attention, chaque plateforme a deux enfants à garder de la même taille :
   `Collision` (la forme qui bloque) et `Visuel` (le rectangle de couleur).
-  Les plateformes mobiles (`Ascenseur`, `NavetteBasse`, `NavetteHaute`) se règlent à droite dans l'inspecteur :
+  Les plateformes mobiles (`Ascenseur`, `AscenseurHaut`, `NavetteBasse`, `NavetteHaute`, `NavetteSommet`) se règlent à droite dans l'inspecteur :
   `size` (taille), `travel` (trajet) et `period` (durée d'un aller-retour en secondes).
 - **La caméra** : en haut de `scripts/game.gd`, les réglages `CAMERA_...` (marge autour des joueurs, zoom le plus proche et le plus éloigné, vitesse).
+
+## Prochaines étapes
+
+1. **Moteur de temps** : pouvoir ralentir ou accélérer le jeu pendant un instant, déclenché par des moments forts (par exemple un contre d'attaque lourde au ralenti).
+2. Des attaques spéciales avec des combinaisons de touches.
+3. Le jeu en ligne.
 
 ## Comment le code est organisé
 

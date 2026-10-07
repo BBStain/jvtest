@@ -382,6 +382,43 @@ func _ready() -> void:
 	InputBindings.fix_web_triggers(true)
 	check(InputBindings._web_triggers_fixed, "Navigateur : correctif des gâchettes LT / RT chargé")
 
+	# 9c) Deux coups qui touchent en même temps (sans se croiser) : les deux perdent une vie
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(40)
+	p1.position.x = 600; p2.position.x = 660
+	for pair in [[p1, Vector2.RIGHT], [p2, Vector2.LEFT]]:
+		var fi: Fighter = pair[0]
+		fi._attack_heavy = false
+		fi._attack_has_hit = false
+		fi._attack_dir = pair[1]
+		fi._attack_time = Fighter.ATTACK_STARTUP
+		fi._attack_cooldown_timer = Fighter.ATTACK_COOLDOWN
+	await step(1)
+	check(p1.lives == 2 and p2.lives == 2, "Coups simultanés : les deux touchés (J1 %d, J2 %d)" % [p1.lives, p2.lives])
+
+	# 9d) Dash vers le haut sans tenir le saut : il n'est plus coupé net (vrai 3e saut)
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f):
+		s.stick = Vector2(0, -1) if f >= 40 and f < 45 else Vector2.ZERO
+		s.dash_pressed = f == 40)
+	await step(40)
+	var dash_ground_y := p1.position.y
+	var dash_top_y := dash_ground_y
+	for i in 50:
+		await step(1)
+		dash_top_y = minf(dash_top_y, p1.position.y)
+	check(dash_ground_y - dash_top_y > 230, "Dash vers le haut : monte de %.0f px" % (dash_ground_y - dash_top_y))
+
+	# 9e) Après une chute, on repart à neuf (plus de recul en cours)
+	p1._knockback_timer = 0.5
+	p1.fall_out(Vector2(640, 120))
+	check(p1._knockback_timer <= 0.0 and p1.lives == 2, "Réapparition : plus de recul, vies = %d" % p1.lives)
+
 	# 10) Écran de connexion : il faut 2 joueurs pour lancer
 	game.queue_free(); game = null
 	var lobby: Node = load("res://scenes/lobby.tscn").instantiate()
