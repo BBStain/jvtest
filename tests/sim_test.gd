@@ -82,6 +82,12 @@ func _ready() -> void:
 	check(p1.lives == 3 and p2.lives == 3, "Choc : vies %d / %d" % [p1.lives, p2.lives])
 	check(p1.position.x < 570 and p2.position.x > 710, "Choc : les deux repoussés (x = %.0f / %.0f)" % [p1.position.x, p2.position.x])
 	check(p1.can_attack(), "Choc : J1 peut ré-attaquer vite")
+	var marks := game.get_children().filter(func(n): return n is ClashMark)
+	check(marks.size() == 1, "Choc : une marque apparaît sur le terrain (%d)" % marks.size())
+	await shot("09_marque_contre")
+	await step(200)
+	marks = game.get_children().filter(func(n): return n is ClashMark)
+	check(marks.is_empty(), "Choc : la marque s'est effacée après quelques secondes")
 
 	# 4b) Attaque lourde : l'arc touche un adversaire proche, devant soi
 	await new_game()

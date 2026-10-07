@@ -11,13 +11,13 @@ const PLAYER_COLORS := [
 	Color(1.0, 0.85, 0.3),    # Joueur 4 : jaune
 ]
 ## Au-delà de ces limites, le joueur est sorti de la map et perd une vie.
-const BLAST_ZONE := Rect2(-850, -700, 2980, 1650)
+const BLAST_ZONE := Rect2(-2150, -700, 5400, 1650)
 const RESTART_DELAY := 1.0   ## évite de relancer par erreur en martelant les boutons
 const LOBBY_SCENE := "res://scenes/lobby.tscn"
 
 # --- Caméra : elle suit le milieu des joueurs et dézoome quand ils s'éloignent ---
 const CAMERA_MARGIN := Vector2(700, 450)   ## espace gardé autour des joueurs (en pixels)
-const CAMERA_ZOOM_MIN := 0.55              ## zoom le plus éloigné (plus petit = voit plus loin)
+const CAMERA_ZOOM_MIN := 0.3               ## zoom le plus éloigné (plus petit = voit plus loin)
 const CAMERA_ZOOM_MAX := 1.2               ## zoom le plus proche
 const CAMERA_SMOOTHING := 4.0              ## plus grand = la caméra réagit plus vite
 
@@ -131,8 +131,18 @@ func _resolve_clashes() -> void:
 				push = Vector2(-1.0, 0.0)
 			push.y = 0.0
 			push = push.normalized()
+			var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
+			_spawn_clash_mark((a.attack_center() + b.attack_center()) / 2.0, heavy_countered)
 			a.clash(push, b.is_heavy_attack() and not a.is_heavy_attack())
 			b.clash(-push, a.is_heavy_attack() and not b.is_heavy_attack())
+
+
+## Laisse une marque sur le terrain à l'endroit du contre (orange si une attaque lourde a été contrée).
+func _spawn_clash_mark(where: Vector2, heavy_countered: bool) -> void:
+	var mark := ClashMark.new()
+	mark.position = where
+	mark.color = Color(1.0, 0.6, 0.2) if heavy_countered else Color(1, 1, 1)
+	add_child(mark)
 
 
 func _resolve_hits() -> void:

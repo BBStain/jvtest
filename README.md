@@ -18,11 +18,13 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 
 ## Les règles
 
+- **La map** : au centre, le sol avec ses deux plateformes et un mur de chaque côté. À gauche, une zone aérienne de pylônes flottants où l'on saute de mur en mur. À droite, une grande zone plate pour les duels directs.
+
 - 2 joueurs (le code est prêt pour 4), chacun a **3 vies**.
 - Un coup reçu = une vie perdue. Tomber hors de la map = une vie perdue, et on réapparaît au milieu.
 - Après un coup, on clignote : on est invincible un court instant et on ne peut pas attaquer.
 - L'attaque légère part toujours vers l'adversaire le plus proche. S'il est trop loin, elle frappe dans le vide.
-- Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés.
+- Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés. Une marque apparaît à l'endroit du choc et s'efface en quelques secondes (orange si une attaque lourde a été contrée).
 - L'**attaque lourde** part du dessus de la tête et fait un arc de cercle jusqu'aux pieds, devant soi. Elle est plus lente et projette plus fort.
 - Contrer une attaque lourde avec une attaque légère annule les deux, mais le temps de recharge de celui qui a contré est doublé pour cette fois.
 - Pendant un dash, on ne peut pas être touché, mais on ne peut pas attaquer.

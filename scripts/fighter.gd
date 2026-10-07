@@ -46,9 +46,9 @@ const DASH_END_KEEP := 0.4              ## part de la vitesse gardée à la fin 
 const AIR_DASHES := 1                   ## dashs possibles en l'air avant de retoucher le sol
 
 # --- Attaque légère (X) : un coup droit vers l'adversaire ---
-const ATTACK_STARTUP := 0.04            ## délai avant que le coup touche
-const ATTACK_ACTIVE := 0.10             ## durée pendant laquelle le coup peut toucher
-const ATTACK_COOLDOWN := 0.30           ## temps de recharge entre deux attaques
+const ATTACK_STARTUP := 0.02            ## délai avant que le coup touche
+const ATTACK_ACTIVE := 0.08             ## durée pendant laquelle le coup peut toucher
+const ATTACK_COOLDOWN := 0.22           ## temps de recharge entre deux attaques
 const ATTACK_REACH := 48.0              ## distance entre le centre du perso et le centre du coup
 const ATTACK_RADIUS := 26.0             ## taille de la zone qui touche
 const CLASH_LOCKOUT := 0.08             ## petit temps mort après un choc d'attaques
@@ -61,14 +61,14 @@ const HEAVY_ARC_RADIUS := 56.0          ## distance entre le centre du perso et 
 const HEAVY_TIP_RADIUS := 24.0          ## taille de la zone qui touche au bout de l'arme
 const HEAVY_ARC_START := -100.0         ## angle de départ en degrés (-90 = droit au-dessus de la tête)
 const HEAVY_ARC_END := 32.0             ## angle d'arrivée (à hauteur des pieds, devant soi)
-const HEAVY_KNOCKBACK := 650.0
+const HEAVY_KNOCKBACK := 850.0
 const COUNTER_COOLDOWN_MULT := 2.0      ## contrer une attaque lourde avec une légère : recharge x2
 
 # --- Coup reçu ---
 const INVINCIBLE_TIME := 0.55           ## doit rester plus long que ATTACK_COOLDOWN
-const HIT_KNOCKBACK := 420.0
+const HIT_KNOCKBACK := 620.0
 const CLASH_PUSH := 450.0
-const KNOCKBACK_TIME := 0.15            ## durée pendant laquelle on contrôle moins bien après un coup / un choc
+const KNOCKBACK_TIME := 0.22            ## durée pendant laquelle on contrôle moins bien après un coup / un choc
 const KNOCKBACK_ACCEL := 1500.0
 
 const START_LIVES := 3
