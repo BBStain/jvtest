@@ -9,7 +9,8 @@ var down_pressed := false   ## bas appuyé cette frame : descendre d'une platefo
 var jump_pressed := false   ## saut appuyé cette frame
 var jump_held := false      ## saut maintenu (saut plus haut si on garde appuyé)
 var attack_pressed := false  ## attaque légère
-var heavy_pressed := false   ## attaque lourde
+var heavy_pressed := false   ## attaque lourde (début de la charge)
+var heavy_held := false      ## attaque lourde maintenue (on charge tant qu'on garde)
 var dash_pressed := false
 var block_held := false     ## blocage maintenu (B)
 
@@ -17,7 +18,7 @@ var block_held := false     ## blocage maintenu (B)
 func to_dict() -> Dictionary:
 	return {
 		"sx": stick.x, "sy": stick.y, "dp": down_pressed,
-		"j": jump_pressed, "jh": jump_held, "a": attack_pressed, "h": heavy_pressed, "d": dash_pressed,
+		"j": jump_pressed, "jh": jump_held, "a": attack_pressed, "h": heavy_pressed, "hh": heavy_held, "d": dash_pressed,
 		"b": block_held,
 	}
 
@@ -30,6 +31,7 @@ static func from_dict(data: Dictionary) -> InputState:
 	s.jump_held = data.get("jh", false)
 	s.attack_pressed = data.get("a", false)
 	s.heavy_pressed = data.get("h", false)
+	s.heavy_held = data.get("hh", false)
 	s.dash_pressed = data.get("d", false)
 	s.block_held = data.get("b", false)
 	return s

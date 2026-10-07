@@ -1,6 +1,7 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://scripts/game.gd" id="1_game"]
+[ext_resource type="Script" path="res://scripts/moving_platform.gd" id="2_moving"]
 
 [sub_resource type="RectangleShape2D" id="Shape_Sol"]
 size = Vector2(1100, 60)
@@ -12,13 +13,34 @@ size = Vector2(440, 16)
 size = Vector2(220, 16)
 
 [sub_resource type="RectangleShape2D" id="Shape_Mur"]
-size = Vector2(80, 420)
+size = Vector2(80, 1060)
 
 [sub_resource type="RectangleShape2D" id="Shape_Pylone"]
 size = Vector2(50, 170)
 
 [sub_resource type="RectangleShape2D" id="Shape_SolDuel"]
 size = Vector2(1200, 60)
+
+[sub_resource type="RectangleShape2D" id="Shape_PetitePlateforme"]
+size = Vector2(150, 16)
+
+[sub_resource type="RectangleShape2D" id="Shape_Corniche"]
+size = Vector2(120, 16)
+
+[sub_resource type="RectangleShape2D" id="Shape_PlateformeDuel"]
+size = Vector2(360, 16)
+
+[sub_resource type="RectangleShape2D" id="Shape_Marche"]
+size = Vector2(80, 40)
+
+[sub_resource type="RectangleShape2D" id="Shape_MurDuel"]
+size = Vector2(80, 1060)
+
+[sub_resource type="RectangleShape2D" id="Shape_Etage"]
+size = Vector2(160, 16)
+
+[sub_resource type="RectangleShape2D" id="Shape_Sommet"]
+size = Vector2(260, 16)
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_game")
@@ -74,30 +96,30 @@ mouse_filter = 2
 color = Color(0.5, 0.54, 0.66, 1)
 
 [node name="MurGauche" type="StaticBody2D" parent="Map"]
-position = Vector2(-110, 450)
+position = Vector2(-110, 130)
 
 [node name="Collision" type="CollisionShape2D" parent="Map/MurGauche"]
 shape = SubResource("Shape_Mur")
 
 [node name="Visuel" type="ColorRect" parent="Map/MurGauche"]
 offset_left = -40.0
-offset_top = -210.0
+offset_top = -530.0
 offset_right = 40.0
-offset_bottom = 210.0
+offset_bottom = 530.0
 mouse_filter = 2
 color = Color(0.32, 0.35, 0.45, 1)
 
 [node name="MurDroit" type="StaticBody2D" parent="Map"]
-position = Vector2(1390, 450)
+position = Vector2(1390, 130)
 
 [node name="Collision" type="CollisionShape2D" parent="Map/MurDroit"]
 shape = SubResource("Shape_Mur")
 
 [node name="Visuel" type="ColorRect" parent="Map/MurDroit"]
 offset_left = -40.0
-offset_top = -210.0
+offset_top = -530.0
 offset_right = 40.0
-offset_bottom = 210.0
+offset_bottom = 530.0
 mouse_filter = 2
 color = Color(0.32, 0.35, 0.45, 1)
 
@@ -228,6 +250,471 @@ offset_right = 600.0
 offset_bottom = 30.0
 mouse_filter = 2
 color = Color(0.45, 0.36, 0.38, 1)
+
+[node name="PlateformeGauche" type="StaticBody2D" parent="Map"]
+position = Vector2(300, 330)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/PlateformeGauche"]
+shape = SubResource("Shape_PetitePlateforme")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/PlateformeGauche"]
+offset_left = -75.0
+offset_top = -8.0
+offset_right = 75.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.5, 0.54, 0.66, 1)
+
+[node name="PlateformeDroite" type="StaticBody2D" parent="Map"]
+position = Vector2(980, 330)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/PlateformeDroite"]
+shape = SubResource("Shape_PetitePlateforme")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/PlateformeDroite"]
+offset_left = -75.0
+offset_top = -8.0
+offset_right = 75.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.5, 0.54, 0.66, 1)
+
+[node name="Corniche1" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-830, 150)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/Corniche1"]
+shape = SubResource("Shape_Corniche")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/Corniche1"]
+offset_left = -60.0
+offset_top = -8.0
+offset_right = 60.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="Corniche2" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1215, 170)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/Corniche2"]
+shape = SubResource("Shape_Corniche")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/Corniche2"]
+offset_left = -60.0
+offset_top = -8.0
+offset_right = 60.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="Corniche3" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1405, 640)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/Corniche3"]
+shape = SubResource("Shape_Corniche")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/Corniche3"]
+offset_left = -60.0
+offset_top = -8.0
+offset_right = 60.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="Ascenseur" type="AnimatableBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-640, 620)
+script = ExtResource("2_moving")
+size = Vector2(90, 16)
+travel = Vector2(0, -400)
+period = 5.0
+
+[node name="NavetteBasse" type="AnimatableBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1550, 690)
+script = ExtResource("2_moving")
+size = Vector2(170, 16)
+travel = Vector2(1000, 0)
+period = 7.0
+
+[node name="ZoneDuel" type="Node2D" parent="Map"]
+
+[node name="PlateformeDuel" type="StaticBody2D" parent="Map/ZoneDuel"]
+position = Vector2(2130, 430)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneDuel/PlateformeDuel"]
+shape = SubResource("Shape_PlateformeDuel")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneDuel/PlateformeDuel"]
+offset_left = -180.0
+offset_top = -8.0
+offset_right = 180.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.6, 0.48, 0.5, 1)
+
+[node name="MarcheGauche" type="StaticBody2D" parent="Map/ZoneDuel"]
+position = Vector2(1830, 550)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneDuel/MarcheGauche"]
+shape = SubResource("Shape_Marche")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneDuel/MarcheGauche"]
+offset_left = -40.0
+offset_top = -20.0
+offset_right = 40.0
+offset_bottom = 20.0
+mouse_filter = 2
+color = Color(0.45, 0.36, 0.38, 1)
+
+[node name="MarcheDroite" type="StaticBody2D" parent="Map/ZoneDuel"]
+position = Vector2(2430, 550)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneDuel/MarcheDroite"]
+shape = SubResource("Shape_Marche")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneDuel/MarcheDroite"]
+offset_left = -40.0
+offset_top = -20.0
+offset_right = 40.0
+offset_bottom = 20.0
+mouse_filter = 2
+color = Color(0.45, 0.36, 0.38, 1)
+
+[node name="MurDuel" type="StaticBody2D" parent="Map/ZoneDuel"]
+position = Vector2(2850, 130)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneDuel/MurDuel"]
+shape = SubResource("Shape_MurDuel")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneDuel/MurDuel"]
+offset_left = -40.0
+offset_top = -530.0
+offset_right = 40.0
+offset_bottom = 530.0
+mouse_filter = 2
+color = Color(0.45, 0.36, 0.38, 1)
+
+[node name="NavetteHaute" type="AnimatableBody2D" parent="Map/ZoneDuel"]
+position = Vector2(1700, 290)
+script = ExtResource("2_moving")
+size = Vector2(140, 16)
+travel = Vector2(860, 0)
+period = 8.0
+
+[node name="Hauteurs" type="Node2D" parent="Map"]
+
+[node name="Etage1Gauche" type="StaticBody2D" parent="Map/Hauteurs"]
+position = Vector2(450, 140)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/Hauteurs/Etage1Gauche"]
+shape = SubResource("Shape_Etage")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/Hauteurs/Etage1Gauche"]
+offset_left = -80.0
+offset_top = -8.0
+offset_right = 80.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.5, 0.54, 0.66, 1)
+
+[node name="Etage1Droite" type="StaticBody2D" parent="Map/Hauteurs"]
+position = Vector2(830, 140)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/Hauteurs/Etage1Droite"]
+shape = SubResource("Shape_Etage")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/Hauteurs/Etage1Droite"]
+offset_left = -80.0
+offset_top = -8.0
+offset_right = 80.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.5, 0.54, 0.66, 1)
+
+[node name="Etage2" type="StaticBody2D" parent="Map/Hauteurs"]
+position = Vector2(640, -10)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/Hauteurs/Etage2"]
+shape = SubResource("Shape_Sommet")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/Hauteurs/Etage2"]
+offset_left = -130.0
+offset_top = -8.0
+offset_right = 130.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.5, 0.54, 0.66, 1)
+
+[node name="Etage3Gauche" type="StaticBody2D" parent="Map/Hauteurs"]
+position = Vector2(360, -160)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/Hauteurs/Etage3Gauche"]
+shape = SubResource("Shape_Etage")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/Hauteurs/Etage3Gauche"]
+offset_left = -80.0
+offset_top = -8.0
+offset_right = 80.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.5, 0.54, 0.66, 1)
+
+[node name="Etage3Droite" type="StaticBody2D" parent="Map/Hauteurs"]
+position = Vector2(920, -160)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/Hauteurs/Etage3Droite"]
+shape = SubResource("Shape_Etage")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/Hauteurs/Etage3Droite"]
+offset_left = -80.0
+offset_top = -8.0
+offset_right = 80.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.5, 0.54, 0.66, 1)
+
+[node name="Sommet" type="StaticBody2D" parent="Map/Hauteurs"]
+position = Vector2(640, -310)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/Hauteurs/Sommet"]
+shape = SubResource("Shape_Sommet")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/Hauteurs/Sommet"]
+offset_left = -130.0
+offset_top = -8.0
+offset_right = 130.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.5, 0.54, 0.66, 1)
+
+[node name="PyloneHaut1" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-440, -80)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/PyloneHaut1"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/PyloneHaut1"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="PyloneHaut2" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-640, -280)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/PyloneHaut2"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/PyloneHaut2"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="PyloneHaut3" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-840, -60)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/PyloneHaut3"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/PyloneHaut3"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="PyloneHaut4" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1030, -300)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/PyloneHaut4"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/PyloneHaut4"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="PyloneHaut5" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1220, -90)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/PyloneHaut5"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/PyloneHaut5"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="PyloneHaut6" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1410, -310)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/PyloneHaut6"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/PyloneHaut6"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="PyloneHaut7" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1600, -100)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/PyloneHaut7"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/PyloneHaut7"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="PyloneHaut8" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1800, -290)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/PyloneHaut8"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/PyloneHaut8"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="AscenseurHaut" type="AnimatableBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1700, 180)
+script = ExtResource("2_moving")
+size = Vector2(90, 16)
+travel = Vector2(0, -520)
+period = 6.0
+
+[node name="EtageDuel1" type="StaticBody2D" parent="Map/ZoneDuel"]
+position = Vector2(2130, 120)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneDuel/EtageDuel1"]
+shape = SubResource("Shape_Sommet")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneDuel/EtageDuel1"]
+offset_left = -130.0
+offset_top = -8.0
+offset_right = 130.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.6, 0.48, 0.5, 1)
+
+[node name="EtageDuel2Gauche" type="StaticBody2D" parent="Map/ZoneDuel"]
+position = Vector2(1780, -40)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneDuel/EtageDuel2Gauche"]
+shape = SubResource("Shape_Etage")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneDuel/EtageDuel2Gauche"]
+offset_left = -80.0
+offset_top = -8.0
+offset_right = 80.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.6, 0.48, 0.5, 1)
+
+[node name="EtageDuel2Droite" type="StaticBody2D" parent="Map/ZoneDuel"]
+position = Vector2(2480, -40)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneDuel/EtageDuel2Droite"]
+shape = SubResource("Shape_Etage")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneDuel/EtageDuel2Droite"]
+offset_left = -80.0
+offset_top = -8.0
+offset_right = 80.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.6, 0.48, 0.5, 1)
+
+[node name="SommetDuel" type="StaticBody2D" parent="Map/ZoneDuel"]
+position = Vector2(2130, -210)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneDuel/SommetDuel"]
+shape = SubResource("Shape_Sommet")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneDuel/SommetDuel"]
+offset_left = -130.0
+offset_top = -8.0
+offset_right = 130.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.6, 0.48, 0.5, 1)
+
+[node name="NavetteSommet" type="AnimatableBody2D" parent="Map/ZoneDuel"]
+position = Vector2(1700, -340)
+script = ExtResource("2_moving")
+size = Vector2(140, 16)
+travel = Vector2(860, 0)
+period = 9.0
 
 [node name="SpawnPoints" type="Node2D" parent="."]
 

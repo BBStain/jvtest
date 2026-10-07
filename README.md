@@ -18,7 +18,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 
 ## Les règles
 
-- **La map** : au centre, le sol avec ses deux plateformes et un mur de chaque côté. À gauche, une zone aérienne de pylônes flottants où l'on saute de mur en mur. À droite, une grande zone plate pour les duels directs.
+- **La map** : elle monte haut ! Au centre, le sol avec quatre plateformes, puis des étages de plateformes jusqu'à un sommet, et un grand mur de chaque côté. À gauche, une zone aérienne de pylônes flottants et de petites corniches, avec des pylônes jusqu'en haut, deux ascenseurs qui montent et descendent et une navette qui passe en bas pour rattraper ceux qui tombent. À droite, une zone de duel avec deux petites marches, des étages de plateformes, deux navettes en hauteur et un grand mur au bout. Les plateformes violettes bougent et transportent les joueurs posés dessus.
 
 - 2 joueurs (le code est prêt pour 4), chacun a **3 vies**.
 - Un coup reçu = une vie perdue. Tomber hors de la map = une vie perdue, et on réapparaît au milieu.
@@ -26,6 +26,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - L'attaque légère part toujours vers l'adversaire le plus proche. S'il est trop loin, elle frappe dans le vide.
 - Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés. Une marque apparaît à l'endroit du choc et s'efface en quelques secondes (orange si une attaque lourde a été contrée).
 - L'**attaque lourde** part du dessus de la tête et fait un arc de cercle jusqu'aux pieds, devant soi. Elle est plus lente et projette plus fort.
+- **Charger l'attaque lourde** : garde Y appuyé. Plus tu charges, plus l'arme grandit (jusqu'à 2 fois plus longue), frappe loin et projette fort. Tu frappes en lâchant Y, ou tout seul au bout d'1 seconde. Pendant la charge tu avances lentement, et pendant la frappe tu es immobilisé.
 - Contrer une attaque lourde avec une attaque légère annule les deux, mais le temps de recharge de celui qui a contré est doublé pour cette fois.
 - Pendant un dash, on ne peut pas être touché, mais on ne peut pas attaquer.
 - **Blocage** (tenir B) : le personnage s'entoure d'un contour lumineux et a un bouclier de **3 points**. Un coup sur le bouclier ne fait pas perdre de vie : il enlève 1 point (2 pour une attaque lourde), et l'attaquant est repoussé mais peut refrapper tout de suite.
@@ -41,7 +42,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 | Se déplacer | Stick gauche ou croix | Z Q S D | Flèches |
 | Sauter (2 fois en l'air) | A | Espace | L |
 | Attaque légère | X | F | K |
-| Attaque lourde | Y | R | I |
+| Attaque lourde (garder pour charger) | Y | R | I |
 | Dash (dans la direction du stick) | Gâchette gauche (ou LB) | G | J |
 | Bloquer (maintenir) | B | C | U |
 | Descendre d'une plateforme | Bas | S | Flèche bas |
@@ -98,9 +99,11 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 - **Le ressenti des personnages** (vitesse, hauteur de saut, dash, durée des attaques…) :
   ouvre `scripts/fighter.gd` dans le panneau « Système de fichiers » en bas à gauche.
   En haut du fichier, chaque réglage est une ligne `const` avec une explication. Change un chiffre, fais **Ctrl+S**, puis **F5** pour tester.
-- **La map** : ouvre `scenes/main.tscn`. Dans l'arbre à gauche, sous `Map`, clique sur `Sol`, `PlateformeMilieu`, `PlateformeHaut`, `MurGauche` ou `MurDroit`
-  et déplace-les avec la souris dans la vue du milieu. Attention, chaque plateforme a deux enfants à garder de la même taille :
+- **La map** : ouvre `scenes/main.tscn`. Dans l'arbre à gauche, sous `Map`, clique sur `Sol`, `PlateformeMilieu`, `PlateformeHaut`, `MurGauche`, `MurDroit`
+  ou une pièce de `ZoneAerienne` / `ZoneDuel`, et déplace-les avec la souris dans la vue du milieu. Attention, chaque plateforme a deux enfants à garder de la même taille :
   `Collision` (la forme qui bloque) et `Visuel` (le rectangle de couleur).
+  Les plateformes mobiles (`Ascenseur`, `NavetteBasse`, `NavetteHaute`) se règlent à droite dans l'inspecteur :
+  `size` (taille), `travel` (trajet) et `period` (durée d'un aller-retour en secondes).
 - **La caméra** : en haut de `scripts/game.gd`, les réglages `CAMERA_...` (marge autour des joueurs, zoom le plus proche et le plus éloigné, vitesse).
 
 ## Comment le code est organisé
@@ -111,7 +114,9 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 | `scripts/game_setup.gd` | Retient quel appareil va avec quel joueur entre l'écran de connexion et le combat |
 | `scenes/main.tscn` | Le combat : la map, les points d'apparition, la caméra, l'écran de fin |
 | `scripts/game.gd` | Crée les joueurs, gère les coups, les chocs d'attaques, les chutes, la caméra et la fin de partie |
-| `scripts/fighter.gd` | Un combattant : déplacements, saut, dash, attaque, vies, dessin |
+| `scripts/fighter.gd` | Un combattant : déplacements, saut, dash, attaques, blocage, vies, dessin |
+| `scripts/moving_platform.gd` | Une plateforme qui fait des allers-retours |
+| `scripts/clash_mark.gd` | La marque laissée sur le terrain quand deux attaques se contrent |
 | `scripts/input/` | Les commandes de chaque joueur, séparées du reste pour pouvoir ajouter le jeu en ligne plus tard |
 | `tests/` | Un test automatique qui simule des parties et vérifie les règles |
 | `.github/workflows/web.yml` | Construit la version web et la publie sur GitHub Pages à chaque modification de `main` |
