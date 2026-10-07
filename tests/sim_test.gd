@@ -241,6 +241,45 @@ func _ready() -> void:
 	check(p1.is_on_floor() and shuttle_moved > 50 and absf((p1.position.x - rider_x) - shuttle_moved) < 6,
 		"Plateforme mobile : J1 est transporté (plateforme %.0f px, J1 %.0f px)" % [shuttle_moved, p1.position.x - rider_x])
 
+	# 4k) Course : plus rapide, vide l'endurance (plus vite en bloquant), puis la jauge remonte
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 100
+	p1.input_source = Scripted.new(func(s, f):
+		s.stick.x = 1.0 if f >= 20 and f < 80 else 0.0
+		s.sprint_held = f >= 20 and f < 80)
+	await step(50)
+	check(p1.is_sprinting() and p1.velocity.x > Fighter.RUN_SPEED * 1.3, "Course : J1 va plus vite (vx = %.0f)" % p1.velocity.x)
+	await shot("11_course")
+	var stamina_sprint := Fighter.STAMINA_MAX - p1.stamina
+	await step(30)
+	check(p1.stamina < Fighter.STAMINA_MAX - 20, "Course : l'endurance baisse (%.0f)" % p1.stamina)
+	var low := p1.stamina
+	await step(90)
+	check(p1.stamina > low + 10, "Course : l'endurance remonte quand on s'arrête (%.0f)" % p1.stamina)
+
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f):
+		s.block_held = f >= 20 and f < 50
+		s.sprint_held = f >= 20 and f < 50)
+	await step(50)
+	var stamina_block := Fighter.STAMINA_MAX - p1.stamina
+	check(stamina_block > stamina_sprint * 1.5, "Course + blocage : l'endurance baisse plus vite (%.0f contre %.0f)" % [stamina_block, stamina_sprint])
+
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 100
+	p1.input_source = Scripted.new(func(s, f):
+		s.stick.x = 1.0 if f < 400 else 0.0
+		s.sprint_held = true)
+	p1.stamina = 5.0
+	await step(30)
+	check(not p1.is_sprinting() and absf(p1.velocity.x) <= Fighter.RUN_SPEED + 1, "Endurance vide : J1 ne court plus (vx = %.0f)" % p1.velocity.x)
+
 	# 5) Dash = intouchable
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]

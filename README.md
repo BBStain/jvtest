@@ -27,12 +27,14 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés. Une marque apparaît à l'endroit du choc et s'efface en quelques secondes (orange si une attaque lourde a été contrée).
 - L'**attaque lourde** part du dessus de la tête et fait un arc de cercle jusqu'aux pieds, devant soi. Elle est plus lente et projette plus fort.
 - **Charger l'attaque lourde** : garde Y appuyé. Plus tu charges, plus l'arme grandit (jusqu'à 2 fois plus longue), frappe loin et projette fort. Tu frappes en lâchant Y, ou tout seul au bout d'1 seconde. Pendant la charge tu avances lentement, et pendant la frappe tu es immobilisé.
-- Contrer une attaque lourde (pendant sa frappe) avec une attaque légère annule les deux : les deux joueurs sont repoussés loin et ne peuvent plus attaquer pendant 0,9 seconde.
+- Contrer une attaque lourde (pendant sa frappe) avec une attaque légère annule les deux : les deux joueurs sont repoussés loin et ne peuvent plus attaquer pendant 1,4 seconde.
 - Pendant un dash, on ne peut pas être touché, mais on ne peut pas attaquer.
 - **Blocage** (tenir B) : le personnage s'entoure d'un contour lumineux et a un bouclier de **3 points**. Un coup sur le bouclier ne fait pas perdre de vie : il enlève 1 point (2 pour une attaque lourde), et l'attaquant est repoussé mais peut refrapper tout de suite.
 - Pendant le blocage, on avance beaucoup plus lentement, on saute moins haut, et on ne peut ni dasher ni attaquer.
 - Si le bouclier casse, on arrête de bloquer et on ne peut plus attaquer pendant 1,5 seconde, mais on peut toujours bouger, sauter et dasher.
 - Le bouclier regagne 1 point toutes les 2 secondes quand on ne bloque pas.
+- **Course** (tenir LT ou Shift) : on va 1,5 fois plus vite, donc on saute aussi plus loin. Toutes les actions marchent en courant.
+- Courir vide une **jauge d'endurance**, qui apparaît à côté du perso, du côté opposé à l'adversaire. Bloquer en courant la vide plus de 2 fois plus vite. Quand on arrête de courir, elle remonte. Si elle est vide, on ne peut plus courir tant qu'elle n'est pas remontée un peu.
 - La partie s'arrête quand il ne reste qu'un joueur en vie.
 
 ## Les commandes
@@ -43,7 +45,8 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 | Sauter (2 fois en l'air) | A | Espace | L |
 | Attaque légère | X | F | K |
 | Attaque lourde (garder pour charger) | Y | R | I |
-| Dash (dans la direction du stick) | Gâchette gauche (ou LB) | G | J |
+| Dash (dans la direction du stick) | Gâchette droite RT (ou LB) | G | J |
+| Courir (maintenir) | Gâchette gauche LT | Shift gauche | Shift droit |
 | Bloquer (maintenir) | B | C | U |
 | Descendre d'une plateforme | Bas | S | Flèche bas |
 | Rejouer à la fin | Start ou A | Entrée | Entrée |

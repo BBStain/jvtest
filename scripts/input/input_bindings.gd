@@ -8,24 +8,27 @@ extends RefCounted
 ##   {"type": "joypad", "id": 2}        -> la manette n°2 connectée
 ##
 ## Manette : stick gauche ou croix pour bouger, A sauter, X attaque légère, Y attaque lourde,
-## B bloquer, gâchette gauche (ou LB) dash.
+## B bloquer, gâchette gauche (LT) courir, gâchette droite (RT) ou LB dash.
 ## Les touches clavier sont des touches PHYSIQUES : "W A S D" ici = "Z Q S D" sur un clavier AZERTY.
 
 const KEYBOARD_LAYOUTS := [
-	# Clavier gauche : Z Q S D pour bouger, Espace saut, F attaque légère, R attaque lourde, G dash, C blocage
+	# Clavier gauche : Z Q S D pour bouger, Espace saut, F attaque légère, R attaque lourde, G dash, C blocage,
+	# Shift gauche pour courir
 	{
 		"name": "Clavier (Z Q S D)",
 		"left": [KEY_A], "right": [KEY_D], "up": [KEY_W], "down": [KEY_S],
 		"jump": [KEY_SPACE], "attack": [KEY_F], "heavy": [KEY_R], "dash": [KEY_G],
-		"block": [KEY_C],
+		"block": [KEY_C], "sprint": [KEY_SHIFT], "sprint_location": KEY_LOCATION_LEFT,
 	},
-	# Clavier droit : flèches pour bouger, L saut, K attaque légère, I attaque lourde, J dash, U blocage
+	# Clavier droit : flèches pour bouger, L saut, K attaque légère, I attaque lourde, J dash, U blocage,
+	# Shift droit pour courir
 	# (ou pavé numérique 0 / 1 / 3 / 2 / 4)
 	{
 		"name": "Clavier (flèches)",
 		"left": [KEY_LEFT], "right": [KEY_RIGHT], "up": [KEY_UP], "down": [KEY_DOWN],
 		"jump": [KEY_L, KEY_KP_0], "attack": [KEY_K, KEY_KP_1], "heavy": [KEY_I, KEY_KP_3],
 		"dash": [KEY_J, KEY_KP_2], "block": [KEY_U, KEY_KP_4],
+		"sprint": [KEY_SHIFT], "sprint_location": KEY_LOCATION_RIGHT,
 	},
 ]
 
@@ -38,9 +41,9 @@ const GAMEPAD_BUTTONS := {
 const GAMEPAD_AXES := {
 	"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0],
 	"up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0],
-	"dash": [JOY_AXIS_TRIGGER_LEFT, 1.0],
+	"sprint": [JOY_AXIS_TRIGGER_LEFT, 1.0], "dash": [JOY_AXIS_TRIGGER_RIGHT, 1.0],
 }
-const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "heavy", "dash", "block"]
+const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "heavy", "dash", "block", "sprint"]
 const DEADZONE := 0.35
 
 
@@ -68,6 +71,8 @@ static func register_player(player_index: int, devices: Array) -> void:
 				for key in KEYBOARD_LAYOUTS[device.layout].get(action, []):
 					var key_event := InputEventKey.new()
 					key_event.physical_keycode = key
+					# Shift gauche et Shift droit ont le même code : on précise de quel côté.
+					key_event.location = KEYBOARD_LAYOUTS[device.layout].get(action + "_location", KEY_LOCATION_UNSPECIFIED)
 					InputMap.action_add_event(action_name, key_event)
 			else:
 				for button in GAMEPAD_BUTTONS.get(action, []):

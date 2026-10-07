@@ -13,13 +13,14 @@ var heavy_pressed := false   ## attaque lourde (début de la charge)
 var heavy_held := false      ## attaque lourde maintenue (on charge tant qu'on garde)
 var dash_pressed := false
 var block_held := false     ## blocage maintenu (B)
+var sprint_held := false    ## course maintenue (LT / Shift)
 
 
 func to_dict() -> Dictionary:
 	return {
 		"sx": stick.x, "sy": stick.y, "dp": down_pressed,
 		"j": jump_pressed, "jh": jump_held, "a": attack_pressed, "h": heavy_pressed, "hh": heavy_held, "d": dash_pressed,
-		"b": block_held,
+		"b": block_held, "r": sprint_held,
 	}
 
 
@@ -34,4 +35,5 @@ static func from_dict(data: Dictionary) -> InputState:
 	s.heavy_held = data.get("hh", false)
 	s.dash_pressed = data.get("d", false)
 	s.block_held = data.get("b", false)
+	s.sprint_held = data.get("r", false)
 	return s
