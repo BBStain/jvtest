@@ -70,7 +70,8 @@ const HEAVY_TIP_RADIUS := 24.0          ## taille de la zone qui touche au bout 
 const HEAVY_ARC_START := -100.0         ## angle de départ en degrés (-90 = droit au-dessus de la tête)
 const HEAVY_ARC_END := 32.0             ## angle d'arrivée (à hauteur des pieds, devant soi)
 const HEAVY_KNOCKBACK := 850.0
-const COUNTER_COOLDOWN_MULT := 2.0      ## contrer une attaque lourde avec une légère : recharge x2
+const HEAVY_COUNTER_COOLDOWN := 1.4     ## attaque lourde contrée par une légère : recharge des DEUX joueurs
+const HEAVY_COUNTER_PUSH := 750.0       ## ... et les deux sont repoussés plus loin
 
 # --- Blocage (B) : un bouclier de 3 points ---
 const SHIELD_MAX := 3                   ## points de bouclier
@@ -81,6 +82,16 @@ const BLOCK_SPEED_MULT := 0.3           ## en bloquant, on se déplace beaucoup 
 const BLOCK_JUMP_MULT := 0.7            ## en bloquant, on saute environ 2 fois moins haut
 const SHIELD_HIT_PUSH := 380.0          ## l'attaquant qui frappe le bouclier est repoussé
 const SHIELD_BLOCKER_PUSH := 120.0      ## celui qui bloque recule un tout petit peu
+
+# --- Course (LT / Shift, à maintenir) et endurance ---
+const SPRINT_SPEED_MULT := 1.5          ## en courant on va 1,5 fois plus vite (et on saute plus loin)
+const STAMINA_MAX := 100.0
+const STAMINA_SPRINT_DRAIN := 30.0      ## endurance perdue par seconde en courant
+const STAMINA_BLOCK_SPRINT_DRAIN := 70.0  ## ... et en bloquant tout en courant
+const STAMINA_REGEN := 25.0             ## endurance regagnée par seconde sans courir
+const STAMINA_REGEN_DELAY := 0.6        ## temps avant que l'endurance remonte
+const STAMINA_RESTART := 25.0           ## jauge vide : il faut remonter jusque-là pour recourir
+const STAMINA_SHOW_TIME := 1.0          ## la jauge reste affichée ce temps après être pleine
 
 # --- Coup reçu ---
 const INVINCIBLE_TIME := 0.55           ## doit rester plus long que ATTACK_COOLDOWN
@@ -121,6 +132,12 @@ var _attack_cooldown_timer := 0.0
 var _heavy_charging := false            ## true = on garde Y pour charger l'attaque lourde
 var _charge_time := 0.0
 var _heavy_charge := 0.0                ## 0 = pas chargée, 1 = charge pleine
+
+var stamina := STAMINA_MAX
+var _sprinting := false
+var _exhausted := false                 ## jauge vidée : on ne peut plus courir tant qu'elle n'est pas remontée
+var _stamina_regen_timer := 0.0
+var _stamina_show_timer := 0.0
 
 var shield := SHIELD_MAX
 var _blocking := false
@@ -180,6 +197,7 @@ func physics_tick(input: InputState, delta: float) -> void:
 	set_collision_mask_value(PLATFORM_LAYER, _drop_timer <= 0.0)
 
 	_update_block(input, delta)
+	_update_sprint(input, delta)
 
 	if input.dash_pressed and not _blocking:
 		_try_start_dash(input, on_floor)
@@ -218,6 +236,29 @@ func _tick_timers(delta: float) -> void:
 	_blink_clock += delta
 
 
+## On court tant que LT / Shift est maintenu et qu'il reste de l'endurance.
+## Courir vide la jauge (plus vite si on bloque en même temps) ; elle remonte quand on s'arrête.
+func _update_sprint(input: InputState, delta: float) -> void:
+	if stamina >= STAMINA_RESTART:
+		_exhausted = false
+	var moving := absf(input.stick.x) > 0.2
+	_sprinting = input.sprint_held and not _exhausted and stamina > 0.0 and (moving or _blocking)
+	if _sprinting:
+		stamina -= (STAMINA_BLOCK_SPRINT_DRAIN if _blocking else STAMINA_SPRINT_DRAIN) * delta
+		_stamina_regen_timer = STAMINA_REGEN_DELAY
+		if stamina <= 0.0:
+			stamina = 0.0
+			_exhausted = true
+	else:
+		_stamina_regen_timer -= delta
+		if _stamina_regen_timer <= 0.0:
+			stamina = minf(stamina + STAMINA_REGEN * delta, STAMINA_MAX)
+	if stamina < STAMINA_MAX:
+		_stamina_show_timer = STAMINA_SHOW_TIME
+	else:
+		_stamina_show_timer -= delta
+
+
 ## On bloque tant que B est maintenu, si le bouclier n'est pas vide et qu'on n'est pas
 ## en train de dasher ou de frapper. Le bouclier se recharge quand on ne bloque pas.
 func _update_block(input: InputState, delta: float) -> void:
@@ -240,6 +281,8 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 	elif _wall_jump_timer > 0.0:
 		accel = WALL_JUMP_ACCEL
 	var speed := RUN_SPEED
+	if _sprinting:
+		speed *= SPRINT_SPEED_MULT
 	if _blocking:
 		speed *= BLOCK_SPEED_MULT
 	elif _heavy_charging:
@@ -404,6 +447,10 @@ func _is_attack_startup_or_active() -> bool:
 	return _attack_time >= 0.0 and (_heavy_charging or _attack_time < _attack_startup() + _attack_active())
 
 
+func is_sprinting() -> bool:
+	return _sprinting
+
+
 func is_blocking() -> bool:
 	return _blocking
 
@@ -458,11 +505,12 @@ func mark_attack_hit() -> void:
 
 
 ## Deux attaques se sont touchées : elles s'annulent et on est repoussé.
-## countered_heavy = on a contré une attaque lourde avec une légère : recharge doublée.
-func clash(push_dir: Vector2, countered_heavy := false) -> void:
+## heavy_countered = une attaque lourde a été contrée par une légère : les deux joueurs
+## ont une longue recharge et sont repoussés plus loin.
+func clash(push_dir: Vector2, heavy_countered := false) -> void:
 	_cancel_attack()
-	_attack_cooldown_timer = ATTACK_COOLDOWN * COUNTER_COOLDOWN_MULT if countered_heavy else CLASH_LOCKOUT
-	velocity = push_dir * CLASH_PUSH + Vector2(0.0, -150.0)
+	_attack_cooldown_timer = HEAVY_COUNTER_COOLDOWN if heavy_countered else CLASH_LOCKOUT
+	velocity = push_dir * (HEAVY_COUNTER_PUSH if heavy_countered else CLASH_PUSH) + Vector2(0.0, -150.0)
 	_knockback_timer = KNOCKBACK_TIME
 
 
@@ -604,6 +652,10 @@ func _draw() -> void:
 			draw_rect(Rect2(length - 14.0, -14.0, 14.0, 28.0), color.lightened(0.6))
 		draw_set_transform(Vector2.ZERO, 0.0)
 
+	# La jauge d'endurance, sur le côté opposé à l'adversaire
+	if _stamina_show_timer > 0.0:
+		_draw_stamina_gauge()
+
 	# Les vies au-dessus de la tête (plus haut si les points de bouclier sont affichés)
 	if _lives_show_timer > 0.0:
 		var alpha := clampf(_lives_show_timer / 0.4, 0.0, 1.0)
@@ -630,3 +682,22 @@ func _draw_shield_points(y: float, alpha: float) -> void:
 			draw_rect(pip, Color(1, 1, 1, 0.95 * alpha))
 		else:
 			draw_rect(pip, Color(1, 1, 1, 0.25 * alpha))
+
+
+## Barre verticale à côté du perso, du côté où n'est pas l'adversaire (pour ne pas gêner le combat).
+func _draw_stamina_gauge() -> void:
+	var side := -facing
+	if target != null and not target.eliminated and absf(target.global_position.x - global_position.x) > 1.0:
+		side = -signf(target.global_position.x - global_position.x)
+	var alpha := clampf(_stamina_show_timer / 0.3, 0.0, 1.0)
+	var height := BODY_SIZE.y
+	var x := side * (BODY_SIZE.x / 2.0 + 9.0) - 3.0
+	var frame := Rect2(x, -height / 2.0, 6.0, height)
+	draw_rect(frame, Color(0, 0, 0, 0.5 * alpha))
+	var ratio := stamina / STAMINA_MAX
+	var fill_color := Color(0.4, 0.95, 0.5).lerp(Color(1.0, 0.85, 0.3), 1.0 - ratio)
+	if _exhausted:
+		fill_color = Color(0.6, 0.6, 0.65)
+	var fill_h := height * ratio
+	draw_rect(Rect2(x, height / 2.0 - fill_h, 6.0, fill_h), Color(fill_color, alpha))
+	draw_rect(frame, Color(1, 1, 1, 0.4 * alpha), false, 1.0)

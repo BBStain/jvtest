@@ -20,4 +20,5 @@ func poll() -> InputState:
 	s.heavy_held = Input.is_action_pressed(_prefix + "heavy")
 	s.dash_pressed = Input.is_action_just_pressed(_prefix + "dash")
 	s.block_held = Input.is_action_pressed(_prefix + "block")
+	s.sprint_held = Input.is_action_pressed(_prefix + "sprint")
 	return s
