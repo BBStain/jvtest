@@ -368,6 +368,18 @@ func _ready() -> void:
 	check(absf(cam_x - 640) < 10, "Caméra centrée entre les joueurs (x=%.0f)" % cam_x)
 	await shot("05_camera_proche")
 
+	# 9b) Manette : la course est sur LT, le dash sur LB
+	InputBindings.register_player(3, [{"type": "joypad", "id": 7}])
+	var sprint_on_lt := false
+	for event in InputMap.action_get_events("p4_sprint"):
+		if event is InputEventJoypadMotion and event.axis == JOY_AXIS_TRIGGER_LEFT:
+			sprint_on_lt = true
+	var dash_on_lb := false
+	for event in InputMap.action_get_events("p4_dash"):
+		if event is InputEventJoypadButton and event.button_index == JOY_BUTTON_LEFT_SHOULDER:
+			dash_on_lb = true
+	check(sprint_on_lt and dash_on_lb, "Manette : course sur LT, dash sur LB")
+
 	# 10) Écran de connexion : il faut 2 joueurs pour lancer
 	game.queue_free(); game = null
 	var lobby: Node = load("res://scenes/lobby.tscn").instantiate()
