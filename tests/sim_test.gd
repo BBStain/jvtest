@@ -419,6 +419,21 @@ func _ready() -> void:
 	p1.fall_out(Vector2(640, 120))
 	check(p1._knockback_timer <= 0.0 and p1.lives == 2, "Réapparition : plus de recul, vies = %d" % p1.lives)
 
+	# 9f) Attaque rapide spammable : en martelant X (1 appui toutes les 4 frames), au moins 7 coups par seconde
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f >= 40 and f % 4 == 0)
+	await step(40)
+	var swings := 0
+	var was_attacking := false
+	for i in 60:
+		await step(1)
+		if p1.is_attacking() and not was_attacking:
+			swings += 1
+		was_attacking = p1.is_attacking()
+	check(swings >= 7, "Spam de l'attaque rapide : %d coups en 1 s" % swings)
+
 	# 10) Écran de connexion : il faut 2 joueurs pour lancer
 	game.queue_free(); game = null
 	var lobby: Node = load("res://scenes/lobby.tscn").instantiate()

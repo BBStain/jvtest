@@ -17,13 +17,13 @@ const PLATFORM_LAYER := 3  ## numéro de la couche "plateformes_traversables"
 const BODY_SIZE := Vector2(20, 60)      ## largeur, hauteur de la barre (en pixels)
 
 # --- Déplacement ---
-const RUN_SPEED := 480.0                ## vitesse de course max
-const GROUND_ACCEL := 7000.0            ## à quelle vitesse on atteint la vitesse max au sol
-const AIR_ACCEL := 4500.0               ## pareil, en l'air
+const RUN_SPEED := 560.0                ## vitesse de course max
+const GROUND_ACCEL := 8500.0            ## à quelle vitesse on atteint la vitesse max au sol
+const AIR_ACCEL := 5500.0               ## pareil, en l'air
 const GRAVITY := 2300.0
 const SHORT_HOP_GRAVITY := 4800.0       ## gravité quand on lâche le saut tôt (petit saut)
-const MAX_FALL_SPEED := 950.0 
-const FAST_FALL_SPEED := 1500.0         ## chute rapide en tenant bas
+const MAX_FALL_SPEED := 1050.0
+const FAST_FALL_SPEED := 1700.0         ## chute rapide en tenant bas
 const JUMP_SPEED := 820.0
 const DOUBLE_JUMP_SPEED := 760.0
 const AIR_JUMPS := 1                    ## 1 = double saut
@@ -39,7 +39,7 @@ const WALL_JUMP_LOCK := 0.1             ## petit temps où l'on contrôle moins 
 const WALL_JUMP_ACCEL := 2200.0
 
 # --- Dash ---
-const DASH_SPEED := 1150.0
+const DASH_SPEED := 1300.0
 const DASH_TIME := 0.14
 const DASH_COOLDOWN := 0.32             ## temps de recharge
 const DASH_END_KEEP := 0.55             ## part de la vitesse gardée à la fin du dash
@@ -48,7 +48,8 @@ const AIR_DASHES := 1                   ## dashs possibles en l'air avant de ret
 # --- Attaque légère (X) : un coup droit vers l'adversaire ---
 const ATTACK_STARTUP := 0.02            ## délai avant que le coup touche
 const ATTACK_ACTIVE := 0.08             ## durée pendant laquelle le coup peut toucher
-const ATTACK_COOLDOWN := 0.22           ## temps de recharge entre deux attaques
+const ATTACK_COOLDOWN := 0.13           ## temps de recharge entre deux attaques (à peine plus que le coup)
+const ATTACK_BUFFER := 0.12             ## X appuyé un peu trop tôt compte quand même : on peut marteler
 const ATTACK_REACH := 72.0              ## distance entre le centre du perso et le centre du coup
 const ATTACK_RADIUS := 28.0             ## taille de la zone qui touche
 const CLASH_LOCKOUT := 0.08             ## petit temps mort après un choc d'attaques
@@ -130,6 +131,7 @@ var _attack_dir := Vector2.RIGHT
 var _attack_has_hit := false
 var _attack_heavy := false              ## true = attaque lourde en cours
 var _attack_cooldown_timer := 0.0
+var _attack_buffer_timer := 0.0
 var _heavy_charging := false            ## true = on garde Y pour charger l'attaque lourde
 var _charge_time := 0.0
 var _heavy_charge := 0.0                ## 0 = pas chargée, 1 = charge pleine
@@ -210,10 +212,15 @@ func physics_tick(input: InputState, delta: float) -> void:
 	else:
 		_tick_movement(input, on_floor, delta)
 
+	# X est gardé en mémoire un court instant : en martelant, le coup suivant part dès que possible.
+	if input.attack_pressed:
+		_attack_buffer_timer = ATTACK_BUFFER
 	if _blocking:
 		pass  # pas d'attaque en bloquant
-	elif input.attack_pressed:
-		_try_start_attack(false)
+	elif _attack_buffer_timer > 0.0:
+		if can_attack():
+			_attack_buffer_timer = 0.0
+			_try_start_attack(false)
 	elif input.heavy_pressed:
 		_try_start_attack(true)
 	_tick_attack(input, delta)
@@ -228,6 +235,7 @@ func _tick_timers(delta: float) -> void:
 	_drop_timer -= delta
 	_dash_cooldown_timer -= delta
 	_attack_cooldown_timer -= delta
+	_attack_buffer_timer -= delta
 	_invincible_timer -= delta
 	_knockback_timer -= delta
 	_wall_jump_timer -= delta
