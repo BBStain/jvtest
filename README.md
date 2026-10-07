@@ -18,7 +18,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 
 ## Les règles
 
-- **La map** : au centre, le sol avec quatre plateformes et un mur de chaque côté. À gauche, une zone aérienne de pylônes flottants et de petites corniches, avec un ascenseur qui monte et descend et une navette qui passe en bas pour rattraper ceux qui tombent. À droite, une zone de duel avec deux petites marches, une plateforme au-dessus, une navette en hauteur et un mur au bout. Les plateformes violettes bougent et transportent les joueurs posés dessus.
+- **La map** : elle monte haut ! Au centre, le sol avec quatre plateformes, puis des étages de plateformes jusqu'à un sommet, et un grand mur de chaque côté. À gauche, une zone aérienne de pylônes flottants et de petites corniches, avec des pylônes jusqu'en haut, deux ascenseurs qui montent et descendent et une navette qui passe en bas pour rattraper ceux qui tombent. À droite, une zone de duel avec deux petites marches, des étages de plateformes, deux navettes en hauteur et un grand mur au bout. Les plateformes violettes bougent et transportent les joueurs posés dessus.
 
 - 2 joueurs (le code est prêt pour 4), chacun a **3 vies**.
 - Un coup reçu = une vie perdue. Tomber hors de la map = une vie perdue, et on réapparaît au milieu.

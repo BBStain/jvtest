@@ -11,7 +11,7 @@ const PLAYER_COLORS := [
 	Color(1.0, 0.85, 0.3),    # Joueur 4 : jaune
 ]
 ## Au-delà de ces limites, le joueur est sorti de la map et perd une vie.
-const BLAST_ZONE := Rect2(-2150, -700, 5400, 1650)
+const BLAST_ZONE := Rect2(-2150, -1500, 5400, 2450)
 const RESTART_DELAY := 1.0   ## évite de relancer par erreur en martelant les boutons
 const LOBBY_SCENE := "res://scenes/lobby.tscn"
 
