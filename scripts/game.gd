@@ -11,13 +11,13 @@ const PLAYER_COLORS := [
 	Color(1.0, 0.85, 0.3),    # Joueur 4 : jaune
 ]
 ## Au-delà de ces limites, le joueur est sorti de la map et perd une vie.
-const BLAST_ZONE := Rect2(-850, -700, 2980, 1650)
+const BLAST_ZONE := Rect2(-2150, -700, 5400, 1650)
 const RESTART_DELAY := 1.0   ## évite de relancer par erreur en martelant les boutons
 const LOBBY_SCENE := "res://scenes/lobby.tscn"
 
 # --- Caméra : elle suit le milieu des joueurs et dézoome quand ils s'éloignent ---
 const CAMERA_MARGIN := Vector2(700, 450)   ## espace gardé autour des joueurs (en pixels)
-const CAMERA_ZOOM_MIN := 0.55              ## zoom le plus éloigné (plus petit = voit plus loin)
+const CAMERA_ZOOM_MIN := 0.3               ## zoom le plus éloigné (plus petit = voit plus loin)
 const CAMERA_ZOOM_MAX := 1.2               ## zoom le plus proche
 const CAMERA_SMOOTHING := 4.0              ## plus grand = la caméra réagit plus vite
 
@@ -131,8 +131,18 @@ func _resolve_clashes() -> void:
 				push = Vector2(-1.0, 0.0)
 			push.y = 0.0
 			push = push.normalized()
+			var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
+			_spawn_clash_mark((a.attack_center() + b.attack_center()) / 2.0, heavy_countered)
 			a.clash(push, b.is_heavy_attack() and not a.is_heavy_attack())
 			b.clash(-push, a.is_heavy_attack() and not b.is_heavy_attack())
+
+
+## Laisse une marque sur le terrain à l'endroit du contre (orange si une attaque lourde a été contrée).
+func _spawn_clash_mark(where: Vector2, heavy_countered: bool) -> void:
+	var mark := ClashMark.new()
+	mark.position = where
+	mark.color = Color(1.0, 0.6, 0.2) if heavy_countered else Color(1, 1, 1)
+	add_child(mark)
 
 
 func _resolve_hits() -> void:
@@ -143,12 +153,26 @@ func _resolve_hits() -> void:
 			if victim == attacker or not victim.can_be_hit():
 				continue
 			if _circle_hits_rect(attacker.attack_center(), attacker.attack_radius(), victim.body_rect()):
+				if victim.is_blocking():
+					_hit_shield(attacker, victim)
+					break
 				var hit_dir := (victim.global_position - attacker.global_position).normalized()
 				if not attacker.is_heavy_attack():
 					hit_dir = attacker.attack_direction()
 				victim.take_hit(hit_dir, attacker.attack_knockback())
 				attacker.mark_attack_hit()
 				break
+
+
+## Le coup tombe sur un bouclier : personne ne perd de vie, l'attaquant est repoussé mais peut
+## refrapper tout de suite, et le bouclier perd 1 point (2 pour une attaque lourde).
+func _hit_shield(attacker: Fighter, victim: Fighter) -> void:
+	var push := victim.global_position - attacker.global_position
+	push.y = 0.0
+	push = push.normalized() if push.length() > 1.0 else Vector2(attacker.facing, 0.0)
+	attacker.hit_shield(-push)
+	if victim.absorb_hit(push, attacker.is_heavy_attack()):
+		_spawn_clash_mark(victim.global_position, true)
 
 
 func _circle_hits_rect(center: Vector2, radius: float, rect: Rect2) -> bool:

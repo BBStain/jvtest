@@ -82,6 +82,12 @@ func _ready() -> void:
 	check(p1.lives == 3 and p2.lives == 3, "Choc : vies %d / %d" % [p1.lives, p2.lives])
 	check(p1.position.x < 570 and p2.position.x > 710, "Choc : les deux repoussés (x = %.0f / %.0f)" % [p1.position.x, p2.position.x])
 	check(p1.can_attack(), "Choc : J1 peut ré-attaquer vite")
+	var marks := game.get_children().filter(func(n): return n is ClashMark)
+	check(marks.size() == 1, "Choc : une marque apparaît sur le terrain (%d)" % marks.size())
+	await shot("09_marque_contre")
+	await step(200)
+	marks = game.get_children().filter(func(n): return n is ClashMark)
+	check(marks.is_empty(), "Choc : la marque s'est effacée après quelques secondes")
 
 	# 4b) Attaque lourde : l'arc touche un adversaire proche, devant soi
 	await new_game()
@@ -109,6 +115,70 @@ func _ready() -> void:
 	check(clash_seen, "Contre : recharge de J2 doublée (%.2f s)" % p2._attack_cooldown_timer)
 	check(p1.lives == 3 and p2.lives == 3, "Contre : personne ne perd de vie (%d / %d)" % [p1.lives, p2.lives])
 	check(p1._attack_cooldown_timer <= Fighter.CLASH_LOCKOUT, "Contre : J1 (attaque lourde) peut vite réattaquer")
+
+	# 4d) Blocage : le coup tombe sur le bouclier, personne ne perd de vie, l'attaquant peut refrapper
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 650
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = true)
+	await step(29)
+	check(p2.is_blocking(), "Blocage : J2 bloque en tenant B")
+	await shot("09_blocage")
+	await step(5)
+	check(p2.lives == 3, "Blocage : J2 ne perd pas de vie (vies = %d)" % p2.lives)
+	check(p2.shield == 2, "Blocage : le bouclier perd 1 point (reste %d)" % p2.shield)
+	check(p1.can_attack(), "Blocage : J1 peut refrapper tout de suite")
+	await step(10)
+	check(p1.position.x < 590, "Blocage : J1 est repoussé (x = %.0f)" % p1.position.x)
+
+	# 4e) Attaque lourde sur le bouclier : -2 points, et casser le bouclier empêche d'attaquer
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 650
+	p1.input_source = Scripted.new(func(s, f): s.heavy_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f):
+		s.block_held = f < 80
+		s.stick.x = 1.0 if f >= 80 else 0.0
+		s.attack_pressed = f == 85)
+	await step(55)
+	check(p2.shield == 1 and p2.lives == 3, "Lourde sur bouclier : -2 points (reste %d, vies %d)" % [p2.shield, p2.lives])
+	p2.shield = 1
+	p1.position.x = p2.position.x - 50; p1.velocity = Vector2.ZERO
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 2)
+	await step(6)
+	check(p2.shield == 0 and not p2.is_blocking(), "Bouclier cassé : J2 ne bloque plus (bouclier %d)" % p2.shield)
+	check(p2._attack_cooldown_timer > 1.0, "Bouclier cassé : J2 ne peut pas attaquer (%.2f s)" % p2._attack_cooldown_timer)
+	var x_before := p2.position.x
+	await step(26)
+	check(not p2.is_attacking(), "Bouclier cassé : J2 appuie sur X mais n'attaque pas")
+	await step(20)
+	check(p2.position.x > x_before + 50, "Bouclier cassé : J2 peut toujours bouger")
+	await step(int(Fighter.SHIELD_REGEN_TIME * 60) + 5)
+	check(p2.shield == 1, "Bouclier : un point revient après 2 s sans bloquer (%d)" % p2.shield)
+
+	# 4f) En bloquant : déplacement lent, petit saut, pas de dash, pas d'attaque
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f):
+		s.block_held = true
+		s.stick.x = 1.0 if f >= 40 and f < 70 else 0.0
+		s.dash_pressed = f == 72
+		s.attack_pressed = f == 70
+		s.jump_pressed = f == 80
+		s.jump_held = f >= 80)
+	await step(65)
+	check(absf(p1.velocity.x) <= Fighter.RUN_SPEED * Fighter.BLOCK_SPEED_MULT + 1, "Blocage : marche lente (vx = %.0f)" % p1.velocity.x)
+	await step(9)
+	check(not p1.is_dashing(), "Blocage : pas de dash")
+	check(not p1.is_attacking(), "Blocage : pas d'attaque")
+	var start_y := p1.position.y
+	var top_y := start_y
+	for i in 40:
+		await step(1)
+		top_y = minf(top_y, p1.position.y)
+	var jump_height := start_y - top_y
+	check(jump_height > 30 and jump_height < 100, "Blocage : saut moins haut (%.0f px)" % jump_height)
 
 	# 5) Dash = intouchable
 	await new_game()

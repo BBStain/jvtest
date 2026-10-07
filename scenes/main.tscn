@@ -1,4 +1,4 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="Script" path="res://scripts/game.gd" id="1_game"]
 
@@ -13,6 +13,12 @@ size = Vector2(220, 16)
 
 [sub_resource type="RectangleShape2D" id="Shape_Mur"]
 size = Vector2(80, 420)
+
+[sub_resource type="RectangleShape2D" id="Shape_Pylone"]
+size = Vector2(50, 170)
+
+[sub_resource type="RectangleShape2D" id="Shape_SolDuel"]
+size = Vector2(1200, 60)
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_game")
@@ -94,6 +100,134 @@ offset_right = 40.0
 offset_bottom = 210.0
 mouse_filter = 2
 color = Color(0.32, 0.35, 0.45, 1)
+
+[node name="ZoneAerienne" type="Node2D" parent="Map"]
+
+[node name="Pylone1" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-340, 430)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/Pylone1"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/Pylone1"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="Pylone2" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-540, 270)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/Pylone2"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/Pylone2"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="Pylone3" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-740, 480)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/Pylone3"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/Pylone3"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="Pylone4" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-930, 320)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/Pylone4"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/Pylone4"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="Pylone5" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1120, 520)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/Pylone5"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/Pylone5"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="Pylone6" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1310, 300)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/Pylone6"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/Pylone6"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="Pylone7" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1500, 470)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/Pylone7"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/Pylone7"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="Pylone8" type="StaticBody2D" parent="Map/ZoneAerienne"]
+position = Vector2(-1680, 280)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/ZoneAerienne/Pylone8"]
+shape = SubResource("Shape_Pylone")
+
+[node name="Visuel" type="ColorRect" parent="Map/ZoneAerienne/Pylone8"]
+offset_left = -25.0
+offset_top = -85.0
+offset_right = 25.0
+offset_bottom = 85.0
+mouse_filter = 2
+color = Color(0.42, 0.5, 0.68, 1)
+
+[node name="SolDuel" type="StaticBody2D" parent="Map"]
+position = Vector2(2130, 600)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/SolDuel"]
+shape = SubResource("Shape_SolDuel")
+
+[node name="Visuel" type="ColorRect" parent="Map/SolDuel"]
+offset_left = -600.0
+offset_top = -30.0
+offset_right = 600.0
+offset_bottom = 30.0
+mouse_filter = 2
+color = Color(0.45, 0.36, 0.38, 1)
 
 [node name="SpawnPoints" type="Node2D" parent="."]
 

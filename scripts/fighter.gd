@@ -46,9 +46,9 @@ const DASH_END_KEEP := 0.4              ## part de la vitesse gardée à la fin 
 const AIR_DASHES := 1                   ## dashs possibles en l'air avant de retoucher le sol
 
 # --- Attaque légère (X) : un coup droit vers l'adversaire ---
-const ATTACK_STARTUP := 0.04            ## délai avant que le coup touche
-const ATTACK_ACTIVE := 0.10             ## durée pendant laquelle le coup peut toucher
-const ATTACK_COOLDOWN := 0.30           ## temps de recharge entre deux attaques
+const ATTACK_STARTUP := 0.02            ## délai avant que le coup touche
+const ATTACK_ACTIVE := 0.08             ## durée pendant laquelle le coup peut toucher
+const ATTACK_COOLDOWN := 0.22           ## temps de recharge entre deux attaques
 const ATTACK_REACH := 48.0              ## distance entre le centre du perso et le centre du coup
 const ATTACK_RADIUS := 26.0             ## taille de la zone qui touche
 const CLASH_LOCKOUT := 0.08             ## petit temps mort après un choc d'attaques
@@ -61,14 +61,24 @@ const HEAVY_ARC_RADIUS := 56.0          ## distance entre le centre du perso et 
 const HEAVY_TIP_RADIUS := 24.0          ## taille de la zone qui touche au bout de l'arme
 const HEAVY_ARC_START := -100.0         ## angle de départ en degrés (-90 = droit au-dessus de la tête)
 const HEAVY_ARC_END := 32.0             ## angle d'arrivée (à hauteur des pieds, devant soi)
-const HEAVY_KNOCKBACK := 650.0
+const HEAVY_KNOCKBACK := 850.0
 const COUNTER_COOLDOWN_MULT := 2.0      ## contrer une attaque lourde avec une légère : recharge x2
+
+# --- Blocage (B) : un bouclier de 3 points ---
+const SHIELD_MAX := 3                   ## points de bouclier
+const SHIELD_REGEN_TIME := 2.0          ## 1 point regagné toutes les 2 s quand on ne bloque pas
+const SHIELD_BREAK_COOLDOWN := 1.5      ## bouclier cassé : pas d'attaque pendant ce temps (on peut bouger)
+const HEAVY_SHIELD_DAMAGE := 2          ## l'attaque lourde enlève 2 points, la légère 1
+const BLOCK_SPEED_MULT := 0.3           ## en bloquant, on se déplace beaucoup plus lentement
+const BLOCK_JUMP_MULT := 0.7            ## en bloquant, on saute environ 2 fois moins haut
+const SHIELD_HIT_PUSH := 380.0          ## l'attaquant qui frappe le bouclier est repoussé
+const SHIELD_BLOCKER_PUSH := 120.0      ## celui qui bloque recule un tout petit peu
 
 # --- Coup reçu ---
 const INVINCIBLE_TIME := 0.55           ## doit rester plus long que ATTACK_COOLDOWN
-const HIT_KNOCKBACK := 420.0
+const HIT_KNOCKBACK := 620.0
 const CLASH_PUSH := 450.0
-const KNOCKBACK_TIME := 0.15            ## durée pendant laquelle on contrôle moins bien après un coup / un choc
+const KNOCKBACK_TIME := 0.22            ## durée pendant laquelle on contrôle moins bien après un coup / un choc
 const KNOCKBACK_ACCEL := 1500.0
 
 const START_LIVES := 3
@@ -100,6 +110,12 @@ var _attack_dir := Vector2.RIGHT
 var _attack_has_hit := false
 var _attack_heavy := false              ## true = attaque lourde en cours
 var _attack_cooldown_timer := 0.0
+
+var shield := SHIELD_MAX
+var _blocking := false
+var _shield_regen_timer := 0.0
+var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
+var _shield_flash_timer := 0.0          ## petit éclat quand le bouclier encaisse un coup
 
 var _invincible_timer := 0.0
 var _knockback_timer := 0.0
@@ -152,7 +168,9 @@ func physics_tick(input: InputState, delta: float) -> void:
 		_drop_timer = DROP_THROUGH_TIME
 	set_collision_mask_value(PLATFORM_LAYER, _drop_timer <= 0.0)
 
-	if input.dash_pressed:
+	_update_block(input, delta)
+
+	if input.dash_pressed and not _blocking:
 		_try_start_dash(input, on_floor)
 
 	if is_dashing():
@@ -160,7 +178,9 @@ func physics_tick(input: InputState, delta: float) -> void:
 	else:
 		_tick_movement(input, on_floor, delta)
 
-	if input.attack_pressed:
+	if _blocking:
+		pass  # pas d'attaque en bloquant
+	elif input.attack_pressed:
 		_try_start_attack(false)
 	elif input.heavy_pressed:
 		_try_start_attack(true)
@@ -180,7 +200,23 @@ func _tick_timers(delta: float) -> void:
 	_knockback_timer -= delta
 	_wall_jump_timer -= delta
 	_lives_show_timer -= delta
+	_shield_broken_timer -= delta
+	_shield_flash_timer -= delta
 	_blink_clock += delta
+
+
+## On bloque tant que B est maintenu, si le bouclier n'est pas vide et qu'on n'est pas
+## en train de dasher ou de frapper. Le bouclier se recharge quand on ne bloque pas.
+func _update_block(input: InputState, delta: float) -> void:
+	_blocking = input.block_held and shield > 0 and not is_dashing() \
+		and not _is_attack_startup_or_active()
+	if _blocking or shield >= SHIELD_MAX:
+		_shield_regen_timer = 0.0
+		return
+	_shield_regen_timer += delta
+	if _shield_regen_timer >= SHIELD_REGEN_TIME:
+		_shield_regen_timer = 0.0
+		shield += 1
 
 
 func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
@@ -190,7 +226,8 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 		accel = KNOCKBACK_ACCEL
 	elif _wall_jump_timer > 0.0:
 		accel = WALL_JUMP_ACCEL
-	velocity.x = move_toward(velocity.x, input.stick.x * RUN_SPEED, accel * delta)
+	var speed := RUN_SPEED * BLOCK_SPEED_MULT if _blocking else RUN_SPEED
+	velocity.x = move_toward(velocity.x, input.stick.x * speed, accel * delta)
 
 	# Gravité (plus forte si on a lâché le saut pendant la montée = petit saut)
 	var gravity := GRAVITY
@@ -205,18 +242,19 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 	# Saut, double saut et saut mural
 	if input.jump_pressed:
 		_jump_buffer_timer = JUMP_BUFFER
+	var jump_mult := BLOCK_JUMP_MULT if _blocking else 1.0
 	if _jump_buffer_timer > 0.0:
 		if on_floor or _coyote_timer > 0.0:
-			velocity.y = -JUMP_SPEED
+			velocity.y = -JUMP_SPEED * jump_mult
 			_jump_buffer_timer = 0.0
 			_coyote_timer = 0.0
 		elif input.jump_pressed and is_wall_sliding() and _air_jumps_left > 0:
-			velocity = Vector2(_wall_normal_x * WALL_JUMP_PUSH, -JUMP_SPEED)
+			velocity = Vector2(_wall_normal_x * WALL_JUMP_PUSH, -JUMP_SPEED * jump_mult)
 			_air_jumps_left -= 1
 			_jump_buffer_timer = 0.0
 			_wall_jump_timer = WALL_JUMP_LOCK
 		elif input.jump_pressed and _air_jumps_left > 0:
-			velocity.y = -DOUBLE_JUMP_SPEED
+			velocity.y = -DOUBLE_JUMP_SPEED * jump_mult
 			_air_jumps_left -= 1
 			_jump_buffer_timer = 0.0
 
@@ -315,8 +353,12 @@ func _is_attack_startup_or_active() -> bool:
 	return _attack_time >= 0.0 and _attack_time < _attack_startup() + _attack_active()
 
 
+func is_blocking() -> bool:
+	return _blocking
+
+
 func can_attack() -> bool:
-	return not eliminated and not is_dashing() and not is_invincible() \
+	return not eliminated and not is_dashing() and not is_invincible() and not _blocking \
 		and not is_attacking() and _attack_cooldown_timer <= 0.0
 
 
@@ -371,6 +413,30 @@ func clash(push_dir: Vector2, countered_heavy := false) -> void:
 	_attack_cooldown_timer = ATTACK_COOLDOWN * COUNTER_COOLDOWN_MULT if countered_heavy else CLASH_LOCKOUT
 	velocity = push_dir * CLASH_PUSH + Vector2(0.0, -150.0)
 	_knockback_timer = KNOCKBACK_TIME
+
+
+## Notre coup a frappé un bouclier : il s'arrête, on est repoussé, mais on peut refrapper tout de suite.
+func hit_shield(push_dir: Vector2) -> void:
+	_cancel_attack()
+	_attack_cooldown_timer = 0.0
+	velocity = push_dir * SHIELD_HIT_PUSH + Vector2(0.0, -120.0)
+	_knockback_timer = KNOCKBACK_TIME
+
+
+## Notre bouclier encaisse un coup. Renvoie true s'il vient de casser.
+func absorb_hit(push_dir: Vector2, heavy: bool) -> bool:
+	shield = maxi(shield - (HEAVY_SHIELD_DAMAGE if heavy else 1), 0)
+	_shield_regen_timer = 0.0
+	_shield_flash_timer = 0.12
+	velocity.x = push_dir.x * SHIELD_BLOCKER_PUSH
+	if shield > 0:
+		return false
+	# Bouclier cassé : on arrête de bloquer et on ne peut plus attaquer un moment.
+	_blocking = false
+	_cancel_attack()
+	_attack_cooldown_timer = SHIELD_BREAK_COOLDOWN
+	_shield_broken_timer = SHIELD_BREAK_COOLDOWN
+	return true
 
 
 func take_hit(hit_dir: Vector2, knockback := HIT_KNOCKBACK) -> void:
@@ -432,6 +498,24 @@ func _draw() -> void:
 		body_color = body_color.lightened(0.4)
 	draw_rect(body, body_color)
 
+	# En surbrillance quand on bloque, avec les points de bouclier qui restent
+	if _blocking:
+		var glow := 1.0 if _shield_flash_timer > 0.0 else 0.8
+		draw_rect(body.grow(12.0), Color(color.lightened(0.5), 0.12 * glow))
+		draw_rect(body.grow(7.0), Color(color.lightened(0.6), 0.25 * glow))
+		draw_rect(body, Color(1, 1, 1, 0.35 * glow))
+		draw_rect(body.grow(7.0), Color(1, 1, 1, glow), false, 3.0)
+		_draw_shield_points(-BODY_SIZE.y / 2.0 - 16.0, 1.0)
+	elif _shield_flash_timer > 0.0:
+		draw_rect(body.grow(5.0), Color(1, 1, 1, 0.8), false, 3.0)
+
+	# Bouclier cassé : une croix grise tant qu'on ne peut pas attaquer
+	if _shield_broken_timer > 0.0:
+		var a := clampf(_shield_broken_timer / 0.3, 0.0, 1.0) * 0.8
+		var c := Vector2(0, -BODY_SIZE.y / 2.0 - 16.0)
+		draw_line(c + Vector2(-7, -7), c + Vector2(7, 7), Color(0.75, 0.75, 0.8, a), 3.0)
+		draw_line(c + Vector2(-7, 7), c + Vector2(7, -7), Color(0.75, 0.75, 0.8, a), 3.0)
+
 	# Petit œil pour voir de quel côté on regarde
 	draw_rect(Rect2(Vector2(facing * 3.0 - 2.5, -BODY_SIZE.y / 2.0 + 9.0), Vector2(5, 5)), Color(0.08, 0.09, 0.13))
 
@@ -460,16 +544,29 @@ func _draw() -> void:
 			draw_rect(Rect2(length - 14.0, -14.0, 14.0, 28.0), color.lightened(0.6))
 		draw_set_transform(Vector2.ZERO, 0.0)
 
-	# Les vies au-dessus de la tête
+	# Les vies au-dessus de la tête (plus haut si les points de bouclier sont affichés)
 	if _lives_show_timer > 0.0:
 		var alpha := clampf(_lives_show_timer / 0.4, 0.0, 1.0)
 		var size := 10.0
 		var gap := 5.0
 		var total := START_LIVES * size + (START_LIVES - 1) * gap
-		var y := -BODY_SIZE.y / 2.0 - 22.0
+		var y := -BODY_SIZE.y / 2.0 - (32.0 if (_blocking or _shield_broken_timer > 0.0) else 22.0)
 		for i in START_LIVES:
 			var pip := Rect2(-total / 2.0 + i * (size + gap), y, size, size)
 			if i < lives:
 				draw_rect(pip, Color(color, alpha))
 			else:
 				draw_rect(pip, Color(1, 1, 1, 0.5 * alpha), false, 2.0)
+
+
+## Petits traits au-dessus de la tête : un par point de bouclier.
+func _draw_shield_points(y: float, alpha: float) -> void:
+	var w := 8.0
+	var gap := 3.0
+	var total := SHIELD_MAX * w + (SHIELD_MAX - 1) * gap
+	for i in SHIELD_MAX:
+		var pip := Rect2(-total / 2.0 + i * (w + gap), y, w, 4.0)
+		if i < shield:
+			draw_rect(pip, Color(1, 1, 1, 0.95 * alpha))
+		else:
+			draw_rect(pip, Color(1, 1, 1, 0.25 * alpha))

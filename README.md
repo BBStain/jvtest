@@ -18,14 +18,20 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 
 ## Les règles
 
+- **La map** : au centre, le sol avec ses deux plateformes et un mur de chaque côté. À gauche, une zone aérienne de pylônes flottants où l'on saute de mur en mur. À droite, une grande zone plate pour les duels directs.
+
 - 2 joueurs (le code est prêt pour 4), chacun a **3 vies**.
 - Un coup reçu = une vie perdue. Tomber hors de la map = une vie perdue, et on réapparaît au milieu.
 - Après un coup, on clignote : on est invincible un court instant et on ne peut pas attaquer.
 - L'attaque légère part toujours vers l'adversaire le plus proche. S'il est trop loin, elle frappe dans le vide.
-- Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés.
+- Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés. Une marque apparaît à l'endroit du choc et s'efface en quelques secondes (orange si une attaque lourde a été contrée).
 - L'**attaque lourde** part du dessus de la tête et fait un arc de cercle jusqu'aux pieds, devant soi. Elle est plus lente et projette plus fort.
 - Contrer une attaque lourde avec une attaque légère annule les deux, mais le temps de recharge de celui qui a contré est doublé pour cette fois.
 - Pendant un dash, on ne peut pas être touché, mais on ne peut pas attaquer.
+- **Blocage** (tenir B) : le personnage s'entoure d'un contour lumineux et a un bouclier de **3 points**. Un coup sur le bouclier ne fait pas perdre de vie : il enlève 1 point (2 pour une attaque lourde), et l'attaquant est repoussé mais peut refrapper tout de suite.
+- Pendant le blocage, on avance beaucoup plus lentement, on saute moins haut, et on ne peut ni dasher ni attaquer.
+- Si le bouclier casse, on arrête de bloquer et on ne peut plus attaquer pendant 1,5 seconde, mais on peut toujours bouger, sauter et dasher.
+- Le bouclier regagne 1 point toutes les 2 secondes quand on ne bloque pas.
 - La partie s'arrête quand il ne reste qu'un joueur en vie.
 
 ## Les commandes
@@ -37,6 +43,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 | Attaque légère | X | F | K |
 | Attaque lourde | Y | R | I |
 | Dash (dans la direction du stick) | Gâchette gauche (ou LB) | G | J |
+| Bloquer (maintenir) | B | C | U |
 | Descendre d'une plateforme | Bas | S | Flèche bas |
 | Rejouer à la fin | Start ou A | Entrée | Entrée |
 | Revenir au menu à la fin | B | Échap | Échap |
