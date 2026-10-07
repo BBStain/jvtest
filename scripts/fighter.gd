@@ -14,7 +14,7 @@ signal life_lost(fighter: Fighter)
 const PLATFORM_LAYER := 3  ## numéro de la couche "plateformes_traversables"
 
 # --- Corps ---
-const BODY_SIZE := Vector2(26, 84)      ## largeur, hauteur de la barre (en pixels)
+const BODY_SIZE := Vector2(20, 60)      ## largeur, hauteur de la barre (en pixels)
 
 # --- Déplacement ---
 const RUN_SPEED := 460.0                ## vitesse de course max
@@ -45,13 +45,24 @@ const DASH_COOLDOWN := 0.45             ## temps de recharge
 const DASH_END_KEEP := 0.4              ## part de la vitesse gardée à la fin du dash
 const AIR_DASHES := 1                   ## dashs possibles en l'air avant de retoucher le sol
 
-# --- Attaque ---
+# --- Attaque légère (X) : un coup droit vers l'adversaire ---
 const ATTACK_STARTUP := 0.04            ## délai avant que le coup touche
 const ATTACK_ACTIVE := 0.10             ## durée pendant laquelle le coup peut toucher
 const ATTACK_COOLDOWN := 0.30           ## temps de recharge entre deux attaques
-const ATTACK_REACH := 62.0              ## distance entre le centre du perso et le centre du coup
-const ATTACK_RADIUS := 34.0             ## taille de la zone qui touche
+const ATTACK_REACH := 48.0              ## distance entre le centre du perso et le centre du coup
+const ATTACK_RADIUS := 26.0             ## taille de la zone qui touche
 const CLASH_LOCKOUT := 0.08             ## petit temps mort après un choc d'attaques
+
+# --- Attaque lourde (Y) : un arc de cercle du dessus de la tête jusqu'aux pieds, devant soi ---
+const HEAVY_STARTUP := 0.18             ## on lève l'arme avant de frapper
+const HEAVY_ACTIVE := 0.18              ## durée du balayage
+const HEAVY_COOLDOWN := 0.65
+const HEAVY_ARC_RADIUS := 56.0          ## distance entre le centre du perso et le bout de l'arme
+const HEAVY_TIP_RADIUS := 24.0          ## taille de la zone qui touche au bout de l'arme
+const HEAVY_ARC_START := -100.0         ## angle de départ en degrés (-90 = droit au-dessus de la tête)
+const HEAVY_ARC_END := 32.0             ## angle d'arrivée (à hauteur des pieds, devant soi)
+const HEAVY_KNOCKBACK := 650.0
+const COUNTER_COOLDOWN_MULT := 2.0      ## contrer une attaque lourde avec une légère : recharge x2
 
 # --- Coup reçu ---
 const INVINCIBLE_TIME := 0.55           ## doit rester plus long que ATTACK_COOLDOWN
@@ -87,6 +98,7 @@ var _dash_dir := Vector2.RIGHT
 var _attack_time := -1.0                ## temps écoulé depuis le début de l'attaque (-1 = pas d'attaque)
 var _attack_dir := Vector2.RIGHT
 var _attack_has_hit := false
+var _attack_heavy := false              ## true = attaque lourde en cours
 var _attack_cooldown_timer := 0.0
 
 var _invincible_timer := 0.0
@@ -149,7 +161,9 @@ func physics_tick(input: InputState, delta: float) -> void:
 		_tick_movement(input, on_floor, delta)
 
 	if input.attack_pressed:
-		_try_start_attack()
+		_try_start_attack(false)
+	elif input.heavy_pressed:
+		_try_start_attack(true)
 	_tick_attack(delta)
 
 	move_and_slide()
@@ -232,7 +246,7 @@ func _tick_dash(delta: float) -> void:
 		velocity *= DASH_END_KEEP
 
 
-func _try_start_attack() -> void:
+func _try_start_attack(heavy: bool) -> void:
 	if not can_attack():
 		return
 	if target != null and not target.eliminated:
@@ -242,17 +256,37 @@ func _try_start_attack() -> void:
 		_attack_dir = Vector2(facing, 0.0)
 	if absf(_attack_dir.x) > 0.1:
 		facing = signf(_attack_dir.x)
+	_attack_heavy = heavy
 	_attack_time = 0.0
 	_attack_has_hit = false
-	_attack_cooldown_timer = ATTACK_COOLDOWN
+	_attack_cooldown_timer = HEAVY_COOLDOWN if heavy else ATTACK_COOLDOWN
 
 
 func _tick_attack(delta: float) -> void:
 	if _attack_time < 0.0:
 		return
 	_attack_time += delta
-	if _attack_time >= ATTACK_STARTUP + ATTACK_ACTIVE:
+	if _attack_time >= _attack_startup() + _attack_active():
 		_attack_time = -1.0
+
+
+func _attack_startup() -> float:
+	return HEAVY_STARTUP if _attack_heavy else ATTACK_STARTUP
+
+
+func _attack_active() -> float:
+	return HEAVY_ACTIVE if _attack_heavy else ATTACK_ACTIVE
+
+
+## Angle actuel de l'arme pendant l'attaque lourde (en radians, côté "facing").
+func _heavy_angle() -> float:
+	var progress := clampf((_attack_time - HEAVY_STARTUP) / HEAVY_ACTIVE, 0.0, 1.0)
+	return deg_to_rad(lerpf(HEAVY_ARC_START, HEAVY_ARC_END, progress))
+
+
+## Position du bout de l'arme (par rapport au centre du perso) pour un angle donné.
+func _heavy_tip(angle: float) -> Vector2:
+	return Vector2(facing * cos(angle), sin(angle)) * HEAVY_ARC_RADIUS
 
 
 func _cancel_attack() -> void:
@@ -278,7 +312,7 @@ func is_attacking() -> bool:
 
 
 func _is_attack_startup_or_active() -> bool:
-	return _attack_time >= 0.0 and _attack_time < ATTACK_STARTUP + ATTACK_ACTIVE
+	return _attack_time >= 0.0 and _attack_time < _attack_startup() + _attack_active()
 
 
 func can_attack() -> bool:
@@ -288,12 +322,27 @@ func can_attack() -> bool:
 
 ## Le coup peut-il toucher en ce moment ?
 func is_attack_active() -> bool:
-	return _attack_time >= ATTACK_STARTUP and _attack_time < ATTACK_STARTUP + ATTACK_ACTIVE \
+	return _attack_time >= _attack_startup() and _attack_time < _attack_startup() + _attack_active() \
 		and not _attack_has_hit
 
 
+func is_heavy_attack() -> bool:
+	return _attack_heavy
+
+
+## Centre de la zone qui touche : devant soi pour l'attaque légère, au bout de l'arme pour la lourde.
 func attack_center() -> Vector2:
+	if _attack_heavy:
+		return global_position + _heavy_tip(_heavy_angle())
 	return global_position + _attack_dir * ATTACK_REACH
+
+
+func attack_radius() -> float:
+	return HEAVY_TIP_RADIUS if _attack_heavy else ATTACK_RADIUS
+
+
+func attack_knockback() -> float:
+	return HEAVY_KNOCKBACK if _attack_heavy else HIT_KNOCKBACK
 
 
 func attack_direction() -> Vector2:
@@ -316,17 +365,18 @@ func mark_attack_hit() -> void:
 
 
 ## Deux attaques se sont touchées : elles s'annulent et on est repoussé.
-func clash(push_dir: Vector2) -> void:
+## countered_heavy = on a contré une attaque lourde avec une légère : recharge doublée.
+func clash(push_dir: Vector2, countered_heavy := false) -> void:
 	_cancel_attack()
-	_attack_cooldown_timer = CLASH_LOCKOUT
+	_attack_cooldown_timer = ATTACK_COOLDOWN * COUNTER_COOLDOWN_MULT if countered_heavy else CLASH_LOCKOUT
 	velocity = push_dir * CLASH_PUSH + Vector2(0.0, -150.0)
 	_knockback_timer = KNOCKBACK_TIME
 
 
-func take_hit(hit_dir: Vector2) -> void:
+func take_hit(hit_dir: Vector2, knockback := HIT_KNOCKBACK) -> void:
 	_cancel_attack()
 	_dash_timer = 0.0
-	velocity = hit_dir * HIT_KNOCKBACK + Vector2(0.0, -200.0)
+	velocity = hit_dir * knockback + Vector2(0.0, -200.0)
 	_knockback_timer = KNOCKBACK_TIME
 	_lose_life()
 
@@ -383,10 +433,24 @@ func _draw() -> void:
 	draw_rect(body, body_color)
 
 	# Petit œil pour voir de quel côté on regarde
-	draw_rect(Rect2(Vector2(facing * 4.0 - 3.0, -BODY_SIZE.y / 2.0 + 12.0), Vector2(6, 6)), Color(0.08, 0.09, 0.13))
+	draw_rect(Rect2(Vector2(facing * 3.0 - 2.5, -BODY_SIZE.y / 2.0 + 9.0), Vector2(5, 5)), Color(0.08, 0.09, 0.13))
 
-	# L'attaque : une barre blanche orientée vers l'adversaire
-	if is_attacking():
+	# L'attaque lourde : l'arme levée au-dessus de la tête, puis un arc jusqu'aux pieds
+	if is_attacking() and _attack_heavy:
+		var angle := _heavy_angle()
+		if _attack_time >= HEAVY_STARTUP:
+			var trail := PackedVector2Array()
+			var start := deg_to_rad(HEAVY_ARC_START)
+			for i in 9:
+				trail.append(_heavy_tip(lerpf(start, angle, i / 8.0)))
+			draw_polyline(trail, Color(color.lightened(0.5), 0.5), 10.0)
+		var tip := _heavy_tip(angle)
+		var blade_color := Color(1, 1, 1, 0.95) if _attack_time >= HEAVY_STARTUP else Color(1, 1, 1, 0.6)
+		draw_line(tip * 0.2, tip, blade_color, 9.0)
+		draw_circle(tip, 9.0, color.lightened(0.6))
+
+	# L'attaque légère : une barre blanche orientée vers l'adversaire
+	elif is_attacking():
 		draw_set_transform(Vector2.ZERO, _attack_dir.angle())
 		var length := ATTACK_REACH + ATTACK_RADIUS
 		if _attack_time < ATTACK_STARTUP:
@@ -399,10 +463,10 @@ func _draw() -> void:
 	# Les vies au-dessus de la tête
 	if _lives_show_timer > 0.0:
 		var alpha := clampf(_lives_show_timer / 0.4, 0.0, 1.0)
-		var size := 12.0
-		var gap := 6.0
+		var size := 10.0
+		var gap := 5.0
 		var total := START_LIVES * size + (START_LIVES - 1) * gap
-		var y := -BODY_SIZE.y / 2.0 - 26.0
+		var y := -BODY_SIZE.y / 2.0 - 22.0
 		for i in START_LIVES:
 			var pip := Rect2(-total / 2.0 + i * (size + gap), y, size, size)
 			if i < lives:

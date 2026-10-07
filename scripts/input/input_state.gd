@@ -8,14 +8,15 @@ var stick := Vector2.ZERO   ## direction du stick ou de la croix (x : gauche/dro
 var down_pressed := false   ## bas appuyé cette frame : descendre d'une plateforme
 var jump_pressed := false   ## saut appuyé cette frame
 var jump_held := false      ## saut maintenu (saut plus haut si on garde appuyé)
-var attack_pressed := false
+var attack_pressed := false  ## attaque légère
+var heavy_pressed := false   ## attaque lourde
 var dash_pressed := false
 
 
 func to_dict() -> Dictionary:
 	return {
 		"sx": stick.x, "sy": stick.y, "dp": down_pressed,
-		"j": jump_pressed, "jh": jump_held, "a": attack_pressed, "d": dash_pressed,
+		"j": jump_pressed, "jh": jump_held, "a": attack_pressed, "h": heavy_pressed, "d": dash_pressed,
 	}
 
 
@@ -26,5 +27,6 @@ static func from_dict(data: Dictionary) -> InputState:
 	s.jump_pressed = data.get("j", false)
 	s.jump_held = data.get("jh", false)
 	s.attack_pressed = data.get("a", false)
+	s.heavy_pressed = data.get("h", false)
 	s.dash_pressed = data.get("d", false)
 	return s

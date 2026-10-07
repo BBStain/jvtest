@@ -49,7 +49,7 @@ func _ready() -> void:
 	p1.input_source = Scripted.new(func(s, f): pass)
 	p2.input_source = Scripted.new(func(s, f): pass)
 	await step(60)
-	check(p1.is_on_floor() and absf(p1.position.y - (570 - 42)) < 3, "J1 au sol (y=%.1f)" % p1.position.y)
+	check(p1.is_on_floor() and absf(p1.position.y - (570 - 30)) < 3, "J1 au sol (y=%.1f)" % p1.position.y)
 	await shot("01_debut")
 
 	# 2) J1 marche vers J2 et attaque : J2 perd une vie
@@ -83,6 +83,33 @@ func _ready() -> void:
 	check(p1.position.x < 570 and p2.position.x > 710, "Choc : les deux repoussés (x = %.0f / %.0f)" % [p1.position.x, p2.position.x])
 	check(p1.can_attack(), "Choc : J1 peut ré-attaquer vite")
 
+	# 4b) Attaque lourde : l'arc touche un adversaire proche, devant soi
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 650
+	p1.input_source = Scripted.new(func(s, f): s.heavy_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(42)
+	await shot("08_lourde")
+	await step(10)
+	check(p2.lives == 2, "Attaque lourde : J2 touché (vies = %d)" % p2.lives)
+
+	# 4c) Attaque lourde contrée par une légère : personne touché, recharge doublée pour celui qui contre
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 690
+	p1.input_source = Scripted.new(func(s, f): s.heavy_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 42)
+	var clash_seen := false
+	for i in 60:
+		await step(1)
+		if p2._attack_cooldown_timer > Fighter.ATTACK_COOLDOWN * 1.5:
+			clash_seen = true
+			break
+	check(clash_seen, "Contre : recharge de J2 doublée (%.2f s)" % p2._attack_cooldown_timer)
+	check(p1.lives == 3 and p2.lives == 3, "Contre : personne ne perd de vie (%d / %d)" % [p1.lives, p2.lives])
+	check(p1._attack_cooldown_timer <= Fighter.CLASH_LOCKOUT, "Contre : J1 (attaque lourde) peut vite réattaquer")
+
 	# 5) Dash = intouchable
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
@@ -111,14 +138,14 @@ func _ready() -> void:
 		min_y = minf(min_y, p1.position.y)
 		if i == 70:
 			await shot("03_triple_saut")
-	check(p1.is_on_floor() and absf(p1.position.y - (282 - 42)) < 3, "Arrivé sur la plateforme du haut (y=%.1f, plus haut=%.1f)" % [p1.position.y, min_y])
+	check(p1.is_on_floor() and absf(p1.position.y - (282 - 30)) < 3, "Arrivé sur la plateforme du haut (y=%.1f, plus haut=%.1f)" % [p1.position.y, min_y])
 
 	# 7) Descendre avec bas
 	p1.input_source = Scripted.new(func(s, f):
 		s.stick.y = 1.0 if f < 3 else 0.0
 		s.down_pressed = f == 0)
 	await step(40)
-	check(p1.is_on_floor() and absf(p1.position.y - (432 - 42)) < 3, "Descendu sur la plateforme du milieu (y=%.1f)" % p1.position.y)
+	check(p1.is_on_floor() and absf(p1.position.y - (432 - 30)) < 3, "Descendu sur la plateforme du milieu (y=%.1f)" % p1.position.y)
 
 	# 7b) Mur : on glisse lentement, sauts et dash rechargés, le saut mural éjecte du mur
 	await new_game()
