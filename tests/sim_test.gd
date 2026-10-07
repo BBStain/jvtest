@@ -414,7 +414,7 @@ func _ready() -> void:
 	p1._attack_dir = Vector2.RIGHT
 	p1._attack_time = Fighter.ATTACK_STARTUP
 	await step(60)
-	check(p2.lives == 2 and p2.position.x - 680 > 100, "Coup léger : J2 repoussé de %.0f px" % (p2.position.x - 680))
+	check(p2.lives == 2 and absf(p2.position.x - 680 - 100) < 8, "Coup léger : J2 repoussé de %.0f px (visé : 100)" % (p2.position.x - 680))
 
 	# 9d) Dash vers le haut sans tenir le saut : il n'est plus coupé net (vrai 3e saut)
 	await new_game()
