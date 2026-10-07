@@ -116,7 +116,7 @@ func _closest_opponent(fighter: Fighter) -> Fighter:
 
 
 ## Deux attaques qui se touchent s'annulent et repoussent les deux joueurs.
-## Si une attaque légère contre une attaque lourde, celui qui a contré a une recharge doublée.
+## Si une attaque légère contre une attaque lourde, les deux ont une longue recharge et sont repoussés plus loin.
 func _resolve_clashes() -> void:
 	for i in fighters.size():
 		for j in range(i + 1, fighters.size()):
@@ -133,8 +133,8 @@ func _resolve_clashes() -> void:
 			push = push.normalized()
 			var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
 			_spawn_clash_mark((a.attack_center() + b.attack_center()) / 2.0, heavy_countered)
-			a.clash(push, b.is_heavy_attack() and not a.is_heavy_attack())
-			b.clash(-push, a.is_heavy_attack() and not b.is_heavy_attack())
+			a.clash(push, heavy_countered)
+			b.clash(-push, heavy_countered)
 
 
 ## Laisse une marque sur le terrain à l'endroit du contre (orange si une attaque lourde a été contrée).

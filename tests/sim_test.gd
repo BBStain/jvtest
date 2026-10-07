@@ -100,7 +100,7 @@ func _ready() -> void:
 	await step(10)
 	check(p2.lives == 2, "Attaque lourde : J2 touché (vies = %d)" % p2.lives)
 
-	# 4c) Attaque lourde contrée par une légère : personne touché, recharge doublée pour celui qui contre
+	# 4c) Attaque lourde contrée par une légère : personne touché, longue recharge pour les deux, repoussés loin
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
 	p1.position.x = 600; p2.position.x = 690
@@ -109,12 +109,16 @@ func _ready() -> void:
 	var clash_seen := false
 	for i in 60:
 		await step(1)
-		if p2._attack_cooldown_timer > Fighter.ATTACK_COOLDOWN * 1.5:
+		if p2._attack_cooldown_timer > Fighter.ATTACK_COOLDOWN * 2.5:
 			clash_seen = true
 			break
-	check(clash_seen, "Contre : recharge de J2 doublée (%.2f s)" % p2._attack_cooldown_timer)
+	check(clash_seen, "Contre : longue recharge pour J2 qui a contré (%.2f s)" % p2._attack_cooldown_timer)
+	check(p1._attack_cooldown_timer > Fighter.HEAVY_COOLDOWN, "Contre : même longue recharge pour J1 qui a lancé la lourde (%.2f s)" % p1._attack_cooldown_timer)
 	check(p1.lives == 3 and p2.lives == 3, "Contre : personne ne perd de vie (%d / %d)" % [p1.lives, p2.lives])
-	check(p1._attack_cooldown_timer <= Fighter.CLASH_LOCKOUT, "Contre : J1 (attaque lourde) peut vite réattaquer")
+	var gap_before := p2.position.x - p1.position.x
+	await step(20)
+	var gap_after := p2.position.x - p1.position.x
+	check(gap_after - gap_before > 150, "Contre : les deux sont repoussés loin (écart %.0f -> %.0f)" % [gap_before, gap_after])
 
 	# 4d) Blocage : le coup tombe sur le bouclier, personne ne perd de vie, l'attaquant peut refrapper
 	await new_game()
