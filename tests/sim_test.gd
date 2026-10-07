@@ -53,8 +53,9 @@ func _ready() -> void:
 	await shot("01_debut")
 
 	# 2) J1 marche vers J2 et attaque : J2 perd une vie
+	p1.position.x = 700; p2.position.x = 880
 	p1.input_source = Scripted.new(func(s, f):
-		s.stick.x = 1.0 if f < 50 else 0.0
+		s.stick.x = 1.0 if f < 15 else 0.0
 		s.attack_pressed = f == 60)
 	await step(63)
 	await shot("02_attaque")
@@ -118,6 +119,28 @@ func _ready() -> void:
 		s.down_pressed = f == 0)
 	await step(40)
 	check(p1.is_on_floor() and absf(p1.position.y - (432 - 42)) < 3, "Descendu sur la plateforme du milieu (y=%.1f)" % p1.position.y)
+
+	# 7b) Mur : on glisse lentement, sauts et dash rechargés, le saut mural éjecte du mur
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position = Vector2(-40, 330)
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = -1.0)
+	await step(2)
+	p1._air_jumps_left = 0
+	p1._air_dashes_left = 0
+	await step(40)
+	check(p1.is_wall_sliding(), "Mur : J1 glisse contre le mur gauche")
+	check(p1.velocity.y <= Fighter.WALL_SLIDE_SPEED + 1, "Mur : glissade lente (vy=%.0f)" % p1.velocity.y)
+	check(p1._air_jumps_left == 2 and p1._air_dashes_left == 1, "Mur : 2 sauts et le dash rechargés")
+	await shot("07_mur")
+	p1.input_source = Scripted.new(func(s, f):
+		s.stick.x = -1.0
+		s.jump_pressed = f == 0
+		s.jump_held = f < 15)
+	await step(6)
+	check(p1.velocity.x > 0 and p1.velocity.y < 0, "Mur : saut mural vers la droite (v=%s)" % p1.velocity)
+	check(p1._air_jumps_left == 1, "Mur : il reste 1 saut après le saut mural")
 
 	# 8) Tomber de la map coûte une vie, puis réapparition au milieu ; 3 chutes = fin
 	await new_game()
