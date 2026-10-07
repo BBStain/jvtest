@@ -33,7 +33,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - Pendant le blocage, on avance beaucoup plus lentement, on saute moins haut, et on ne peut ni dasher ni attaquer.
 - Si le bouclier casse, on arrête de bloquer et on ne peut plus attaquer pendant 1,5 seconde, mais on peut toujours bouger, sauter et dasher.
 - Le bouclier regagne 1 point toutes les 2 secondes quand on ne bloque pas.
-- **Course** (tenir LB ou Shift) : on va 1,5 fois plus vite, donc on saute aussi plus loin. Toutes les actions marchent en courant.
+- **Course** (tenir LT ou Shift) : on va 1,5 fois plus vite, donc on saute aussi plus loin. Toutes les actions marchent en courant.
 - Courir vide une **jauge d'endurance**, qui apparaît à côté du perso, du côté opposé à l'adversaire. Bloquer en courant la vide plus de 2 fois plus vite. Quand on arrête de courir, elle remonte. Si elle est vide, on ne peut plus courir tant qu'elle n'est pas remontée un peu.
 - La partie s'arrête quand il ne reste qu'un joueur en vie.
 
@@ -45,8 +45,8 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 | Sauter (2 fois en l'air) | A | Espace | L |
 | Attaque légère | X | F | K |
 | Attaque lourde (garder pour charger) | Y | R | I |
-| Dash (dans la direction du stick) | Gâchette gauche LT | G | J |
-| Courir (maintenir) | LB | Shift gauche | Shift droit |
+| Dash (dans la direction du stick) | LB | G | J |
+| Courir (maintenir) | Gâchette gauche LT | Shift gauche | Shift droit |
 | Bloquer (maintenir) | B | C | U |
 | Descendre d'une plateforme | Bas | S | Flèche bas |
 | Rejouer à la fin | Start ou A | Entrée | Entrée |
