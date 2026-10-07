@@ -180,6 +180,63 @@ func _ready() -> void:
 	var jump_height := start_y - top_y
 	check(jump_height > 30 and jump_height < 100, "Blocage : saut moins haut (%.0f px)" % jump_height)
 
+	# 4g) Attaque rapide plus longue : touche à 100 px
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 700
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(36)
+	check(p2.lives == 2, "Attaque rapide longue : touche à 100 px (vies = %d)" % p2.lives)
+
+	# 4h) Attaque lourde non chargée : trop courte à 130 px
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 730
+	p1.input_source = Scripted.new(func(s, f): s.heavy_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(60)
+	check(p2.lives == 3, "Lourde sans charge : rate à 130 px (vies = %d)" % p2.lives)
+
+	# 4i) Attaque lourde chargée : l'arme grandit, touche à 130 px, et le perso est immobile pendant la frappe
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 730
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 30
+		s.heavy_held = f >= 30 and f < 200
+		s.stick.x = -1.0 if f >= 88 else 0.0)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(80)
+	check(p1.is_charging_heavy() and p1.heavy_scale() > 1.5, "Lourde chargée : l'arme grandit (taille x%.2f)" % p1.heavy_scale())
+	await shot("10_charge")
+	var swing_frames := 0
+	var swing_moved := 0.0
+	for i in 40:
+		var x_before_frame := p1.position.x
+		await step(1)
+		if p1.is_heavy_swinging():
+			swing_frames += 1
+			swing_moved += absf(p1.position.x - x_before_frame)
+	check(swing_frames > 5, "Lourde chargée : la frappe part toute seule à pleine charge (%d frames)" % swing_frames)
+	check(swing_moved < 1.0, "Lourde chargée : immobile pendant la frappe (bougé de %.1f px)" % swing_moved)
+	check(p2.lives == 2, "Lourde chargée : touche à 130 px (vies = %d)" % p2.lives)
+
+	# 4j) Plateforme mobile : le joueur posé dessus est transporté
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	var shuttle: Node2D = game.get_node("Map/ZoneDuel/NavetteHaute")
+	p1.position = shuttle.position + Vector2(0, -45)
+	await step(20)
+	var rider_x := p1.position.x
+	var shuttle_x := shuttle.position.x
+	await step(60)
+	var shuttle_moved := shuttle.position.x - shuttle_x
+	check(p1.is_on_floor() and shuttle_moved > 50 and absf((p1.position.x - rider_x) - shuttle_moved) < 6,
+		"Plateforme mobile : J1 est transporté (plateforme %.0f px, J1 %.0f px)" % [shuttle_moved, p1.position.x - rider_x])
+
 	# 5) Dash = intouchable
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]

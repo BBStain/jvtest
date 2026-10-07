@@ -49,12 +49,20 @@ const AIR_DASHES := 1                   ## dashs possibles en l'air avant de ret
 const ATTACK_STARTUP := 0.02            ## délai avant que le coup touche
 const ATTACK_ACTIVE := 0.08             ## durée pendant laquelle le coup peut toucher
 const ATTACK_COOLDOWN := 0.22           ## temps de recharge entre deux attaques
-const ATTACK_REACH := 48.0              ## distance entre le centre du perso et le centre du coup
-const ATTACK_RADIUS := 26.0             ## taille de la zone qui touche
+const ATTACK_REACH := 72.0              ## distance entre le centre du perso et le centre du coup
+const ATTACK_RADIUS := 28.0             ## taille de la zone qui touche
 const CLASH_LOCKOUT := 0.08             ## petit temps mort après un choc d'attaques
 
 # --- Attaque lourde (Y) : un arc de cercle du dessus de la tête jusqu'aux pieds, devant soi ---
-const HEAVY_STARTUP := 0.18             ## on lève l'arme avant de frapper
+# On la charge en gardant Y appuyé : plus on charge, plus l'arme grandit et frappe loin.
+# On frappe en lâchant Y (ou tout seul quand la charge est au maximum).
+# Pendant la frappe, le perso est immobilisé.
+const HEAVY_STARTUP := 0.18             ## charge minimale : on lève l'arme avant de frapper
+const HEAVY_CHARGE_MAX := 1.0           ## au bout de ce temps la charge est pleine et on frappe tout seul
+const HEAVY_CHARGE_GROWTH := 2.0        ## à pleine charge, l'arme est 2 fois plus longue
+const HEAVY_CHARGE_TIP_GROWTH := 1.5    ## à pleine charge, la zone qui touche est 1,5 fois plus grosse
+const HEAVY_CHARGE_KNOCKBACK := 1.5     ## à pleine charge, on projette 1,5 fois plus fort
+const HEAVY_CHARGE_MOVE_MULT := 0.4     ## en chargeant, on avance lentement
 const HEAVY_ACTIVE := 0.18              ## durée du balayage
 const HEAVY_COOLDOWN := 0.65
 const HEAVY_ARC_RADIUS := 56.0          ## distance entre le centre du perso et le bout de l'arme
@@ -110,6 +118,9 @@ var _attack_dir := Vector2.RIGHT
 var _attack_has_hit := false
 var _attack_heavy := false              ## true = attaque lourde en cours
 var _attack_cooldown_timer := 0.0
+var _heavy_charging := false            ## true = on garde Y pour charger l'attaque lourde
+var _charge_time := 0.0
+var _heavy_charge := 0.0                ## 0 = pas chargée, 1 = charge pleine
 
 var shield := SHIELD_MAX
 var _blocking := false
@@ -175,6 +186,8 @@ func physics_tick(input: InputState, delta: float) -> void:
 
 	if is_dashing():
 		_tick_dash(delta)
+	elif is_heavy_swinging():
+		velocity = Vector2.ZERO  # immobilisé pendant la frappe lourde
 	else:
 		_tick_movement(input, on_floor, delta)
 
@@ -184,7 +197,7 @@ func physics_tick(input: InputState, delta: float) -> void:
 		_try_start_attack(false)
 	elif input.heavy_pressed:
 		_try_start_attack(true)
-	_tick_attack(delta)
+	_tick_attack(input, delta)
 
 	move_and_slide()
 	queue_redraw()
@@ -226,7 +239,11 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 		accel = KNOCKBACK_ACCEL
 	elif _wall_jump_timer > 0.0:
 		accel = WALL_JUMP_ACCEL
-	var speed := RUN_SPEED * BLOCK_SPEED_MULT if _blocking else RUN_SPEED
+	var speed := RUN_SPEED
+	if _blocking:
+		speed *= BLOCK_SPEED_MULT
+	elif _heavy_charging:
+		speed *= HEAVY_CHARGE_MOVE_MULT
 	velocity.x = move_toward(velocity.x, input.stick.x * speed, accel * delta)
 
 	# Gravité (plus forte si on a lâché le saut pendant la montée = petit saut)
@@ -287,6 +304,18 @@ func _tick_dash(delta: float) -> void:
 func _try_start_attack(heavy: bool) -> void:
 	if not can_attack():
 		return
+	_aim_at_target()
+	_attack_heavy = heavy
+	_attack_time = 0.0
+	_attack_has_hit = false
+	_heavy_charging = heavy
+	_charge_time = 0.0
+	_heavy_charge = 0.0
+	_attack_cooldown_timer = HEAVY_COOLDOWN if heavy else ATTACK_COOLDOWN
+
+
+## Se tourne vers l'adversaire visé.
+func _aim_at_target() -> void:
 	if target != null and not target.eliminated:
 		var to_target := target.global_position - global_position
 		_attack_dir = to_target.normalized() if to_target.length() > 1.0 else Vector2(facing, 0.0)
@@ -294,14 +323,21 @@ func _try_start_attack(heavy: bool) -> void:
 		_attack_dir = Vector2(facing, 0.0)
 	if absf(_attack_dir.x) > 0.1:
 		facing = signf(_attack_dir.x)
-	_attack_heavy = heavy
-	_attack_time = 0.0
-	_attack_has_hit = false
-	_attack_cooldown_timer = HEAVY_COOLDOWN if heavy else ATTACK_COOLDOWN
 
 
-func _tick_attack(delta: float) -> void:
+func _tick_attack(input: InputState, delta: float) -> void:
 	if _attack_time < 0.0:
+		return
+	if _heavy_charging:
+		# On charge tant que Y est gardé ; on frappe en le lâchant, ou quand la charge est pleine.
+		_charge_time += delta
+		_heavy_charge = clampf((_charge_time - HEAVY_STARTUP) / (HEAVY_CHARGE_MAX - HEAVY_STARTUP), 0.0, 1.0)
+		if (_charge_time >= HEAVY_STARTUP and not input.heavy_held) or _charge_time >= HEAVY_CHARGE_MAX:
+			_heavy_charging = false
+			_aim_at_target()  # l'adversaire a pu bouger pendant la charge
+			_attack_time = HEAVY_STARTUP
+			_attack_cooldown_timer = HEAVY_COOLDOWN
+			velocity = Vector2.ZERO  # la frappe commence : on s'arrête net
 		return
 	_attack_time += delta
 	if _attack_time >= _attack_startup() + _attack_active():
@@ -324,11 +360,17 @@ func _heavy_angle() -> float:
 
 ## Position du bout de l'arme (par rapport au centre du perso) pour un angle donné.
 func _heavy_tip(angle: float) -> Vector2:
-	return Vector2(facing * cos(angle), sin(angle)) * HEAVY_ARC_RADIUS
+	return Vector2(facing * cos(angle), sin(angle)) * HEAVY_ARC_RADIUS * heavy_scale()
+
+
+## Taille de l'arme lourde : 1 sans charge, HEAVY_CHARGE_GROWTH à pleine charge.
+func heavy_scale() -> float:
+	return lerpf(1.0, HEAVY_CHARGE_GROWTH, _heavy_charge)
 
 
 func _cancel_attack() -> void:
 	_attack_time = -1.0
+	_heavy_charging = false
 
 
 # --- Questions que game.gd pose au combattant ---
@@ -349,8 +391,17 @@ func is_attacking() -> bool:
 	return _attack_time >= 0.0
 
 
+func is_charging_heavy() -> bool:
+	return _heavy_charging
+
+
+## En train de donner le coup lourd (après la charge) : le perso est immobilisé.
+func is_heavy_swinging() -> bool:
+	return _attack_heavy and _attack_time >= 0.0 and not _heavy_charging
+
+
 func _is_attack_startup_or_active() -> bool:
-	return _attack_time >= 0.0 and _attack_time < _attack_startup() + _attack_active()
+	return _attack_time >= 0.0 and (_heavy_charging or _attack_time < _attack_startup() + _attack_active())
 
 
 func is_blocking() -> bool:
@@ -364,7 +415,7 @@ func can_attack() -> bool:
 
 ## Le coup peut-il toucher en ce moment ?
 func is_attack_active() -> bool:
-	return _attack_time >= _attack_startup() and _attack_time < _attack_startup() + _attack_active() \
+	return not _heavy_charging and _attack_time >= _attack_startup() and _attack_time < _attack_startup() + _attack_active() \
 		and not _attack_has_hit
 
 
@@ -380,11 +431,11 @@ func attack_center() -> Vector2:
 
 
 func attack_radius() -> float:
-	return HEAVY_TIP_RADIUS if _attack_heavy else ATTACK_RADIUS
+	return HEAVY_TIP_RADIUS * lerpf(1.0, HEAVY_CHARGE_TIP_GROWTH, _heavy_charge) if _attack_heavy else ATTACK_RADIUS
 
 
 func attack_knockback() -> float:
-	return HEAVY_KNOCKBACK if _attack_heavy else HIT_KNOCKBACK
+	return HEAVY_KNOCKBACK * lerpf(1.0, HEAVY_CHARGE_KNOCKBACK, _heavy_charge) if _attack_heavy else HIT_KNOCKBACK
 
 
 func attack_direction() -> Vector2:
@@ -529,9 +580,18 @@ func _draw() -> void:
 				trail.append(_heavy_tip(lerpf(start, angle, i / 8.0)))
 			draw_polyline(trail, Color(color.lightened(0.5), 0.5), 10.0)
 		var tip := _heavy_tip(angle)
-		var blade_color := Color(1, 1, 1, 0.95) if _attack_time >= HEAVY_STARTUP else Color(1, 1, 1, 0.6)
-		draw_line(tip * 0.2, tip, blade_color, 9.0)
-		draw_circle(tip, 9.0, color.lightened(0.6))
+		var weapon_scale := heavy_scale()
+		var blade_color := Color(1, 1, 1, 0.95)
+		if _heavy_charging:
+			blade_color = Color(1, 1, 1, lerpf(0.55, 0.9, _heavy_charge))
+			# La charge : un halo qui grossit au bout de l'arme, qui clignote quand c'est plein
+			var halo := attack_radius()
+			var full_blink := _heavy_charge >= 1.0 or (_heavy_charge > 0.95 and int(_blink_clock / 0.05) % 2 == 0)
+			draw_circle(tip, halo, Color(color.lightened(0.5), 0.15 + 0.25 * _heavy_charge))
+			if full_blink:
+				draw_arc(tip, halo, 0.0, TAU, 24, Color(1, 1, 1, 0.9), 2.0)
+		draw_line(tip * 0.2, tip, blade_color, 9.0 * sqrt(weapon_scale))
+		draw_circle(tip, 9.0 * sqrt(weapon_scale), color.lightened(0.6))
 
 	# L'attaque légère : une barre blanche orientée vers l'adversaire
 	elif is_attacking():
