@@ -416,6 +416,25 @@ func _ready() -> void:
 	await step(60)
 	check(p2.lives == 2 and absf(p2.position.x - 680 - 100) < 8, "Coup léger : J2 repoussé de %.0f px (visé : 100)" % (p2.position.x - 680))
 
+	# 9c ter) À 3 joueurs : J1 touche J2 pendant que J2 touche J3 -> J2 et J3 perdent une vie (l'ordre ne compte pas)
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}]]
+	await new_game()
+	GameSetup.player_devices = []
+	var f3: Array = game.fighters
+	for fi in f3:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(40)
+	f3[0].position = Vector2(500, 540); f3[1].position = Vector2(560, 540); f3[2].position = Vector2(620, 540)
+	for k in 2:
+		var fi: Fighter = f3[k]
+		fi._attack_heavy = false
+		fi._attack_has_hit = false
+		fi._attack_dir = Vector2.RIGHT
+		fi._attack_time = Fighter.ATTACK_STARTUP
+	await step(1)
+	check(f3[0].lives == 3 and f3[1].lives == 2 and f3[2].lives == 2,
+		"3 joueurs : coups en chaîne tous comptés (J1 %d, J2 %d, J3 %d)" % [f3[0].lives, f3[1].lives, f3[2].lives])
+
 	# 9d) Dash vers le haut sans tenir le saut : il n'est plus coupé net (vrai 3e saut)
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]

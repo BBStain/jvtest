@@ -167,14 +167,21 @@ func _resolve_hits() -> void:
 				landed.append({"attacker": attacker, "victim": victim, "dir": hit_dir,
 					"knockback": attacker.attack_knockback(), "heavy": attacker.is_heavy_attack()})
 				break
+	# Deux joueurs qui se touchent l'un l'autre : choc, leurs deux coups sont annulés.
+	var clashed: Array[Fighter] = []
+	for hit in landed:
+		for other in landed:
+			if other.attacker == hit.victim and other.victim == hit.attacker and not hit.attacker in clashed:
+				clashed.append(hit.attacker)
+				clashed.append(hit.victim)
+				_clash(hit.attacker, hit.victim, (hit.attacker.global_position + hit.victim.global_position) / 2.0)
+	# Les autres coups touchent tous, même si leur auteur est lui-même touché à la même frame
+	# (à 3 ou 4 joueurs, l'ordre des joueurs ne doit pas décider qui touche).
 	for hit in landed:
 		var attacker: Fighter = hit.attacker
 		var victim: Fighter = hit.victim
-		for other in landed:
-			if other.attacker == victim and other.victim == attacker and attacker.is_attack_active() and victim.is_attack_active():
-				_clash(attacker, victim, (attacker.global_position + victim.global_position) / 2.0)
-		if not attacker.is_attack_active():
-			continue  # son attaque vient d'être annulée par un choc
+		if attacker in clashed:
+			continue
 		if not victim.can_be_hit():
 			continue  # déjà touché cette frame par quelqu'un d'autre
 		if victim.is_blocking():
