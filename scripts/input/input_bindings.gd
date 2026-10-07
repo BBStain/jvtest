@@ -46,6 +46,22 @@ const GAMEPAD_AXES := {
 const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "heavy", "dash", "block", "sprint"]
 const DEADZONE := 0.35
 
+## Correctif pour la version navigateur (Godot 4.3) : le navigateur envoie les gâchettes LT / RT
+## comme des axes n°6 et 7, mais la correspondance "standard" fournie par Godot les attend comme
+## des boutons. Résultat : LT et RT ne faisaient rien dans le navigateur. On remplace cette
+## correspondance par une version où les gâchettes sont lues sur les axes 6 et 7.
+const WEB_STANDARD_MAPPING := "standard,Standard Gamepad Mapping,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:+a6,righttrigger:+a7,a:b0,b:b1,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,back:b8,start:b9,leftstick:b10,rightstick:b11,dpup:b12,dpdown:b13,dpleft:b14,dpright:b15,guide:b16"
+
+static var _web_triggers_fixed := false
+
+
+## À appeler au démarrage (écran de connexion et combat). Ne fait rien hors du navigateur.
+static func fix_web_triggers(force := false) -> void:
+	if _web_triggers_fixed or not (force or OS.has_feature("web")):
+		return
+	Input.add_joy_mapping(WEB_STANDARD_MAPPING, true)
+	_web_triggers_fixed = true
+
 
 static func action_prefix(player_index: int) -> String:
 	return "p%d_" % (player_index + 1)
@@ -90,6 +106,7 @@ static func register_player(player_index: int, devices: Array) -> void:
 
 ## Actions communes à tout le monde : rejouer / revenir au menu à la fin de la partie.
 static func register_menu_actions() -> void:
+	fix_web_triggers()
 	_reset_action("restart")
 	for key in [KEY_ENTER, KEY_KP_ENTER]:
 		var restart_key := InputEventKey.new()

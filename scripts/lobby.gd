@@ -21,6 +21,7 @@ var _slots: Array[Dictionary] = []   ## les cases affichées : {"panel", "title"
 
 
 func _ready() -> void:
+	InputBindings.fix_web_triggers()
 	_build_slots()
 	_start_button.pressed.connect(_start_game)
 	Input.joy_connection_changed.connect(_on_joy_connection_changed)
