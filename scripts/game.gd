@@ -153,12 +153,26 @@ func _resolve_hits() -> void:
 			if victim == attacker or not victim.can_be_hit():
 				continue
 			if _circle_hits_rect(attacker.attack_center(), attacker.attack_radius(), victim.body_rect()):
+				if victim.is_blocking():
+					_hit_shield(attacker, victim)
+					break
 				var hit_dir := (victim.global_position - attacker.global_position).normalized()
 				if not attacker.is_heavy_attack():
 					hit_dir = attacker.attack_direction()
 				victim.take_hit(hit_dir, attacker.attack_knockback())
 				attacker.mark_attack_hit()
 				break
+
+
+## Le coup tombe sur un bouclier : personne ne perd de vie, l'attaquant est repoussé mais peut
+## refrapper tout de suite, et le bouclier perd 1 point (2 pour une attaque lourde).
+func _hit_shield(attacker: Fighter, victim: Fighter) -> void:
+	var push := victim.global_position - attacker.global_position
+	push.y = 0.0
+	push = push.normalized() if push.length() > 1.0 else Vector2(attacker.facing, 0.0)
+	attacker.hit_shield(-push)
+	if victim.absorb_hit(push, attacker.is_heavy_attack()):
+		_spawn_clash_mark(victim.global_position, true)
 
 
 func _circle_hits_rect(center: Vector2, radius: float, rect: Rect2) -> bool:
