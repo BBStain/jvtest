@@ -19,7 +19,7 @@ const LOBBY_SCENE := "res://scenes/lobby.tscn"
 const CAMERA_MARGIN := Vector2(700, 450)   ## espace gardé autour des joueurs (en pixels)
 const CAMERA_ZOOM_MIN := 0.3               ## zoom le plus éloigné (plus petit = voit plus loin)
 const CAMERA_ZOOM_MAX := 1.2               ## zoom le plus proche
-const CAMERA_SMOOTHING := 4.0              ## plus grand = la caméra réagit plus vite
+const CAMERA_SMOOTHING := 6.0              ## plus grand = la caméra réagit plus vite
 
 var fighters: Array[Fighter] = []
 var _match_over := false
@@ -145,7 +145,10 @@ func _spawn_clash_mark(where: Vector2, heavy_countered: bool) -> void:
 	add_child(mark)
 
 
+## On repère d'abord tous les coups de la frame, puis on les applique : si deux joueurs se
+## touchent exactement en même temps, les deux perdent une vie (sinon le joueur 1 gagnerait toujours).
 func _resolve_hits() -> void:
+	var landed: Array[Dictionary] = []
 	for attacker in fighters:
 		if not attacker.is_attack_active():
 			continue
@@ -153,25 +156,32 @@ func _resolve_hits() -> void:
 			if victim == attacker or not victim.can_be_hit():
 				continue
 			if _circle_hits_rect(attacker.attack_center(), attacker.attack_radius(), victim.body_rect()):
-				if victim.is_blocking():
-					_hit_shield(attacker, victim)
-					break
 				var hit_dir := (victim.global_position - attacker.global_position).normalized()
 				if not attacker.is_heavy_attack():
 					hit_dir = attacker.attack_direction()
-				victim.take_hit(hit_dir, attacker.attack_knockback())
-				attacker.mark_attack_hit()
+				landed.append({"attacker": attacker, "victim": victim, "dir": hit_dir,
+					"knockback": attacker.attack_knockback(), "heavy": attacker.is_heavy_attack()})
 				break
+	for hit in landed:
+		var attacker: Fighter = hit.attacker
+		var victim: Fighter = hit.victim
+		if not victim.can_be_hit():
+			continue  # déjà touché cette frame par quelqu'un d'autre
+		if victim.is_blocking():
+			_hit_shield(attacker, victim, hit.heavy)
+			continue
+		victim.take_hit(hit.dir, hit.knockback)
+		attacker.mark_attack_hit()
 
 
 ## Le coup tombe sur un bouclier : personne ne perd de vie, l'attaquant est repoussé mais peut
 ## refrapper tout de suite, et le bouclier perd 1 point (2 pour une attaque lourde).
-func _hit_shield(attacker: Fighter, victim: Fighter) -> void:
+func _hit_shield(attacker: Fighter, victim: Fighter, heavy: bool) -> void:
 	var push := victim.global_position - attacker.global_position
 	push.y = 0.0
 	push = push.normalized() if push.length() > 1.0 else Vector2(attacker.facing, 0.0)
 	attacker.hit_shield(-push)
-	if victim.absorb_hit(push, attacker.is_heavy_attack()):
+	if victim.absorb_hit(push, heavy):
 		_spawn_clash_mark(victim.global_position, true)
 
 

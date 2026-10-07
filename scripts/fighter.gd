@@ -17,38 +17,39 @@ const PLATFORM_LAYER := 3  ## numéro de la couche "plateformes_traversables"
 const BODY_SIZE := Vector2(20, 60)      ## largeur, hauteur de la barre (en pixels)
 
 # --- Déplacement ---
-const RUN_SPEED := 460.0                ## vitesse de course max
-const GROUND_ACCEL := 5000.0            ## à quelle vitesse on atteint la vitesse max au sol
-const AIR_ACCEL := 3000.0               ## pareil, en l'air
-const GRAVITY := 2600.0
-const SHORT_HOP_GRAVITY := 5200.0       ## gravité quand on lâche le saut tôt (petit saut)
-const MAX_FALL_SPEED := 1000.0
-const FAST_FALL_SPEED := 1500.0         ## chute rapide en tenant bas
-const JUMP_SPEED := 850.0
-const DOUBLE_JUMP_SPEED := 780.0
+const RUN_SPEED := 560.0                ## vitesse de course max
+const GROUND_ACCEL := 8500.0            ## à quelle vitesse on atteint la vitesse max au sol
+const AIR_ACCEL := 5500.0               ## pareil, en l'air
+const GRAVITY := 2300.0
+const SHORT_HOP_GRAVITY := 4800.0       ## gravité quand on lâche le saut tôt (petit saut)
+const MAX_FALL_SPEED := 1050.0
+const FAST_FALL_SPEED := 1700.0         ## chute rapide en tenant bas
+const JUMP_SPEED := 820.0
+const DOUBLE_JUMP_SPEED := 760.0
 const AIR_JUMPS := 1                    ## 1 = double saut
-const COYOTE_TIME := 0.08               ## on peut encore sauter un instant après avoir quitté le bord
-const JUMP_BUFFER := 0.1                ## un saut appuyé juste avant d'atterrir compte quand même
+const COYOTE_TIME := 0.1                ## on peut encore sauter un instant après avoir quitté le bord
+const JUMP_BUFFER := 0.12               ## un saut appuyé juste avant d'atterrir compte quand même
 const DROP_THROUGH_TIME := 0.22         ## temps pendant lequel on traverse les plateformes après "bas"
 
 # --- Murs ---
 const WALL_SLIDE_SPEED := 160.0         ## vitesse de glissade le long d'un mur (en tenant vers le mur)
 const WALL_JUMPS := 2                   ## sauts rendus quand on touche un mur (saut mural + 1 en l'air)
 const WALL_JUMP_PUSH := 480.0           ## force qui éjecte du mur quand on saute
-const WALL_JUMP_LOCK := 0.12            ## petit temps où l'on contrôle moins bien après un saut mural
-const WALL_JUMP_ACCEL := 1200.0
+const WALL_JUMP_LOCK := 0.1             ## petit temps où l'on contrôle moins bien après un saut mural
+const WALL_JUMP_ACCEL := 2200.0
 
 # --- Dash ---
-const DASH_SPEED := 1150.0
+const DASH_SPEED := 1300.0
 const DASH_TIME := 0.14
-const DASH_COOLDOWN := 0.45             ## temps de recharge
-const DASH_END_KEEP := 0.4              ## part de la vitesse gardée à la fin du dash
+const DASH_COOLDOWN := 0.32             ## temps de recharge
+const DASH_END_KEEP := 0.55             ## part de la vitesse gardée à la fin du dash
 const AIR_DASHES := 1                   ## dashs possibles en l'air avant de retoucher le sol
 
 # --- Attaque légère (X) : un coup droit vers l'adversaire ---
 const ATTACK_STARTUP := 0.02            ## délai avant que le coup touche
 const ATTACK_ACTIVE := 0.08             ## durée pendant laquelle le coup peut toucher
-const ATTACK_COOLDOWN := 0.22           ## temps de recharge entre deux attaques
+const ATTACK_COOLDOWN := 0.13           ## temps de recharge entre deux attaques (à peine plus que le coup)
+const ATTACK_BUFFER := 0.12             ## X appuyé un peu trop tôt compte quand même : on peut marteler
 const ATTACK_REACH := 72.0              ## distance entre le centre du perso et le centre du coup
 const ATTACK_RADIUS := 28.0             ## taille de la zone qui touche
 const CLASH_LOCKOUT := 0.08             ## petit temps mort après un choc d'attaques
@@ -57,14 +58,14 @@ const CLASH_LOCKOUT := 0.08             ## petit temps mort après un choc d'att
 # On la charge en gardant Y appuyé : plus on charge, plus l'arme grandit et frappe loin.
 # On frappe en lâchant Y (ou tout seul quand la charge est au maximum).
 # Pendant la frappe, le perso est immobilisé.
-const HEAVY_STARTUP := 0.18             ## charge minimale : on lève l'arme avant de frapper
+const HEAVY_STARTUP := 0.14             ## charge minimale : on lève l'arme avant de frapper
 const HEAVY_CHARGE_MAX := 1.0           ## au bout de ce temps la charge est pleine et on frappe tout seul
 const HEAVY_CHARGE_GROWTH := 2.0        ## à pleine charge, l'arme est 2 fois plus longue
 const HEAVY_CHARGE_TIP_GROWTH := 1.5    ## à pleine charge, la zone qui touche est 1,5 fois plus grosse
 const HEAVY_CHARGE_KNOCKBACK := 1.5     ## à pleine charge, on projette 1,5 fois plus fort
-const HEAVY_CHARGE_MOVE_MULT := 0.4     ## en chargeant, on avance lentement
-const HEAVY_ACTIVE := 0.18              ## durée du balayage
-const HEAVY_COOLDOWN := 0.65
+const HEAVY_CHARGE_MOVE_MULT := 0.6     ## en chargeant, on avance lentement
+const HEAVY_ACTIVE := 0.15              ## durée du balayage
+const HEAVY_COOLDOWN := 0.5
 const HEAVY_ARC_RADIUS := 56.0          ## distance entre le centre du perso et le bout de l'arme
 const HEAVY_TIP_RADIUS := 24.0          ## taille de la zone qui touche au bout de l'arme
 const HEAVY_ARC_START := -100.0         ## angle de départ en degrés (-90 = droit au-dessus de la tête)
@@ -97,8 +98,8 @@ const STAMINA_SHOW_TIME := 1.0          ## la jauge reste affichée ce temps apr
 const INVINCIBLE_TIME := 0.55           ## doit rester plus long que ATTACK_COOLDOWN
 const HIT_KNOCKBACK := 620.0
 const CLASH_PUSH := 450.0
-const KNOCKBACK_TIME := 0.22            ## durée pendant laquelle on contrôle moins bien après un coup / un choc
-const KNOCKBACK_ACCEL := 1500.0
+const KNOCKBACK_TIME := 0.15            ## durée pendant laquelle on contrôle moins bien après un coup / un choc
+const KNOCKBACK_ACCEL := 2500.0
 
 const START_LIVES := 3
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
@@ -119,6 +120,7 @@ var _jump_buffer_timer := 0.0
 var _drop_timer := 0.0
 var _wall_normal_x := 0.0               ## -1 / 1 quand on glisse contre un mur, 0 sinon
 var _wall_jump_timer := 0.0
+var _jump_rising := false              ## true = on monte grâce à un saut (pour le petit saut)
 
 var _dash_timer := 0.0
 var _dash_cooldown_timer := 0.0
@@ -129,6 +131,7 @@ var _attack_dir := Vector2.RIGHT
 var _attack_has_hit := false
 var _attack_heavy := false              ## true = attaque lourde en cours
 var _attack_cooldown_timer := 0.0
+var _attack_buffer_timer := 0.0
 var _heavy_charging := false            ## true = on garde Y pour charger l'attaque lourde
 var _charge_time := 0.0
 var _heavy_charge := 0.0                ## 0 = pas chargée, 1 = charge pleine
@@ -209,10 +212,15 @@ func physics_tick(input: InputState, delta: float) -> void:
 	else:
 		_tick_movement(input, on_floor, delta)
 
+	# X est gardé en mémoire un court instant : en martelant, le coup suivant part dès que possible.
+	if input.attack_pressed:
+		_attack_buffer_timer = ATTACK_BUFFER
 	if _blocking:
 		pass  # pas d'attaque en bloquant
-	elif input.attack_pressed:
-		_try_start_attack(false)
+	elif _attack_buffer_timer > 0.0:
+		if can_attack():
+			_attack_buffer_timer = 0.0
+			_try_start_attack(false)
 	elif input.heavy_pressed:
 		_try_start_attack(true)
 	_tick_attack(input, delta)
@@ -227,6 +235,7 @@ func _tick_timers(delta: float) -> void:
 	_drop_timer -= delta
 	_dash_cooldown_timer -= delta
 	_attack_cooldown_timer -= delta
+	_attack_buffer_timer -= delta
 	_invincible_timer -= delta
 	_knockback_timer -= delta
 	_wall_jump_timer -= delta
@@ -289,9 +298,12 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 		speed *= HEAVY_CHARGE_MOVE_MULT
 	velocity.x = move_toward(velocity.x, input.stick.x * speed, accel * delta)
 
-	# Gravité (plus forte si on a lâché le saut pendant la montée = petit saut)
+	# Gravité (plus forte si on a lâché le saut pendant la montée d'un saut = petit saut).
+	# Seulement pour un saut : un dash vers le haut ou une projection ne sont pas coupés.
+	if velocity.y >= 0.0:
+		_jump_rising = false
 	var gravity := GRAVITY
-	if velocity.y < 0.0 and not input.jump_held:
+	if velocity.y < 0.0 and _jump_rising and not input.jump_held:
 		gravity = SHORT_HOP_GRAVITY
 	velocity.y += gravity * delta
 	var max_fall := FAST_FALL_SPEED if (input.stick.y > 0.5 and not on_floor) else MAX_FALL_SPEED
@@ -306,15 +318,18 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 	if _jump_buffer_timer > 0.0:
 		if on_floor or _coyote_timer > 0.0:
 			velocity.y = -JUMP_SPEED * jump_mult
+			_jump_rising = true
 			_jump_buffer_timer = 0.0
 			_coyote_timer = 0.0
 		elif input.jump_pressed and is_wall_sliding() and _air_jumps_left > 0:
 			velocity = Vector2(_wall_normal_x * WALL_JUMP_PUSH, -JUMP_SPEED * jump_mult)
+			_jump_rising = true
 			_air_jumps_left -= 1
 			_jump_buffer_timer = 0.0
 			_wall_jump_timer = WALL_JUMP_LOCK
 		elif input.jump_pressed and _air_jumps_left > 0:
 			velocity.y = -DOUBLE_JUMP_SPEED * jump_mult
+			_jump_rising = true
 			_air_jumps_left -= 1
 			_jump_buffer_timer = 0.0
 
@@ -334,6 +349,7 @@ func _try_start_dash(input: InputState, on_floor: bool) -> void:
 		_air_dashes_left -= 1
 	_dash_timer = DASH_TIME
 	_dash_cooldown_timer = DASH_COOLDOWN
+	_jump_rising = false
 	_cancel_attack()
 
 
@@ -511,6 +527,7 @@ func clash(push_dir: Vector2, heavy_countered := false) -> void:
 	_cancel_attack()
 	_attack_cooldown_timer = HEAVY_COUNTER_COOLDOWN if heavy_countered else CLASH_LOCKOUT
 	velocity = push_dir * (HEAVY_COUNTER_PUSH if heavy_countered else CLASH_PUSH) + Vector2(0.0, -150.0)
+	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
 
 
@@ -519,6 +536,7 @@ func hit_shield(push_dir: Vector2) -> void:
 	_cancel_attack()
 	_attack_cooldown_timer = 0.0
 	velocity = push_dir * SHIELD_HIT_PUSH + Vector2(0.0, -120.0)
+	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
 
 
@@ -542,6 +560,7 @@ func take_hit(hit_dir: Vector2, knockback := HIT_KNOCKBACK) -> void:
 	_cancel_attack()
 	_dash_timer = 0.0
 	velocity = hit_dir * knockback + Vector2(0.0, -200.0)
+	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
 	_lose_life()
 
@@ -554,6 +573,12 @@ func fall_out(respawn_position: Vector2) -> void:
 	velocity = Vector2.ZERO
 	_air_jumps_left = AIR_JUMPS
 	_air_dashes_left = AIR_DASHES
+	# On repart à neuf : plus de recul ni de saut en cours venant d'avant la chute.
+	_knockback_timer = 0.0
+	_wall_jump_timer = 0.0
+	_drop_timer = 0.0
+	_jump_buffer_timer = 0.0
+	_jump_rising = false
 	_lose_life()
 
 
