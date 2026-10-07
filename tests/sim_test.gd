@@ -130,5 +130,39 @@ func _ready() -> void:
 	check(p1.eliminated and game._match_over, "J1 éliminé après 3 chutes, partie finie")
 	await shot("04_fin")
 
+	# 9) La caméra dézoome quand les joueurs s'éloignent, zoome quand ils se rapprochent
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 300; p2.position.x = 980
+	for i in 120:
+		await get_tree().process_frame
+	var far_zoom: float = game.get_node("Camera").zoom.x
+	p1.position.x = 600; p2.position.x = 680
+	for i in 120:
+		await get_tree().process_frame
+	var near_zoom: float = game.get_node("Camera").zoom.x
+	check(near_zoom > far_zoom, "Caméra : zoom loin %.2f < zoom proche %.2f" % [far_zoom, near_zoom])
+	var cam_x: float = game.get_node("Camera").position.x
+	check(absf(cam_x - 640) < 10, "Caméra centrée entre les joueurs (x=%.0f)" % cam_x)
+	await shot("05_camera_proche")
+
+	# 10) Écran de connexion : il faut 2 joueurs pour lancer
+	game.queue_free(); game = null
+	var lobby: Node = load("res://scenes/lobby.tscn").instantiate()
+	add_child(lobby)
+	await get_tree().process_frame
+	var button: Button = lobby.get_node("Center/Layout/StartButton")
+	check(button.disabled, "Lobby : bouton désactivé sans joueur")
+	lobby._join({"type": "keyboard", "layout": 0})
+	lobby._join({"type": "keyboard", "layout": 0})
+	check(button.disabled and lobby._joined.size() == 1, "Lobby : 1 joueur (pas de doublon), toujours désactivé")
+	lobby._join({"type": "joypad", "id": 0})
+	check(not button.disabled, "Lobby : 2 joueurs, bouton activé")
+	await shot("06_lobby")
+	lobby._leave({"type": "joypad", "id": 0})
+	check(button.disabled, "Lobby : un joueur part, bouton désactivé")
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)

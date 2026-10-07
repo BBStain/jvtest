@@ -1,9 +1,9 @@
+class_name Game
 extends Node2D
 ## Le chef d'orchestre de la partie : crée les joueurs, leur passe les commandes,
-## gère les coups, les chocs d'attaques, les chutes hors de la map et la fin de partie.
+## gère les coups, les chocs d'attaques, les chutes hors de la map, la caméra et la fin de partie.
+## Les joueurs et leurs appareils viennent de l'écran de connexion (lobby.gd, via GameSetup).
 
-const PLAYER_COUNT := 2      ## nombre de joueurs (le code est prêt pour 4)
-const MAX_PLAYERS := 4
 const PLAYER_COLORS := [
 	Color(0.95, 0.35, 0.35),  # Joueur 1 : rouge
 	Color(0.35, 0.65, 1.0),   # Joueur 2 : bleu
@@ -13,6 +13,13 @@ const PLAYER_COLORS := [
 ## Au-delà de ces limites, le joueur est sorti de la map et perd une vie.
 const BLAST_ZONE := Rect2(-400, -700, 2080, 1650)
 const RESTART_DELAY := 1.0   ## évite de relancer par erreur en martelant les boutons
+const LOBBY_SCENE := "res://scenes/lobby.tscn"
+
+# --- Caméra : elle suit le milieu des joueurs et dézoome quand ils s'éloignent ---
+const CAMERA_MARGIN := Vector2(700, 450)   ## espace gardé autour des joueurs (en pixels)
+const CAMERA_ZOOM_MIN := 0.55              ## zoom le plus éloigné (plus petit = voit plus loin)
+const CAMERA_ZOOM_MAX := 1.2               ## zoom le plus proche
+const CAMERA_SMOOTHING := 4.0              ## plus grand = la caméra réagit plus vite
 
 var fighters: Array[Fighter] = []
 var _match_over := false
@@ -22,12 +29,14 @@ var _match_over_time := 0.0
 @onready var _respawn_point: Marker2D = $RespawnPoint
 @onready var _end_screen: Control = $UI/EndScreen
 @onready var _winner_label: Label = $UI/EndScreen/Winner
-@onready var _gamepad_hint: Label = $UI/GamepadHint
+@onready var _camera: Camera2D = $Camera
 
 
 func _ready() -> void:
-	InputBindings.register(MAX_PLAYERS)
-	for i in PLAYER_COUNT:
+	InputBindings.register_menu_actions()
+	var player_devices := GameSetup.devices_or_default()
+	for i in player_devices.size():
+		InputBindings.register_player(i, player_devices[i])
 		var fighter := Fighter.new()
 		fighter.name = "Joueur%d" % (i + 1)
 		fighter.player_index = i
@@ -38,15 +47,21 @@ func _ready() -> void:
 		add_child(fighter)
 		fighter.show_lives()
 		fighters.append(fighter)
+	_update_camera(1.0, true)
+
+
+func _process(delta: float) -> void:
+	_update_camera(delta, false)
 
 
 func _physics_process(delta: float) -> void:
-	_gamepad_hint.visible = Input.get_connected_joypads().is_empty()
-
 	if _match_over:
 		_match_over_time += delta
-		if _match_over_time > RESTART_DELAY and Input.is_action_just_pressed("restart"):
-			get_tree().reload_current_scene()
+		if _match_over_time > RESTART_DELAY:
+			if Input.is_action_just_pressed("restart"):
+				get_tree().reload_current_scene()
+			elif Input.is_action_just_pressed("back_to_menu"):
+				get_tree().change_scene_to_file(LOBBY_SCENE)
 		return
 
 	for fighter in fighters:
@@ -58,6 +73,33 @@ func _physics_process(delta: float) -> void:
 	_resolve_hits()
 	_check_blast_zone()
 	_check_end_of_match()
+
+
+## Cadre tous les joueurs encore en jeu : centre au milieu d'eux, zoom selon leur écart.
+func _update_camera(delta: float, instant: bool) -> void:
+	var box := Rect2()
+	var first := true
+	for fighter in fighters:
+		if fighter.eliminated:
+			continue
+		if first:
+			box = Rect2(fighter.global_position, Vector2.ZERO)
+			first = false
+		else:
+			box = box.expand(fighter.global_position)
+	if first:
+		return
+	var view_size := get_viewport_rect().size
+	var needed := box.size + CAMERA_MARGIN
+	var target_zoom := clampf(minf(view_size.x / needed.x, view_size.y / needed.y), CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX)
+	var target_position := box.get_center()
+	if instant:
+		_camera.position = target_position
+		_camera.zoom = Vector2.ONE * target_zoom
+		return
+	var weight := 1.0 - exp(-CAMERA_SMOOTHING * delta)
+	_camera.position = _camera.position.lerp(target_position, weight)
+	_camera.zoom = _camera.zoom.lerp(Vector2.ONE * target_zoom, weight)
 
 
 func _closest_opponent(fighter: Fighter) -> Fighter:

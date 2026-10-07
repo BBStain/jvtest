@@ -4,6 +4,18 @@ Prototype de jeu de combat 2D en plateformes, inspiré de Brawlhalla, fait avec 
 
 **Jouer dans le navigateur (téléphone ou ordinateur) : https://bbstain.github.io/jvtest/**
 
+## Avant la partie : l'écran de connexion
+
+Chaque joueur se connecte avec son appareil, puis on lance la partie (il faut au moins 2 joueurs, jusqu'à 4) :
+
+- **Manette** : appuie sur **A** pour rejoindre, **B** pour partir.
+- **Clavier** : deux joueurs peuvent partager un clavier. **Espace** pour le côté gauche (Z Q S D), **L** pour le côté droit (flèches). **Échap** retire le dernier joueur clavier.
+- **Lancer la partie** : clique sur le bouton, ou appuie sur **Start** / **Entrée**.
+
+À la fin d'une partie : **Start** ou **A** pour rejouer, **B** ou **Échap** pour revenir à cet écran.
+
+La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quand ils se rapprochent.
+
 ## Les règles
 
 - 2 joueurs (le code est prêt pour 4), chacun a **3 vies**.
@@ -24,18 +36,19 @@ Prototype de jeu de combat 2D en plateformes, inspiré de Brawlhalla, fait avec 
 | Dash (dans la direction du stick) | Gâchette gauche (ou LB) | G | J |
 | Descendre d'une plateforme | Bas | S | Flèche bas |
 | Rejouer à la fin | Start ou A | Entrée | Entrée |
+| Revenir au menu à la fin | B | Échap | Échap |
 
 - Garder le saut appuyé = saut plus haut. Le lâcher tôt = petit saut.
 - En l'air, on a droit à un seul dash avant de retoucher le sol. Un dash vers le haut sert de 3e saut.
-- La 1re manette connectée est le joueur 1, la 2e le joueur 2.
+- Le premier qui rejoint sur l'écran de connexion est le joueur 1, le suivant le joueur 2, etc.
 
 ## Jouer sur ton téléphone avec une manette Bluetooth
 
 1. Connecte ta manette au téléphone dans les réglages Bluetooth du téléphone.
 2. Ouvre le lien du jeu dans Chrome (ou Safari sur iPhone) et tourne le téléphone à l'horizontale.
-3. Appuie sur un bouton de la manette : le message « Appuie sur un bouton… » disparaît, c'est prêt.
+3. Appuie sur **A** : ta manette apparaît dans la case du joueur 1.
 
-Avec une seule manette, le joueur 2 reste immobile : il sert de cible d'entraînement.
+Sur ordinateur, la manette PS5 marche dans Chrome ou Edge, mais Firefox la reconnaît mal.
 
 ## Guide débutant : ouvrir le projet sur ton ordinateur
 
@@ -65,7 +78,8 @@ Si Godot est en anglais : Editor > Editor Settings > Interface > Editor > Editor
 
 ### 4. Lancer le jeu
 
-Appuie sur **F5**, ou clique sur le triangle ▶ en haut à droite. Une fenêtre s'ouvre avec le jeu.
+Appuie sur **F5**, ou clique sur le triangle ▶ en haut à droite. Une fenêtre s'ouvre sur l'écran de connexion.
+Astuce : ouvre `scenes/main.tscn` et appuie sur **F6** pour aller directement au combat (joueur 1 = Z Q S D ou manette 1, joueur 2 = flèches ou manette 2).
 Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir à l'éditeur.
 
 ### 5. Modifier le jeu
@@ -76,14 +90,16 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 - **La map** : ouvre `scenes/main.tscn`. Dans l'arbre à gauche, sous `Map`, clique sur `Sol`, `PlateformeMilieu` ou `PlateformeHaut`
   et déplace-les avec la souris dans la vue du milieu. Attention, chaque plateforme a deux enfants à garder de la même taille :
   `Collision` (la forme qui bloque) et `Visuel` (le rectangle de couleur).
-- **Le nombre de joueurs** : dans `scripts/game.gd`, change `PLAYER_COUNT := 2`.
+- **La caméra** : en haut de `scripts/game.gd`, les réglages `CAMERA_...` (marge autour des joueurs, zoom le plus proche et le plus éloigné, vitesse).
 
 ## Comment le code est organisé
 
 | Fichier | Rôle |
 |---|---|
-| `scenes/main.tscn` | La scène principale : la map, les points d'apparition, l'écran de fin |
-| `scripts/game.gd` | Crée les joueurs, gère les coups, les chocs d'attaques, les chutes et la fin de partie |
+| `scenes/lobby.tscn` + `scripts/lobby.gd` | L'écran de connexion des joueurs |
+| `scripts/game_setup.gd` | Retient quel appareil va avec quel joueur entre l'écran de connexion et le combat |
+| `scenes/main.tscn` | Le combat : la map, les points d'apparition, la caméra, l'écran de fin |
+| `scripts/game.gd` | Crée les joueurs, gère les coups, les chocs d'attaques, les chutes, la caméra et la fin de partie |
 | `scripts/fighter.gd` | Un combattant : déplacements, saut, dash, attaque, vies, dessin |
 | `scripts/input/` | Les commandes de chaque joueur, séparées du reste pour pouvoir ajouter le jeu en ligne plus tard |
 | `tests/` | Un test automatique qui simule des parties et vérifie les règles |
