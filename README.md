@@ -40,6 +40,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 
 - Garder le saut appuyé = saut plus haut. Le lâcher tôt = petit saut.
 - En l'air, on a droit à un seul dash avant de retoucher le sol. Un dash vers le haut sert de 3e saut.
+- **Murs** : en l'air, pousse le stick vers un mur pour t'y coller. Tu glisses doucement vers le bas, et tes 2 sauts et ton dash sont rechargés. Saute pour rebondir dans l'autre sens.
 - Le premier qui rejoint sur l'écran de connexion est le joueur 1, le suivant le joueur 2, etc.
 
 ## Jouer sur ton téléphone avec une manette Bluetooth
@@ -87,7 +88,7 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 - **Le ressenti des personnages** (vitesse, hauteur de saut, dash, durée des attaques…) :
   ouvre `scripts/fighter.gd` dans le panneau « Système de fichiers » en bas à gauche.
   En haut du fichier, chaque réglage est une ligne `const` avec une explication. Change un chiffre, fais **Ctrl+S**, puis **F5** pour tester.
-- **La map** : ouvre `scenes/main.tscn`. Dans l'arbre à gauche, sous `Map`, clique sur `Sol`, `PlateformeMilieu` ou `PlateformeHaut`
+- **La map** : ouvre `scenes/main.tscn`. Dans l'arbre à gauche, sous `Map`, clique sur `Sol`, `PlateformeMilieu`, `PlateformeHaut`, `MurGauche` ou `MurDroit`
   et déplace-les avec la souris dans la vue du milieu. Attention, chaque plateforme a deux enfants à garder de la même taille :
   `Collision` (la forme qui bloque) et `Visuel` (le rectangle de couleur).
 - **La caméra** : en haut de `scripts/game.gd`, les réglages `CAMERA_...` (marge autour des joueurs, zoom le plus proche et le plus éloigné, vitesse).

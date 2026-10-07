@@ -1,15 +1,18 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/game.gd" id="1_game"]
 
 [sub_resource type="RectangleShape2D" id="Shape_Sol"]
-size = Vector2(800, 60)
+size = Vector2(1100, 60)
 
 [sub_resource type="RectangleShape2D" id="Shape_Milieu"]
-size = Vector2(360, 16)
+size = Vector2(440, 16)
 
 [sub_resource type="RectangleShape2D" id="Shape_Haut"]
-size = Vector2(200, 16)
+size = Vector2(220, 16)
+
+[sub_resource type="RectangleShape2D" id="Shape_Mur"]
+size = Vector2(80, 420)
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_game")
@@ -23,9 +26,9 @@ position = Vector2(640, 600)
 shape = SubResource("Shape_Sol")
 
 [node name="Visuel" type="ColorRect" parent="Map/Sol"]
-offset_left = -400.0
+offset_left = -550.0
 offset_top = -30.0
-offset_right = 400.0
+offset_right = 550.0
 offset_bottom = 30.0
 mouse_filter = 2
 color = Color(0.32, 0.35, 0.45, 1)
@@ -40,9 +43,9 @@ shape = SubResource("Shape_Milieu")
 one_way_collision = true
 
 [node name="Visuel" type="ColorRect" parent="Map/PlateformeMilieu"]
-offset_left = -180.0
+offset_left = -220.0
 offset_top = -8.0
-offset_right = 180.0
+offset_right = 220.0
 offset_bottom = 8.0
 mouse_filter = 2
 color = Color(0.5, 0.54, 0.66, 1)
@@ -57,20 +60,48 @@ shape = SubResource("Shape_Haut")
 one_way_collision = true
 
 [node name="Visuel" type="ColorRect" parent="Map/PlateformeHaut"]
-offset_left = -100.0
+offset_left = -110.0
 offset_top = -8.0
-offset_right = 100.0
+offset_right = 110.0
 offset_bottom = 8.0
 mouse_filter = 2
 color = Color(0.5, 0.54, 0.66, 1)
 
+[node name="MurGauche" type="StaticBody2D" parent="Map"]
+position = Vector2(-110, 450)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/MurGauche"]
+shape = SubResource("Shape_Mur")
+
+[node name="Visuel" type="ColorRect" parent="Map/MurGauche"]
+offset_left = -40.0
+offset_top = -210.0
+offset_right = 40.0
+offset_bottom = 210.0
+mouse_filter = 2
+color = Color(0.32, 0.35, 0.45, 1)
+
+[node name="MurDroit" type="StaticBody2D" parent="Map"]
+position = Vector2(1390, 450)
+
+[node name="Collision" type="CollisionShape2D" parent="Map/MurDroit"]
+shape = SubResource("Shape_Mur")
+
+[node name="Visuel" type="ColorRect" parent="Map/MurDroit"]
+offset_left = -40.0
+offset_top = -210.0
+offset_right = 40.0
+offset_bottom = 210.0
+mouse_filter = 2
+color = Color(0.32, 0.35, 0.45, 1)
+
 [node name="SpawnPoints" type="Node2D" parent="."]
 
 [node name="Joueur1" type="Marker2D" parent="SpawnPoints"]
-position = Vector2(400, 520)
+position = Vector2(330, 520)
 
 [node name="Joueur2" type="Marker2D" parent="SpawnPoints"]
-position = Vector2(880, 520)
+position = Vector2(950, 520)
 
 [node name="Joueur3" type="Marker2D" parent="SpawnPoints"]
 position = Vector2(520, 380)

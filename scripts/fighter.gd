@@ -31,6 +31,13 @@ const COYOTE_TIME := 0.08               ## on peut encore sauter un instant apr�
 const JUMP_BUFFER := 0.1                ## un saut appuyé juste avant d'atterrir compte quand même
 const DROP_THROUGH_TIME := 0.22         ## temps pendant lequel on traverse les plateformes après "bas"
 
+# --- Murs ---
+const WALL_SLIDE_SPEED := 160.0         ## vitesse de glissade le long d'un mur (en tenant vers le mur)
+const WALL_JUMPS := 2                   ## sauts rendus quand on touche un mur (saut mural + 1 en l'air)
+const WALL_JUMP_PUSH := 480.0           ## force qui éjecte du mur quand on saute
+const WALL_JUMP_LOCK := 0.12            ## petit temps où l'on contrôle moins bien après un saut mural
+const WALL_JUMP_ACCEL := 1200.0
+
 # --- Dash ---
 const DASH_SPEED := 1150.0
 const DASH_TIME := 0.14
@@ -70,6 +77,8 @@ var _air_dashes_left := AIR_DASHES
 var _coyote_timer := 0.0
 var _jump_buffer_timer := 0.0
 var _drop_timer := 0.0
+var _wall_normal_x := 0.0               ## -1 / 1 quand on glisse contre un mur, 0 sinon
+var _wall_jump_timer := 0.0
 
 var _dash_timer := 0.0
 var _dash_cooldown_timer := 0.0
@@ -115,6 +124,17 @@ func physics_tick(input: InputState, delta: float) -> void:
 	if input.stick.x != 0.0 and not is_attacking():
 		facing = signf(input.stick.x)
 
+	# Collé à un mur en l'air (en poussant vers lui) : on glisse, et sauts + dash sont rechargés.
+	_wall_normal_x = 0.0
+	if not on_floor and is_on_wall():
+		var normal_x := get_wall_normal().x
+		if absf(normal_x) > 0.5 and input.stick.x * normal_x < -0.3:
+			_wall_normal_x = signf(normal_x)
+			_air_jumps_left = WALL_JUMPS
+			_air_dashes_left = AIR_DASHES
+			_dash_cooldown_timer = 0.0
+			facing = _wall_normal_x
+
 	# Descendre d'une plateforme traversable avec "bas".
 	if input.down_pressed and on_floor:
 		_drop_timer = DROP_THROUGH_TIME
@@ -144,6 +164,7 @@ func _tick_timers(delta: float) -> void:
 	_attack_cooldown_timer -= delta
 	_invincible_timer -= delta
 	_knockback_timer -= delta
+	_wall_jump_timer -= delta
 	_lives_show_timer -= delta
 	_blink_clock += delta
 
@@ -153,6 +174,8 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 	var accel := GROUND_ACCEL if on_floor else AIR_ACCEL
 	if _knockback_timer > 0.0:
 		accel = KNOCKBACK_ACCEL
+	elif _wall_jump_timer > 0.0:
+		accel = WALL_JUMP_ACCEL
 	velocity.x = move_toward(velocity.x, input.stick.x * RUN_SPEED, accel * delta)
 
 	# Gravité (plus forte si on a lâché le saut pendant la montée = petit saut)
@@ -161,9 +184,11 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 		gravity = SHORT_HOP_GRAVITY
 	velocity.y += gravity * delta
 	var max_fall := FAST_FALL_SPEED if (input.stick.y > 0.5 and not on_floor) else MAX_FALL_SPEED
+	if is_wall_sliding():
+		max_fall = WALL_SLIDE_SPEED
 	velocity.y = minf(velocity.y, max_fall)
 
-	# Saut et double saut
+	# Saut, double saut et saut mural
 	if input.jump_pressed:
 		_jump_buffer_timer = JUMP_BUFFER
 	if _jump_buffer_timer > 0.0:
@@ -171,6 +196,11 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 			velocity.y = -JUMP_SPEED
 			_jump_buffer_timer = 0.0
 			_coyote_timer = 0.0
+		elif input.jump_pressed and is_wall_sliding() and _air_jumps_left > 0:
+			velocity = Vector2(_wall_normal_x * WALL_JUMP_PUSH, -JUMP_SPEED)
+			_air_jumps_left -= 1
+			_jump_buffer_timer = 0.0
+			_wall_jump_timer = WALL_JUMP_LOCK
 		elif input.jump_pressed and _air_jumps_left > 0:
 			velocity.y = -DOUBLE_JUMP_SPEED
 			_air_jumps_left -= 1
@@ -233,6 +263,10 @@ func _cancel_attack() -> void:
 
 func is_dashing() -> bool:
 	return _dash_timer > 0.0
+
+
+func is_wall_sliding() -> bool:
+	return _wall_normal_x != 0.0
 
 
 func is_invincible() -> bool:
