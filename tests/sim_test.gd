@@ -379,6 +379,8 @@ func _ready() -> void:
 		if event is InputEventJoypadButton and event.button_index == JOY_BUTTON_LEFT_SHOULDER:
 			dash_on_lb = true
 	check(sprint_on_lt and dash_on_lb, "Manette : course sur LT, dash sur LB")
+	InputBindings.fix_web_triggers(true)
+	check(InputBindings._web_triggers_fixed, "Navigateur : correctif des gâchettes LT / RT chargé")
 
 	# 10) Écran de connexion : il faut 2 joueurs pour lancer
 	game.queue_free(); game = null
