@@ -382,7 +382,7 @@ func _ready() -> void:
 	InputBindings.fix_web_triggers(true)
 	check(InputBindings._web_triggers_fixed, "Navigateur : correctif des gâchettes LT / RT chargé")
 
-	# 9c) Deux coups qui touchent en même temps (sans se croiser) : les deux perdent une vie
+	# 9c) Deux coups qui touchent en même temps (sans se croiser) : choc, personne ne perd de vie
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
 	p1.input_source = Scripted.new(func(s, f): pass)
@@ -397,7 +397,24 @@ func _ready() -> void:
 		fi._attack_time = Fighter.ATTACK_STARTUP
 		fi._attack_cooldown_timer = Fighter.ATTACK_COOLDOWN
 	await step(1)
-	check(p1.lives == 2 and p2.lives == 2, "Coups simultanés : les deux touchés (J1 %d, J2 %d)" % [p1.lives, p2.lives])
+	check(p1.lives == 3 and p2.lives == 3, "Coups simultanés : annulés, personne ne perd de vie (J1 %d, J2 %d)" % [p1.lives, p2.lives])
+	await step(5)
+	check(not p1.is_attacking() and not p2.is_attacking() and p1.position.x < 600 and p2.position.x > 660,
+		"Coups simultanés : les deux attaques s'arrêtent et les joueurs sont repoussés")
+
+	# 9c bis) Un coup léger repousse nettement la victime
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(40)
+	p1.position.x = 600; p2.position.x = 680
+	p1._attack_heavy = false
+	p1._attack_has_hit = false
+	p1._attack_dir = Vector2.RIGHT
+	p1._attack_time = Fighter.ATTACK_STARTUP
+	await step(60)
+	check(p2.lives == 2 and absf(p2.position.x - 680 - 100) < 8, "Coup léger : J2 repoussé de %.0f px (visé : 100)" % (p2.position.x - 680))
 
 	# 9d) Dash vers le haut sans tenir le saut : il n'est plus coupé net (vrai 3e saut)
 	await new_game()

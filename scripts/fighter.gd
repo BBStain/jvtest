@@ -70,7 +70,7 @@ const HEAVY_ARC_RADIUS := 56.0          ## distance entre le centre du perso et 
 const HEAVY_TIP_RADIUS := 24.0          ## taille de la zone qui touche au bout de l'arme
 const HEAVY_ARC_START := -100.0         ## angle de départ en degrés (-90 = droit au-dessus de la tête)
 const HEAVY_ARC_END := 32.0             ## angle d'arrivée (à hauteur des pieds, devant soi)
-const HEAVY_KNOCKBACK := 850.0
+const HEAVY_KNOCKBACK := 940.0
 const HEAVY_COUNTER_COOLDOWN := 1.4     ## attaque lourde contrée par une légère : recharge des DEUX joueurs
 const HEAVY_COUNTER_PUSH := 750.0       ## ... et les deux sont repoussés plus loin
 
@@ -96,10 +96,10 @@ const STAMINA_SHOW_TIME := 1.0          ## la jauge reste affichée ce temps apr
 
 # --- Coup reçu ---
 const INVINCIBLE_TIME := 0.55           ## doit rester plus long que ATTACK_COOLDOWN
-const HIT_KNOCKBACK := 620.0
+const HIT_KNOCKBACK := 700.0           ## un coup léger repousse d'environ 100 px
 const CLASH_PUSH := 450.0
-const KNOCKBACK_TIME := 0.15            ## durée pendant laquelle on contrôle moins bien après un coup / un choc
-const KNOCKBACK_ACCEL := 2500.0
+const KNOCKBACK_TIME := 0.2             ## durée pendant laquelle on contrôle moins bien après un coup / un choc
+const KNOCKBACK_ACCEL := 2000.0
 
 const START_LIVES := 3
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête

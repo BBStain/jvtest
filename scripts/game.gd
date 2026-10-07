@@ -126,15 +126,20 @@ func _resolve_clashes() -> void:
 				continue
 			if a.attack_center().distance_to(b.attack_center()) > a.attack_radius() + b.attack_radius():
 				continue
-			var push := a.global_position - b.global_position
-			if push.length() < 1.0:
-				push = Vector2(-1.0, 0.0)
-			push.y = 0.0
-			push = push.normalized()
-			var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
-			_spawn_clash_mark((a.attack_center() + b.attack_center()) / 2.0, heavy_countered)
-			a.clash(push, heavy_countered)
-			b.clash(-push, heavy_countered)
+			_clash(a, b, (a.attack_center() + b.attack_center()) / 2.0)
+
+
+## Les attaques de a et b s'annulent : les deux sont repoussés et une marque apparaît à "where".
+func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
+	var push := a.global_position - b.global_position
+	if push.length() < 1.0:
+		push = Vector2(-1.0, 0.0)
+	push.y = 0.0
+	push = push.normalized()
+	var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
+	_spawn_clash_mark(where, heavy_countered)
+	a.clash(push, heavy_countered)
+	b.clash(-push, heavy_countered)
 
 
 ## Laisse une marque sur le terrain à l'endroit du contre (orange si une attaque lourde a été contrée).
@@ -146,7 +151,7 @@ func _spawn_clash_mark(where: Vector2, heavy_countered: bool) -> void:
 
 
 ## On repère d'abord tous les coups de la frame, puis on les applique : si deux joueurs se
-## touchent exactement en même temps, les deux perdent une vie (sinon le joueur 1 gagnerait toujours).
+## touchent exactement en même temps, c'est un choc, les deux attaques s'annulent et personne ne perd de vie.
 func _resolve_hits() -> void:
 	var landed: Array[Dictionary] = []
 	for attacker in fighters:
@@ -165,6 +170,11 @@ func _resolve_hits() -> void:
 	for hit in landed:
 		var attacker: Fighter = hit.attacker
 		var victim: Fighter = hit.victim
+		for other in landed:
+			if other.attacker == victim and other.victim == attacker and attacker.is_attack_active() and victim.is_attack_active():
+				_clash(attacker, victim, (attacker.global_position + victim.global_position) / 2.0)
+		if not attacker.is_attack_active():
+			continue  # son attaque vient d'être annulée par un choc
 		if not victim.can_be_hit():
 			continue  # déjà touché cette frame par quelqu'un d'autre
 		if victim.is_blocking():

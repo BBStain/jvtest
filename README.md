@@ -24,7 +24,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - Un coup reçu = une vie perdue. Tomber hors de la map = une vie perdue, et on réapparaît au milieu.
 - Après un coup, on clignote : on est invincible un court instant et on ne peut pas attaquer.
 - L'attaque légère part toujours vers l'adversaire le plus proche. S'il est trop loin, elle frappe dans le vide.
-- Si deux coups touchent exactement en même temps sans se croiser, les deux joueurs perdent une vie.
+- Si deux joueurs se touchent exactement en même temps, c'est aussi un choc : les deux attaques s'annulent et personne ne perd de vie.
 - Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés. Une marque apparaît à l'endroit du choc et s'efface en quelques secondes (orange si une attaque lourde a été contrée).
 - L'**attaque lourde** part du dessus de la tête et fait un arc de cercle jusqu'aux pieds, devant soi. Elle est plus lente et projette plus fort.
 - **Charger l'attaque lourde** : garde Y appuyé. Plus tu charges, plus l'arme grandit (jusqu'à 2 fois plus longue), frappe loin et projette fort. Tu frappes en lâchant Y, ou tout seul au bout d'1 seconde. Pendant la charge tu avances lentement, et pendant la frappe tu es immobilisé.
