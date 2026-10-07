@@ -8,7 +8,7 @@ extends RefCounted
 ##   {"type": "joypad", "id": 2}        -> la manette n°2 connectée
 ##
 ## Manette : stick gauche ou croix pour bouger, A sauter, X attaque légère, Y attaque lourde,
-## B bloquer, gâchette gauche (LT) courir, gâchette droite (RT) ou LB dash.
+## B bloquer, gâchette gauche (LT) dash, LB courir.
 ## Les touches clavier sont des touches PHYSIQUES : "W A S D" ici = "Z Q S D" sur un clavier AZERTY.
 
 const KEYBOARD_LAYOUTS := [
@@ -36,12 +36,12 @@ const GAMEPAD_BUTTONS := {
 	"left": [JOY_BUTTON_DPAD_LEFT], "right": [JOY_BUTTON_DPAD_RIGHT],
 	"up": [JOY_BUTTON_DPAD_UP], "down": [JOY_BUTTON_DPAD_DOWN],
 	"jump": [JOY_BUTTON_A], "attack": [JOY_BUTTON_X], "heavy": [JOY_BUTTON_Y],
-	"block": [JOY_BUTTON_B], "dash": [JOY_BUTTON_LEFT_SHOULDER],
+	"block": [JOY_BUTTON_B], "sprint": [JOY_BUTTON_LEFT_SHOULDER],
 }
 const GAMEPAD_AXES := {
 	"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0],
 	"up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0],
-	"sprint": [JOY_AXIS_TRIGGER_LEFT, 1.0], "dash": [JOY_AXIS_TRIGGER_RIGHT, 1.0],
+	"dash": [JOY_AXIS_TRIGGER_LEFT, 1.0],
 }
 const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "heavy", "dash", "block", "sprint"]
 const DEADZONE := 0.35
