@@ -377,7 +377,9 @@ func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
 			var direction := push if fighter == a else -push
 			fighter.clash(direction * Fighter.HEAVY_COUNTER_PUSH * other.stats.mass(), cooldown)
 		if _duel.is_empty() or _in_duel(a, b):
-			_start_duel(a, b)  # pendant un duel, un contre entre deux autres joueurs n'en lance pas un 2e
+			_start_duel(a, b)
+		else:
+			_renew_slowmo(a, b)  # pendant un duel, pas de 2e duel : le premier continue (ou pas)
 	else:
 		a.clash(push * Fighter.CLASH_PUSH * b.stats.mass())
 		b.clash(-push * Fighter.CLASH_PUSH * a.stats.mass())
@@ -395,10 +397,11 @@ func _parry(attacker: Fighter, defender: Fighter) -> void:
 	_renew_slowmo(attacker, defender)
 
 
-## Un contre relance le ralenti en cours pour toute sa durée. Pendant un micro-duel, seuls les
-## contres entre les deux duellistes le relancent (à 3 ou 4, les autres ne le prolongent pas).
+## Un contre relance le ralenti en cours pour toute sa durée. Pendant un micro-duel, il faut
+## qu'un des deux duellistes soit dans le contre (entre eux, ou contre un autre joueur) :
+## un contre entre deux autres joueurs ne prolonge pas le duel.
 func _renew_slowmo(a: Fighter, b: Fighter) -> void:
-	if _duel.is_empty() or _in_duel(a, b):
+	if _duel.is_empty() or a in _duel or b in _duel:
 		_time_engine.renew()
 
 
@@ -523,7 +526,7 @@ func _hit_shield(attacker: Fighter, victim: Fighter, heavy: bool) -> void:
 	if _duel.is_empty():
 		_time_engine.play(SHIELD_BREAK_TIME_SCALE, SHIELD_BREAK_SLOWMO)
 	else:
-		_renew_slowmo(attacker, victim)  # entre duellistes, le duel continue (et repart pour toute sa durée)
+		_renew_slowmo(attacker, victim)  # avec un duelliste, le duel continue (et repart pour toute sa durée)
 
 
 ## Un segment épais (de a à b, d'épaisseur radius de chaque côté) touche-t-il le rectangle ?
