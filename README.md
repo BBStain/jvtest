@@ -101,14 +101,19 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 
 ### 5. Modifier le jeu
 
-- **Le ressenti des personnages** (vitesse, hauteur de saut, dash, durée des attaques…) :
-  ouvre `scripts/fighter.gd` dans le panneau « Système de fichiers » en bas à gauche.
-  En haut du fichier, chaque réglage est une ligne `const` avec une explication. Change un chiffre, fais **Ctrl+S**, puis **F5** pour tester.
-- **La map** : ouvre `scenes/main.tscn`. Dans l'arbre à gauche, sous `Map`, clique sur `Sol`, `PlateformeMilieu`, `PlateformeHaut`, `MurGauche`, `MurDroit`
+- **Un personnage** (vitesse, hauteur de saut, dash, attaques, poids…) : double-clique sur `characters/barre.tres`
+  dans le panneau « Système de fichiers » en bas à gauche. Ses réglages s'affichent à droite dans l'inspecteur, rangés par groupes
+  (Déplacement, Dash, Attaque légère…). Change un chiffre, fais **Ctrl+S**, puis **F5** pour tester.
+- **Ajouter un personnage** : clic droit sur `characters/barre.tres` > Dupliquer, donne-lui un nom, change ses réglages,
+  puis ajoute son chemin dans la liste `CHARACTERS` de `scripts/game_setup.gd`.
+- **Les règles communes à tous** (bouclier, contre, invincibilité…) : en haut de `scripts/fighter.gd`, chaque règle est une ligne `const` avec une explication.
+- **La map** : ouvre `scenes/maps/arene.tscn`. Dans l'arbre à gauche, clique sur `Sol`, `PlateformeMilieu`, `PlateformeHaut`, `MurGauche`, `MurDroit`
   ou une pièce de `ZoneAerienne` / `ZoneDuel`, et déplace-les avec la souris dans la vue du milieu. Attention, chaque plateforme a deux enfants à garder de la même taille :
   `Collision` (la forme qui bloque) et `Visuel` (le rectangle de couleur).
   Les plateformes mobiles (`Ascenseur`, `AscenseurHaut`, `NavetteBasse`, `NavetteHaute`, `NavetteSommet`) se règlent à droite dans l'inspecteur :
   `size` (taille), `travel` (trajet) et `period` (durée d'un aller-retour en secondes).
+- **Ajouter une map** : clic droit sur `scenes/maps/arene.tscn` > Dupliquer, change le décor (garde les nœuds `SpawnPoints` et `RespawnPoint`),
+  puis ajoute son chemin dans la liste `MAPS` de `scripts/game_setup.gd`. La zone hors de laquelle on tombe se règle dans l'inspecteur (`blast_zone`).
 - **La caméra** : en haut de `scripts/game.gd`, les réglages `CAMERA_...` (marge autour des joueurs, zoom le plus proche et le plus éloigné, vitesse).
 
 ## Prochaines étapes
@@ -123,10 +128,12 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 | Fichier | Rôle |
 |---|---|
 | `scenes/lobby.tscn` + `scripts/lobby.gd` | L'écran de connexion des joueurs |
-| `scripts/game_setup.gd` | Retient quel appareil va avec quel joueur entre l'écran de connexion et le combat |
-| `scenes/main.tscn` | Le combat : la map, les points d'apparition, la caméra, l'écran de fin |
+| `scripts/game_setup.gd` | La liste des maps et des personnages, et les choix des joueurs (appareil, personnage, map) |
+| `scenes/main.tscn` | Le combat : la caméra et l'écran de fin (la map est chargée à part) |
+| `scenes/maps/` + `scripts/game_map.gd` | Les maps : le décor, les points d'apparition et la zone de jeu |
+| `characters/` + `scripts/character_stats.gd` | Les personnages et leurs caractéristiques (vitesse, sauts, attaques, poids…) |
 | `scripts/game.gd` | Crée les joueurs, gère les coups, les chocs d'attaques, les chutes, la caméra et la fin de partie |
-| `scripts/fighter.gd` | Un combattant : déplacements, saut, dash, attaques, blocage, vies, dessin |
+| `scripts/fighter.gd` | Un combattant : déplacements, saut, dash, attaques, blocage, vies, dessin, et les règles communes |
 | `scripts/moving_platform.gd` | Une plateforme qui fait des allers-retours |
 | `scripts/clash_mark.gd` | La marque laissée sur le terrain quand deux attaques se contrent |
 | `scripts/micro_explosion.gd` | La micro-explosion quand deux attaques lourdes se percutent |
