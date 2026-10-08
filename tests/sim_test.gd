@@ -13,6 +13,7 @@ class Scripted extends InputSource:
 		return s
 
 var game: Node
+var base := CharacterStats.new()  ## les stats par défaut (la Barre)
 var shot_dir := ""
 var failures := 0
 
@@ -109,11 +110,11 @@ func _ready() -> void:
 	var clash_seen := false
 	for i in 60:
 		await step(1)
-		if p2._attack_cooldown_timer > Fighter.ATTACK_COOLDOWN * 2.5:
+		if p2._attack_cooldown_timer > base.attack_cooldown * 2.5:
 			clash_seen = true
 			break
 	check(clash_seen, "Contre : longue recharge pour J2 qui a contré (%.2f s)" % p2._attack_cooldown_timer)
-	check(p1._attack_cooldown_timer > Fighter.HEAVY_COOLDOWN, "Contre : même longue recharge pour J1 qui a lancé la lourde (%.2f s)" % p1._attack_cooldown_timer)
+	check(p1._attack_cooldown_timer > base.heavy_cooldown, "Contre : même longue recharge pour J1 qui a lancé la lourde (%.2f s)" % p1._attack_cooldown_timer)
 	check(p1.lives == 3 and p2.lives == 3, "Contre : personne ne perd de vie (%d / %d)" % [p1.lives, p2.lives])
 	check(Engine.time_scale < 0.6, "Micro-duel : le temps ralentit (vitesse %.2f)" % Engine.time_scale)
 	var gap_before := p2.position.x - p1.position.x
@@ -200,7 +201,7 @@ func _ready() -> void:
 		s.jump_pressed = f == 80
 		s.jump_held = f >= 80)
 	await step(65)
-	check(absf(p1.velocity.x) <= Fighter.RUN_SPEED * Fighter.BLOCK_SPEED_MULT + 1, "Blocage : marche lente (vx = %.0f)" % p1.velocity.x)
+	check(absf(p1.velocity.x) <= base.run_speed * Fighter.BLOCK_SPEED_MULT + 1, "Blocage : marche lente (vx = %.0f)" % p1.velocity.x)
 	await step(9)
 	check(not p1.is_dashing(), "Blocage : pas de dash")
 	check(not p1.is_attacking(), "Blocage : pas d'attaque")
@@ -259,7 +260,7 @@ func _ready() -> void:
 	p1 = game.fighters[0]; p2 = game.fighters[1]
 	p2.input_source = Scripted.new(func(s, f): pass)
 	p1.input_source = Scripted.new(func(s, f): pass)
-	var shuttle: Node2D = game.get_node("Map/ZoneDuel/NavetteHaute")
+	var shuttle: Node2D = game.map.get_node("ZoneDuel/NavetteHaute")
 	p1.position = shuttle.position + Vector2(0, -45)
 	await step(20)
 	var rider_x := p1.position.x
@@ -278,11 +279,11 @@ func _ready() -> void:
 		s.stick.x = 1.0 if f >= 20 and f < 80 else 0.0
 		s.sprint_held = f >= 20 and f < 80)
 	await step(50)
-	check(p1.is_sprinting() and p1.velocity.x > Fighter.RUN_SPEED * 1.3, "Course : J1 va plus vite (vx = %.0f)" % p1.velocity.x)
+	check(p1.is_sprinting() and p1.velocity.x > base.run_speed * 1.3, "Course : J1 va plus vite (vx = %.0f)" % p1.velocity.x)
 	await shot("11_course")
-	var stamina_sprint := Fighter.STAMINA_MAX - p1.stamina
+	var stamina_sprint := base.stamina_max - p1.stamina
 	await step(30)
-	check(p1.stamina < Fighter.STAMINA_MAX - 20, "Course : l'endurance baisse (%.0f)" % p1.stamina)
+	check(p1.stamina < base.stamina_max - 20, "Course : l'endurance baisse (%.0f)" % p1.stamina)
 	var low := p1.stamina
 	await step(90)
 	check(p1.stamina > low + 10, "Course : l'endurance remonte quand on s'arrête (%.0f)" % p1.stamina)
@@ -294,7 +295,7 @@ func _ready() -> void:
 		s.block_held = f >= 20 and f < 50
 		s.sprint_held = f >= 20 and f < 50)
 	await step(50)
-	var stamina_block := Fighter.STAMINA_MAX - p1.stamina
+	var stamina_block := base.stamina_max - p1.stamina
 	check(stamina_block > stamina_sprint * 1.5, "Course + blocage : l'endurance baisse plus vite (%.0f contre %.0f)" % [stamina_block, stamina_sprint])
 
 	await new_game()
@@ -306,7 +307,7 @@ func _ready() -> void:
 		s.sprint_held = true)
 	p1.stamina = 5.0
 	await step(30)
-	check(not p1.is_sprinting() and absf(p1.velocity.x) <= Fighter.RUN_SPEED + 1, "Endurance vide : J1 ne court plus (vx = %.0f)" % p1.velocity.x)
+	check(not p1.is_sprinting() and absf(p1.velocity.x) <= base.run_speed + 1, "Endurance vide : J1 ne court plus (vx = %.0f)" % p1.velocity.x)
 
 	# 5) Dash = intouchable
 	await new_game()
@@ -356,7 +357,7 @@ func _ready() -> void:
 	p1._air_dashes_left = 0
 	await step(40)
 	check(p1.is_wall_sliding(), "Mur : J1 glisse contre le mur gauche")
-	check(p1.velocity.y <= Fighter.WALL_SLIDE_SPEED + 1, "Mur : glissade lente (vy=%.0f)" % p1.velocity.y)
+	check(p1.velocity.y <= base.wall_slide_speed + 1, "Mur : glissade lente (vy=%.0f)" % p1.velocity.y)
 	check(p1._air_jumps_left == 2 and p1._air_dashes_left == 1, "Mur : 2 sauts et le dash rechargés")
 	await shot("07_mur")
 	p1.input_source = Scripted.new(func(s, f):
@@ -422,8 +423,8 @@ func _ready() -> void:
 		fi._attack_heavy = false
 		fi._attack_has_hit = false
 		fi._attack_dir = pair[1]
-		fi._attack_time = Fighter.ATTACK_STARTUP
-		fi._attack_cooldown_timer = Fighter.ATTACK_COOLDOWN
+		fi._attack_time = base.attack_startup
+		fi._attack_cooldown_timer = base.attack_cooldown
 	await step(1)
 	check(p1.lives == 3 and p2.lives == 3, "Coups simultanés : annulés, personne ne perd de vie (J1 %d, J2 %d)" % [p1.lives, p2.lives])
 	await step(5)
@@ -440,7 +441,7 @@ func _ready() -> void:
 	p1._attack_heavy = false
 	p1._attack_has_hit = false
 	p1._attack_dir = Vector2.RIGHT
-	p1._attack_time = Fighter.ATTACK_STARTUP
+	p1._attack_time = base.attack_startup
 	await step(60)
 	check(p2.lives == 2 and absf(p2.position.x - 680 - 100) < 8, "Coup léger : J2 repoussé de %.0f px (visé : 100)" % (p2.position.x - 680))
 
@@ -458,10 +459,38 @@ func _ready() -> void:
 		fi._attack_heavy = false
 		fi._attack_has_hit = false
 		fi._attack_dir = Vector2.RIGHT
-		fi._attack_time = Fighter.ATTACK_STARTUP
+		fi._attack_time = base.attack_startup
 	await step(1)
 	check(f3[0].lives == 3 and f3[1].lives == 2 and f3[2].lives == 2,
 		"3 joueurs : coups en chaîne tous comptés (J1 %d, J2 %d, J3 %d)" % [f3[0].lives, f3[1].lives, f3[2].lives])
+
+	# 9g) Personnages : chacun peut avoir ses propres stats (vitesse, poids...)
+	var slow := CharacterStats.new()
+	slow.display_name = "Test lent"
+	slow.run_speed = 300.0
+	slow.weight = 2.0
+	ResourceSaver.save(slow, "user://perso_test.tres")
+	GameSetup.player_characters = ["", "user://perso_test.tres"]
+	await new_game()
+	GameSetup.player_characters = []
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	check(p1.stats.display_name == "Barre" and p2.stats.display_name == "Test lent",
+		"Persos : J1 = %s, J2 = %s" % [p1.stats.display_name, p2.stats.display_name])
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): s.stick.x = -1.0 if f >= 40 else 0.0)
+	await step(60)
+	check(absf(absf(p2.velocity.x) - 300.0) < 5.0, "Persos : J2 court à sa propre vitesse (vx = %.0f)" % p2.velocity.x)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.position = Vector2(600, 540); p2.position = Vector2(680, 540)
+	p2._invincible_timer = 0.0
+	p1._attack_heavy = false
+	p1._attack_has_hit = false
+	p1._attack_dir = Vector2.RIGHT
+	p1._attack_time = base.attack_startup
+	await step(60)
+	check(p2.lives == 2 and p2.position.x - 680 < 70, "Persos : J2, 2 fois plus lourd, recule moins (%.0f px)" % (p2.position.x - 680))
+	check(game.map is GameMap and game.map.map_name == "Arène", "Map : chargée depuis scenes/maps/ (%s)" % game.map.map_name)
 
 	# 9d) Dash vers le haut sans tenir le saut : il n'est plus coupé net (vrai 3e saut)
 	await new_game()

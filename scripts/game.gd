@@ -2,7 +2,8 @@ class_name Game
 extends Node2D
 ## Le chef d'orchestre de la partie : crée les joueurs, leur passe les commandes,
 ## gère les coups, les chocs d'attaques, les chutes hors de la map, la caméra et la fin de partie.
-## Les joueurs et leurs appareils viennent de l'écran de connexion (lobby.gd, via GameSetup).
+## Les joueurs, leurs appareils, leurs personnages et la map viennent de GameSetup.
+## La map est une scène à part (scenes/maps/), chargée au début de la partie.
 
 const PLAYER_COLORS := [
 	Color(0.95, 0.35, 0.35),  # Joueur 1 : rouge
@@ -10,8 +11,6 @@ const PLAYER_COLORS := [
 	Color(0.45, 0.9, 0.45),   # Joueur 3 : vert
 	Color(1.0, 0.85, 0.3),    # Joueur 4 : jaune
 ]
-## Au-delà de ces limites, le joueur est sorti de la map et perd une vie.
-const BLAST_ZONE := Rect2(-2150, -1500, 5400, 2450)
 const RESTART_DELAY := 1.0   ## évite de relancer par erreur en martelant les boutons
 const LOBBY_SCENE := "res://scenes/lobby.tscn"
 
@@ -33,8 +32,7 @@ var _match_over_time := 0.0
 var _time_engine := TimeEngine.new()
 var _duel: Array[Fighter] = []             ## les deux joueurs du micro-duel en cours
 
-@onready var _spawn_points: Array[Node] = $SpawnPoints.get_children()
-@onready var _respawn_point: Marker2D = $RespawnPoint
+var map: GameMap
 @onready var _end_screen: Control = $UI/EndScreen
 @onready var _winner_label: Label = $UI/EndScreen/Winner
 @onready var _camera: Camera2D = $Camera
@@ -42,6 +40,9 @@ var _duel: Array[Fighter] = []             ## les deux joueurs du micro-duel en 
 
 func _ready() -> void:
 	add_child(_time_engine)
+	map = (load(GameSetup.map_path) as PackedScene).instantiate()
+	add_child(map)
+	move_child(map, 0)  # le décor est dessiné derrière les joueurs
 	InputBindings.register_menu_actions()
 	var player_devices := GameSetup.devices_or_default()
 	for i in player_devices.size():
@@ -49,10 +50,11 @@ func _ready() -> void:
 		var fighter := Fighter.new()
 		fighter.name = "Joueur%d" % (i + 1)
 		fighter.player_index = i
+		fighter.stats = GameSetup.character_for(i)
 		fighter.color = PLAYER_COLORS[i]
 		fighter.input_source = LocalInputSource.new(i)
-		fighter.position = (_spawn_points[i] as Node2D).position
-		fighter.facing = 1.0 if fighter.position.x < _respawn_point.position.x else -1.0
+		fighter.position = map.spawn_position(i)
+		fighter.facing = 1.0 if fighter.position.x < map.respawn_position().x else -1.0
 		add_child(fighter)
 		fighter.life_lost.connect(_on_life_lost)
 		fighter.show_lives()
@@ -245,8 +247,8 @@ func _circle_hits_rect(center: Vector2, radius: float, rect: Rect2) -> bool:
 
 func _check_blast_zone() -> void:
 	for fighter in fighters:
-		if not fighter.eliminated and not BLAST_ZONE.has_point(fighter.global_position):
-			fighter.fall_out(_respawn_point.position)
+		if not fighter.eliminated and not map.blast_zone.has_point(fighter.global_position):
+			fighter.fall_out(map.respawn_position())
 
 
 func _check_end_of_match() -> void:

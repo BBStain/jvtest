@@ -6,78 +6,46 @@ extends CharacterBody2D
 ## lui donne un InputState via physics_tick(). Les coups et les chocs d'attaques
 ## sont gérés par game.gd, qui voit tous les combattants à la fois.
 ##
-## Tous les réglages du "ressenti" sont les constantes ci-dessous : change un chiffre,
-## relance le jeu (F5) et teste !
+## Les caractéristiques propres à chaque personnage (vitesse, sauts, dash, attaques, poids...)
+## sont dans "stats" : un fichier .tres du dossier characters/ (voir character_stats.gd).
+## Les constantes ci-dessous sont les règles communes à tous les personnages.
 
 signal life_lost(fighter: Fighter)
 
 const PLATFORM_LAYER := 3  ## numéro de la couche "plateformes_traversables"
 
-# --- Corps ---
-const BODY_SIZE := Vector2(20, 60)      ## largeur, hauteur de la barre (en pixels)
-
 # --- Déplacement ---
-const RUN_SPEED := 560.0                ## vitesse de course max
-const GROUND_ACCEL := 8500.0            ## à quelle vitesse on atteint la vitesse max au sol
-const AIR_ACCEL := 5500.0               ## pareil, en l'air
-const GRAVITY := 2300.0
-const SHORT_HOP_GRAVITY := 4800.0       ## gravité quand on lâche le saut tôt (petit saut)
-const MAX_FALL_SPEED := 1050.0
-const FAST_FALL_SPEED := 1700.0         ## chute rapide en tenant bas
-const JUMP_SPEED := 820.0
-const DOUBLE_JUMP_SPEED := 760.0
-const AIR_JUMPS := 1                    ## 1 = double saut
 const COYOTE_TIME := 0.1                ## on peut encore sauter un instant après avoir quitté le bord
 const JUMP_BUFFER := 0.12               ## un saut appuyé juste avant d'atterrir compte quand même
 const DROP_THROUGH_TIME := 0.22         ## temps pendant lequel on traverse les plateformes après "bas"
 
 # --- Murs ---
-const WALL_SLIDE_SPEED := 160.0         ## vitesse de glissade le long d'un mur (en tenant vers le mur)
-const WALL_JUMPS := 2                   ## sauts rendus quand on touche un mur (saut mural + 1 en l'air)
-const WALL_JUMP_PUSH := 480.0           ## force qui éjecte du mur quand on saute
 const WALL_JUMP_LOCK := 0.1             ## petit temps où l'on contrôle moins bien après un saut mural
 const WALL_JUMP_ACCEL := 2200.0
 
 # --- Dash ---
-const DASH_SPEED := 1300.0
-const DASH_TIME := 0.14
-const DASH_COOLDOWN := 0.32             ## temps de recharge
 const DASH_END_KEEP := 0.55             ## part de la vitesse gardée à la fin du dash
-const AIR_DASHES := 1                   ## dashs possibles en l'air avant de retoucher le sol
 
 # --- Attaque légère (X) : un coup droit vers l'adversaire ---
-const ATTACK_STARTUP := 0.02            ## délai avant que le coup touche
-const ATTACK_ACTIVE := 0.08             ## durée pendant laquelle le coup peut toucher
-const ATTACK_COOLDOWN := 0.13           ## temps de recharge entre deux attaques (à peine plus que le coup)
 const ATTACK_BUFFER := 0.12             ## X appuyé un peu trop tôt compte quand même : on peut marteler
-const ATTACK_REACH := 72.0              ## distance entre le centre du perso et le centre du coup
-const ATTACK_RADIUS := 28.0             ## taille de la zone qui touche
 const CLASH_LOCKOUT := 0.08             ## petit temps mort après un choc d'attaques
 
 # --- Attaque lourde (Y) : un arc de cercle du dessus de la tête jusqu'aux pieds, devant soi ---
 # On la charge en gardant Y appuyé : plus on charge, plus l'arme grandit et frappe loin.
 # On frappe en lâchant Y (ou tout seul quand la charge est au maximum).
 # Pendant la frappe, le perso est immobilisé.
-const HEAVY_STARTUP := 0.14             ## charge minimale : on lève l'arme avant de frapper
 const HEAVY_CHARGE_MAX := 1.0           ## au bout de ce temps la charge est pleine et on frappe tout seul
 const HEAVY_CHARGE_GROWTH := 2.0        ## à pleine charge, l'arme est 2 fois plus longue
 const HEAVY_CHARGE_TIP_GROWTH := 1.5    ## à pleine charge, la zone qui touche est 1,5 fois plus grosse
 const HEAVY_CHARGE_KNOCKBACK := 1.5     ## à pleine charge, on projette 1,5 fois plus fort
-const HEAVY_CHARGE_MOVE_MULT := 0.6     ## en chargeant, on avance lentement
-const HEAVY_ACTIVE := 0.15              ## durée du balayage
-const HEAVY_COOLDOWN := 0.5
-const HEAVY_ARC_RADIUS := 56.0          ## distance entre le centre du perso et le bout de l'arme
-const HEAVY_TIP_RADIUS := 24.0          ## taille de la zone qui touche au bout de l'arme
 const HEAVY_ARC_START := -100.0         ## angle de départ en degrés (-90 = droit au-dessus de la tête)
 const HEAVY_ARC_END := 32.0             ## angle d'arrivée (à hauteur des pieds, devant soi)
-const HEAVY_KNOCKBACK := 940.0
 const HEAVY_COUNTER_COOLDOWN := 1.4     ## attaque lourde contrée par une légère : recharge des DEUX joueurs
 const HEAVY_COUNTER_PUSH := 750.0       ## ... et les deux sont repoussés plus loin
 const HEAVY_CLASH_PUSH := 1150.0        ## deux attaques lourdes qui se percutent : micro-explosion, éjectés fort
 const HEAVY_CLASH_LIFT := 320.0         ## ... et un peu soulevés
 
 # --- Blocage (B) : un bouclier de 3 points ---
-const SHIELD_MAX := 3                   ## points de bouclier
 const SHIELD_REGEN_TIME := 2.0          ## 1 point regagné toutes les 2 s quand on ne bloque pas
 const SHIELD_BREAK_COOLDOWN := 1.5      ## bouclier cassé : pas d'attaque pendant ce temps (on peut bouger)
 const HEAVY_SHIELD_DAMAGE := 2          ## l'attaque lourde enlève 2 points, la légère 1
@@ -87,18 +55,13 @@ const SHIELD_HIT_PUSH := 380.0          ## l'attaquant qui frappe le bouclier es
 const SHIELD_BLOCKER_PUSH := 120.0      ## celui qui bloque recule un tout petit peu
 
 # --- Course (LT / Shift, à maintenir) et endurance ---
-const SPRINT_SPEED_MULT := 1.5          ## en courant on va 1,5 fois plus vite (et on saute plus loin)
-const STAMINA_MAX := 100.0
-const STAMINA_SPRINT_DRAIN := 30.0      ## endurance perdue par seconde en courant
 const STAMINA_BLOCK_SPRINT_DRAIN := 70.0  ## ... et en bloquant tout en courant
-const STAMINA_REGEN := 25.0             ## endurance regagnée par seconde sans courir
 const STAMINA_REGEN_DELAY := 0.6        ## temps avant que l'endurance remonte
 const STAMINA_RESTART := 25.0           ## jauge vide : il faut remonter jusque-là pour recourir
 const STAMINA_SHOW_TIME := 1.0          ## la jauge reste affichée ce temps après être pleine
 
 # --- Coup reçu ---
-const INVINCIBLE_TIME := 0.55           ## doit rester plus long que ATTACK_COOLDOWN
-const HIT_KNOCKBACK := 700.0           ## un coup léger repousse d'environ 100 px
+const INVINCIBLE_TIME := 0.55           ## doit rester plus long que la recharge de l'attaque légère
 const CLASH_PUSH := 450.0
 const KNOCKBACK_TIME := 0.2             ## durée pendant laquelle on contrôle moins bien après un coup / un choc
 const KNOCKBACK_ACCEL := 2000.0
@@ -106,6 +69,7 @@ const KNOCKBACK_ACCEL := 2000.0
 const START_LIVES := 3
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
+var stats: CharacterStats = CharacterStats.new()  ## le personnage joué (choisi par game.gd)
 var player_index := 0
 var color := Color.WHITE
 var input_source: InputSource
@@ -115,8 +79,8 @@ var lives := START_LIVES
 var eliminated := false
 var facing := 1.0                       ## 1 = regarde à droite, -1 = à gauche
 
-var _air_jumps_left := AIR_JUMPS
-var _air_dashes_left := AIR_DASHES
+var _air_jumps_left := 0
+var _air_dashes_left := 0
 var _coyote_timer := 0.0
 var _jump_buffer_timer := 0.0
 var _drop_timer := 0.0
@@ -138,13 +102,13 @@ var _heavy_charging := false            ## true = on garde Y pour charger l'atta
 var _charge_time := 0.0
 var _heavy_charge := 0.0                ## 0 = pas chargée, 1 = charge pleine
 
-var stamina := STAMINA_MAX
+var stamina := 0.0
 var _sprinting := false
 var _exhausted := false                 ## jauge vidée : on ne peut plus courir tant qu'elle n'est pas remontée
 var _stamina_regen_timer := 0.0
 var _stamina_show_timer := 0.0
 
-var shield := SHIELD_MAX
+var shield := 0
 var _blocking := false
 var _shield_regen_timer := 0.0
 var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
@@ -156,7 +120,12 @@ var _lives_show_timer := 0.0
 var _blink_clock := 0.0
 
 
-func _init() -> void:
+## Le corps est créé à l'entrée dans la partie, une fois le personnage (stats) choisi.
+func _ready() -> void:
+	_air_jumps_left = stats.air_jumps
+	_air_dashes_left = stats.air_dashes
+	stamina = stats.stamina_max
+	shield = stats.shield_max
 	collision_layer = 0
 	set_collision_layer_value(2, true)          # on est un "joueur"
 	collision_mask = 0
@@ -165,7 +134,7 @@ func _init() -> void:
 	floor_snap_length = 6.0
 	var shape := CollisionShape2D.new()
 	var rect := RectangleShape2D.new()
-	rect.size = BODY_SIZE
+	rect.size = stats.body_size
 	shape.shape = rect
 	add_child(shape)
 
@@ -178,8 +147,8 @@ func physics_tick(input: InputState, delta: float) -> void:
 
 	var on_floor := is_on_floor()
 	if on_floor:
-		_air_jumps_left = AIR_JUMPS
-		_air_dashes_left = AIR_DASHES
+		_air_jumps_left = stats.air_jumps
+		_air_dashes_left = stats.air_dashes
 		_coyote_timer = COYOTE_TIME
 
 	if input.stick.x != 0.0 and not is_attacking():
@@ -191,8 +160,8 @@ func physics_tick(input: InputState, delta: float) -> void:
 		var normal_x := get_wall_normal().x
 		if absf(normal_x) > 0.5 and input.stick.x * normal_x < -0.3:
 			_wall_normal_x = signf(normal_x)
-			_air_jumps_left = WALL_JUMPS
-			_air_dashes_left = AIR_DASHES
+			_air_jumps_left = stats.wall_jumps
+			_air_dashes_left = stats.air_dashes
 			_dash_cooldown_timer = 0.0
 			facing = _wall_normal_x
 
@@ -255,7 +224,7 @@ func _update_sprint(input: InputState, delta: float) -> void:
 	var moving := absf(input.stick.x) > 0.2
 	_sprinting = input.sprint_held and not _exhausted and stamina > 0.0 and (moving or _blocking)
 	if _sprinting:
-		stamina -= (STAMINA_BLOCK_SPRINT_DRAIN if _blocking else STAMINA_SPRINT_DRAIN) * delta
+		stamina -= (STAMINA_BLOCK_SPRINT_DRAIN if _blocking else stats.stamina_sprint_drain) * delta
 		_stamina_regen_timer = STAMINA_REGEN_DELAY
 		if stamina <= 0.0:
 			stamina = 0.0
@@ -263,8 +232,8 @@ func _update_sprint(input: InputState, delta: float) -> void:
 	else:
 		_stamina_regen_timer -= delta
 		if _stamina_regen_timer <= 0.0:
-			stamina = minf(stamina + STAMINA_REGEN * delta, STAMINA_MAX)
-	if stamina < STAMINA_MAX:
+			stamina = minf(stamina + stats.stamina_regen * delta, stats.stamina_max)
+	if stamina < stats.stamina_max:
 		_stamina_show_timer = STAMINA_SHOW_TIME
 	else:
 		_stamina_show_timer -= delta
@@ -275,7 +244,7 @@ func _update_sprint(input: InputState, delta: float) -> void:
 func _update_block(input: InputState, delta: float) -> void:
 	_blocking = input.block_held and shield > 0 and not is_dashing() \
 		and not _is_attack_startup_or_active()
-	if _blocking or shield >= SHIELD_MAX:
+	if _blocking or shield >= stats.shield_max:
 		_shield_regen_timer = 0.0
 		return
 	_shield_regen_timer += delta
@@ -286,31 +255,31 @@ func _update_block(input: InputState, delta: float) -> void:
 
 func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 	# Gauche / droite
-	var accel := GROUND_ACCEL if on_floor else AIR_ACCEL
+	var accel := stats.ground_accel if on_floor else stats.air_accel
 	if _knockback_timer > 0.0:
 		accel = KNOCKBACK_ACCEL
 	elif _wall_jump_timer > 0.0:
 		accel = WALL_JUMP_ACCEL
-	var speed := RUN_SPEED
+	var speed := stats.run_speed
 	if _sprinting:
-		speed *= SPRINT_SPEED_MULT
+		speed *= stats.sprint_speed_mult
 	if _blocking:
 		speed *= BLOCK_SPEED_MULT
 	elif _heavy_charging:
-		speed *= HEAVY_CHARGE_MOVE_MULT
+		speed *= stats.heavy_charge_move_mult
 	velocity.x = move_toward(velocity.x, input.stick.x * speed, accel * delta)
 
 	# Gravité (plus forte si on a lâché le saut pendant la montée d'un saut = petit saut).
 	# Seulement pour un saut : un dash vers le haut ou une projection ne sont pas coupés.
 	if velocity.y >= 0.0:
 		_jump_rising = false
-	var gravity := GRAVITY
+	var gravity := stats.gravity
 	if velocity.y < 0.0 and _jump_rising and not input.jump_held:
-		gravity = SHORT_HOP_GRAVITY
+		gravity = stats.short_hop_gravity
 	velocity.y += gravity * delta
-	var max_fall := FAST_FALL_SPEED if (input.stick.y > 0.5 and not on_floor) else MAX_FALL_SPEED
+	var max_fall := stats.fast_fall_speed if (input.stick.y > 0.5 and not on_floor) else stats.max_fall_speed
 	if is_wall_sliding():
-		max_fall = WALL_SLIDE_SPEED
+		max_fall = stats.wall_slide_speed
 	velocity.y = minf(velocity.y, max_fall)
 
 	# Saut, double saut et saut mural
@@ -319,18 +288,18 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 	var jump_mult := BLOCK_JUMP_MULT if _blocking else 1.0
 	if _jump_buffer_timer > 0.0:
 		if on_floor or _coyote_timer > 0.0:
-			velocity.y = -JUMP_SPEED * jump_mult
+			velocity.y = -stats.jump_speed * jump_mult
 			_jump_rising = true
 			_jump_buffer_timer = 0.0
 			_coyote_timer = 0.0
 		elif input.jump_pressed and is_wall_sliding() and _air_jumps_left > 0:
-			velocity = Vector2(_wall_normal_x * WALL_JUMP_PUSH, -JUMP_SPEED * jump_mult)
+			velocity = Vector2(_wall_normal_x * stats.wall_jump_push, -stats.jump_speed * jump_mult)
 			_jump_rising = true
 			_air_jumps_left -= 1
 			_jump_buffer_timer = 0.0
 			_wall_jump_timer = WALL_JUMP_LOCK
 		elif input.jump_pressed and _air_jumps_left > 0:
-			velocity.y = -DOUBLE_JUMP_SPEED * jump_mult
+			velocity.y = -stats.double_jump_speed * jump_mult
 			_jump_rising = true
 			_air_jumps_left -= 1
 			_jump_buffer_timer = 0.0
@@ -349,14 +318,14 @@ func _try_start_dash(input: InputState, on_floor: bool) -> void:
 	_dash_dir = dir.normalized()
 	if not on_floor:
 		_air_dashes_left -= 1
-	_dash_timer = DASH_TIME
-	_dash_cooldown_timer = DASH_COOLDOWN
+	_dash_timer = stats.dash_time
+	_dash_cooldown_timer = stats.dash_cooldown
 	_jump_rising = false
 	_cancel_attack()
 
 
 func _tick_dash(delta: float) -> void:
-	velocity = _dash_dir * DASH_SPEED
+	velocity = _dash_dir * stats.dash_speed
 	_dash_timer -= delta
 	if _dash_timer <= 0.0:
 		velocity *= DASH_END_KEEP
@@ -372,7 +341,7 @@ func _try_start_attack(heavy: bool) -> void:
 	_heavy_charging = heavy
 	_charge_time = 0.0
 	_heavy_charge = 0.0
-	_attack_cooldown_timer = HEAVY_COOLDOWN if heavy else ATTACK_COOLDOWN
+	_attack_cooldown_timer = stats.heavy_cooldown if heavy else stats.attack_cooldown
 
 
 ## Se tourne vers l'adversaire visé.
@@ -392,12 +361,12 @@ func _tick_attack(input: InputState, delta: float) -> void:
 	if _heavy_charging:
 		# On charge tant que Y est gardé ; on frappe en le lâchant, ou quand la charge est pleine.
 		_charge_time += delta
-		_heavy_charge = clampf((_charge_time - HEAVY_STARTUP) / (HEAVY_CHARGE_MAX - HEAVY_STARTUP), 0.0, 1.0)
-		if (_charge_time >= HEAVY_STARTUP and not input.heavy_held) or _charge_time >= HEAVY_CHARGE_MAX:
+		_heavy_charge = clampf((_charge_time - stats.heavy_startup) / (HEAVY_CHARGE_MAX - stats.heavy_startup), 0.0, 1.0)
+		if (_charge_time >= stats.heavy_startup and not input.heavy_held) or _charge_time >= HEAVY_CHARGE_MAX:
 			_heavy_charging = false
 			_aim_at_target()  # l'adversaire a pu bouger pendant la charge
-			_attack_time = HEAVY_STARTUP
-			_attack_cooldown_timer = HEAVY_COOLDOWN
+			_attack_time = stats.heavy_startup
+			_attack_cooldown_timer = stats.heavy_cooldown
 			velocity = Vector2.ZERO  # la frappe commence : on s'arrête net
 		return
 	_attack_time += delta
@@ -406,22 +375,22 @@ func _tick_attack(input: InputState, delta: float) -> void:
 
 
 func _attack_startup() -> float:
-	return HEAVY_STARTUP if _attack_heavy else ATTACK_STARTUP
+	return stats.heavy_startup if _attack_heavy else stats.attack_startup
 
 
 func _attack_active() -> float:
-	return HEAVY_ACTIVE if _attack_heavy else ATTACK_ACTIVE
+	return stats.heavy_active if _attack_heavy else stats.attack_active
 
 
 ## Angle actuel de l'arme pendant l'attaque lourde (en radians, côté "facing").
 func _heavy_angle() -> float:
-	var progress := clampf((_attack_time - HEAVY_STARTUP) / HEAVY_ACTIVE, 0.0, 1.0)
+	var progress := clampf((_attack_time - stats.heavy_startup) / stats.heavy_active, 0.0, 1.0)
 	return deg_to_rad(lerpf(HEAVY_ARC_START, HEAVY_ARC_END, progress))
 
 
 ## Position du bout de l'arme (par rapport au centre du perso) pour un angle donné.
 func _heavy_tip(angle: float) -> Vector2:
-	return Vector2(facing * cos(angle), sin(angle)) * HEAVY_ARC_RADIUS * heavy_scale()
+	return Vector2(facing * cos(angle), sin(angle)) * stats.heavy_arc_radius * heavy_scale()
 
 
 ## Taille de l'arme lourde : 1 sans charge, HEAVY_CHARGE_GROWTH à pleine charge.
@@ -492,15 +461,15 @@ func is_heavy_attack() -> bool:
 func attack_center() -> Vector2:
 	if _attack_heavy:
 		return global_position + _heavy_tip(_heavy_angle())
-	return global_position + _attack_dir * ATTACK_REACH
+	return global_position + _attack_dir * stats.attack_reach
 
 
 func attack_radius() -> float:
-	return HEAVY_TIP_RADIUS * lerpf(1.0, HEAVY_CHARGE_TIP_GROWTH, _heavy_charge) if _attack_heavy else ATTACK_RADIUS
+	return stats.heavy_tip_radius * lerpf(1.0, HEAVY_CHARGE_TIP_GROWTH, _heavy_charge) if _attack_heavy else stats.attack_radius
 
 
 func attack_knockback() -> float:
-	return HEAVY_KNOCKBACK * lerpf(1.0, HEAVY_CHARGE_KNOCKBACK, _heavy_charge) if _attack_heavy else HIT_KNOCKBACK
+	return stats.heavy_knockback * lerpf(1.0, HEAVY_CHARGE_KNOCKBACK, _heavy_charge) if _attack_heavy else stats.hit_knockback
 
 
 func attack_direction() -> Vector2:
@@ -513,7 +482,7 @@ func can_be_hit() -> bool:
 
 
 func body_rect() -> Rect2:
-	return Rect2(global_position - BODY_SIZE / 2.0, BODY_SIZE)
+	return Rect2(global_position - stats.body_size / 2.0, stats.body_size)
 
 
 # --- Événements déclenchés par game.gd ---
@@ -562,10 +531,13 @@ func absorb_hit(push_dir: Vector2, heavy: bool) -> bool:
 	return true
 
 
-func take_hit(hit_dir: Vector2, knockback := HIT_KNOCKBACK) -> void:
+## knockback = force du coup reçu (-1 = celle d'une attaque légère). Plus on est lourd, moins on recule.
+func take_hit(hit_dir: Vector2, knockback := -1.0) -> void:
+	if knockback < 0.0:
+		knockback = stats.hit_knockback
 	_cancel_attack()
 	_dash_timer = 0.0
-	velocity = hit_dir * knockback + Vector2(0.0, -200.0)
+	velocity = hit_dir * knockback / maxf(stats.weight, 0.1) + Vector2(0.0, -200.0)
 	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
 	_lose_life()
@@ -577,8 +549,8 @@ func fall_out(respawn_position: Vector2) -> void:
 	_dash_timer = 0.0
 	global_position = respawn_position
 	velocity = Vector2.ZERO
-	_air_jumps_left = AIR_JUMPS
-	_air_dashes_left = AIR_DASHES
+	_air_jumps_left = stats.air_jumps
+	_air_dashes_left = stats.air_dashes
 	# On repart à neuf : plus de recul ni de saut en cours venant d'avant la chute.
 	_knockback_timer = 0.0
 	_wall_jump_timer = 0.0
@@ -611,7 +583,7 @@ func show_lives() -> void:
 func _draw() -> void:
 	if eliminated:
 		return
-	var body := Rect2(-BODY_SIZE / 2.0, BODY_SIZE)
+	var body := Rect2(-stats.body_size / 2.0, stats.body_size)
 
 	# Traînée pendant le dash
 	if is_dashing():
@@ -635,24 +607,24 @@ func _draw() -> void:
 		draw_rect(body.grow(7.0), Color(color.lightened(0.6), 0.25 * glow))
 		draw_rect(body, Color(1, 1, 1, 0.35 * glow))
 		draw_rect(body.grow(7.0), Color(1, 1, 1, glow), false, 3.0)
-		_draw_shield_points(-BODY_SIZE.y / 2.0 - 16.0, 1.0)
+		_draw_shield_points(-stats.body_size.y / 2.0 - 16.0, 1.0)
 	elif _shield_flash_timer > 0.0:
 		draw_rect(body.grow(5.0), Color(1, 1, 1, 0.8), false, 3.0)
 
 	# Bouclier cassé : une croix grise tant qu'on ne peut pas attaquer
 	if _shield_broken_timer > 0.0:
 		var a := clampf(_shield_broken_timer / 0.3, 0.0, 1.0) * 0.8
-		var c := Vector2(0, -BODY_SIZE.y / 2.0 - 16.0)
+		var c := Vector2(0, -stats.body_size.y / 2.0 - 16.0)
 		draw_line(c + Vector2(-7, -7), c + Vector2(7, 7), Color(0.75, 0.75, 0.8, a), 3.0)
 		draw_line(c + Vector2(-7, 7), c + Vector2(7, -7), Color(0.75, 0.75, 0.8, a), 3.0)
 
 	# Petit œil pour voir de quel côté on regarde
-	draw_rect(Rect2(Vector2(facing * 3.0 - 2.5, -BODY_SIZE.y / 2.0 + 9.0), Vector2(5, 5)), Color(0.08, 0.09, 0.13))
+	draw_rect(Rect2(Vector2(facing * 3.0 - 2.5, -stats.body_size.y / 2.0 + 9.0), Vector2(5, 5)), Color(0.08, 0.09, 0.13))
 
 	# L'attaque lourde : l'arme levée au-dessus de la tête, puis un arc jusqu'aux pieds
 	if is_attacking() and _attack_heavy:
 		var angle := _heavy_angle()
-		if _attack_time >= HEAVY_STARTUP:
+		if _attack_time >= stats.heavy_startup:
 			var trail := PackedVector2Array()
 			var start := deg_to_rad(HEAVY_ARC_START)
 			for i in 9:
@@ -675,8 +647,8 @@ func _draw() -> void:
 	# L'attaque légère : une barre blanche orientée vers l'adversaire
 	elif is_attacking():
 		draw_set_transform(Vector2.ZERO, _attack_dir.angle())
-		var length := ATTACK_REACH + ATTACK_RADIUS
-		if _attack_time < ATTACK_STARTUP:
+		var length := stats.attack_reach + stats.attack_radius
+		if _attack_time < stats.attack_startup:
 			draw_rect(Rect2(10.0, -2.0, length * 0.5, 4.0), Color(1, 1, 1, 0.5))
 		else:
 			draw_rect(Rect2(10.0, -9.0, length - 10.0, 18.0), Color(1, 1, 1, 0.95))
@@ -693,7 +665,7 @@ func _draw() -> void:
 		var size := 10.0
 		var gap := 5.0
 		var total := START_LIVES * size + (START_LIVES - 1) * gap
-		var y := -BODY_SIZE.y / 2.0 - (32.0 if (_blocking or _shield_broken_timer > 0.0) else 22.0)
+		var y := -stats.body_size.y / 2.0 - (32.0 if (_blocking or _shield_broken_timer > 0.0) else 22.0)
 		for i in START_LIVES:
 			var pip := Rect2(-total / 2.0 + i * (size + gap), y, size, size)
 			if i < lives:
@@ -706,8 +678,8 @@ func _draw() -> void:
 func _draw_shield_points(y: float, alpha: float) -> void:
 	var w := 8.0
 	var gap := 3.0
-	var total := SHIELD_MAX * w + (SHIELD_MAX - 1) * gap
-	for i in SHIELD_MAX:
+	var total := stats.shield_max * w + (stats.shield_max - 1) * gap
+	for i in stats.shield_max:
 		var pip := Rect2(-total / 2.0 + i * (w + gap), y, w, 4.0)
 		if i < shield:
 			draw_rect(pip, Color(1, 1, 1, 0.95 * alpha))
@@ -721,11 +693,11 @@ func _draw_stamina_gauge() -> void:
 	if target != null and not target.eliminated and absf(target.global_position.x - global_position.x) > 1.0:
 		side = -signf(target.global_position.x - global_position.x)
 	var alpha := clampf(_stamina_show_timer / 0.3, 0.0, 1.0)
-	var height := BODY_SIZE.y
-	var x := side * (BODY_SIZE.x / 2.0 + 9.0) - 3.0
+	var height := stats.body_size.y
+	var x := side * (stats.body_size.x / 2.0 + 9.0) - 3.0
 	var frame := Rect2(x, -height / 2.0, 6.0, height)
 	draw_rect(frame, Color(0, 0, 0, 0.5 * alpha))
-	var ratio := stamina / STAMINA_MAX
+	var ratio := stamina / stats.stamina_max
 	var fill_color := Color(0.4, 0.95, 0.5).lerp(Color(1.0, 0.85, 0.3), 1.0 - ratio)
 	if _exhausted:
 		fill_color = Color(0.6, 0.6, 0.65)
