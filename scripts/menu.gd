@@ -22,7 +22,7 @@ const GAME_SCENE := "res://scenes/main.tscn"
 const MAIN_BUTTONS := ["JOUER", "COMMANDES", "OPTIONS"]
 const MIN_LIVES := 1
 const MAX_LIVES := 5
-const SLOT_SIZE := Vector2(230, 450)    ## taille fixe des cases du choix de perso (rien ne bouge)
+const SLOT_SIZE := Vector2(230, 480)    ## taille fixe des cases du choix de perso (rien ne bouge)
 const PREVIEW_SIZE := Vector2(120, 130) ## la zone où le perso est dessiné
 
 var screen := Screen.TITLE
@@ -358,11 +358,16 @@ func _character_slot(index: int) -> PanelContainer:
 	return panel
 
 
-## Donne une hauteur fixe à une ligne de texte (centrée dedans), pour que rien ne bouge.
-func _fixed_row(label: Label, height: float) -> Label:
-	label.custom_minimum_size.y = height
+## Donne une hauteur fixe à une ligne de texte (centrée dedans), pour que rien ne bouge :
+## le texte est posé dans une boîte de taille fixe, la taille de la police n'y change rien.
+func _fixed_row(label: Label, height: float) -> Control:
+	var row := Control.new()
+	row.custom_minimum_size = Vector2(200, height)
+	row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	return label
+	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.add_child(label)
+	return row
 
 
 ## La touche pour se retirer de la partie, selon l'appareil du joueur.
