@@ -1093,6 +1093,50 @@ func _ready() -> void:
 		game._time_engine.stop(true)
 	check(duels.is_empty(), "3 joueurs : une lourde dans le dos d'un joueur qui frappe devant lui le touche, pas de duel %s" % [duels])
 
+	# 13h) Micro-duel à 4 joueurs : la caméra garde tout le monde à l'écran ; à 2, elle zoome sur le duel
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}],
+		[{"type": "joypad", "id": 5}], [{"type": "joypad", "id": 6}]]
+	await new_game()
+	GameSetup.player_devices = []
+	for fighter in game.fighters:
+		fighter.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	game.fighters[0].position = Vector2(500, 540); game.fighters[1].position = Vector2(560, 540)
+	game.fighters[2].position = Vector2(1700, 300); game.fighters[3].position = Vector2(1750, 300)
+	game._start_duel(game.fighters[0], game.fighters[1])
+	game._update_camera(1.0, true)
+	var cam: Camera2D = game._camera
+	var view := Rect2(cam.position - game.get_viewport_rect().size / cam.zoom / 2.0, game.get_viewport_rect().size / cam.zoom)
+	check(view.has_point(game.fighters[3].position) and view.has_point(game.fighters[0].position),
+		"Duel à 4 joueurs : les autres joueurs restent à l'écran (zoom %.2f)" % cam.zoom.x)
+	game._time_engine._time_left = 2.0
+	game._clash(game.fighters[2], game.fighters[3], game.fighters[2].position)
+	check(is_equal_approx(game._time_engine._time_left, 2.0), "Duel à 4 joueurs : un contre entre les 2 autres joueurs ne relance pas le ralenti")
+	game._time_engine._time_left = 2.0
+	game._clash(game.fighters[0], game.fighters[1], game.fighters[0].position)
+	check(is_equal_approx(game._time_engine._time_left, Game.DUEL_DURATION), "Duel à 4 joueurs : un contre entre duellistes relance le ralenti")
+	game._time_engine._time_left = 2.0
+	game._clash(game.fighters[0], game.fighters[2], game.fighters[0].position)
+	check(is_equal_approx(game._time_engine._time_left, Game.DUEL_DURATION), "Duel à 4 joueurs : un duelliste qui contre un autre joueur relance le ralenti")
+	check(game._duel.size() == 2 and game.fighters[0] in game._duel and game.fighters[2] in game._duel,
+		"Duel à 4 joueurs : le joueur contré par un duelliste devient duelliste, l'ancien redevient normal")
+	game._time_engine._time_left = 2.0
+	game._clash(game.fighters[1], game.fighters[3], game.fighters[1].position)
+	check(is_equal_approx(game._time_engine._time_left, 2.0), "Duel à 4 joueurs : l'ancien duelliste ne relance plus le ralenti")
+	game._on_life_lost(game.fighters[1])
+	check(is_equal_approx(game._time_engine._time_left, 2.0), "Duel à 4 joueurs : l'ancien duelliste perd une vie, le ralenti continue")
+	game._on_life_lost(game.fighters[2])
+	check(game._time_engine._time_left <= TimeEngine.RAMP_TIME, "Duel à 4 joueurs : le nouveau duelliste perd une vie, le ralenti s'arrête")
+	var group_zoom := cam.zoom.x
+	game._duel.clear()
+	game._update_camera(1.0, true)
+	check(group_zoom > cam.zoom.x, "Duel à 4 joueurs : la caméra se resserre un peu (%.2f > %.2f)" % [group_zoom, cam.zoom.x])
+	game.fighters[2].eliminated = true; game.fighters[3].eliminated = true
+	game._start_duel(game.fighters[0], game.fighters[1])
+	game._update_camera(1.0, true)
+	check(cam.zoom.x > 1.2, "Duel quand il ne reste que 2 joueurs : zoom sur les duellistes (%.2f)" % cam.zoom.x)
+	game._time_engine.stop(true)
+
 	# 14) Attaque visée : une pichenette sur le stick droit lance un coup léger dans cette direction
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
