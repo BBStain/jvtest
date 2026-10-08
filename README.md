@@ -201,4 +201,4 @@ Comment ça marche : le petit serveur des salons (dossier `server/`, sur Cloudfl
 | `server/` | Le petit serveur des salons (Cloudflare Workers), avec ses tests |
 | `tests/` | Un test automatique qui simule des parties et vérifie les règles |
 | `.github/workflows/web.yml` | Construit la version web et la publie sur GitHub Pages à chaque modification de `main` |
-| `.github/workflows/server.yml` | Teste le serveur des salons et le met en ligne sur Cloudflare à chaque modification de `server/` sur `main` |
+| `.github/workflows/server.yml` | Teste le serveur des salons (Cloudflare le met en ligne lui-même quand `main` change) |
