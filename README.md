@@ -39,7 +39,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - De 2 à 4 joueurs, chacun a **3 vies** (réglable dans OPTIONS).
 - Un coup reçu = une vie perdue. Tomber hors de la map = une vie perdue, et on réapparaît au milieu.
 - Après un coup, on clignote : on est invincible un court instant et on ne peut pas attaquer.
-- L'attaque légère part toujours vers l'adversaire le plus proche, comme un coup de poing rapide ou un coup d'épée horizontal : toute la barre touche, même collé à l'adversaire. S'il est trop loin, elle frappe dans le vide.
+- L'attaque légère part toujours vers l'adversaire le plus proche, comme un coup de poing rapide ou un coup d'épée horizontal : toute la barre touche, même collé à l'adversaire, mais rien derrière soi (à 3 ou 4, celui qui est dans ton dos n'est pas touché, et une attaque dans ton dos n'est pas un contre). S'il est trop loin, elle frappe dans le vide.
 - Si deux joueurs se touchent exactement en même temps, c'est aussi un choc : les deux attaques s'annulent et personne ne perd de vie.
 - Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés. Une marque apparaît à l'endroit du choc et s'efface en quelques secondes (orange si une attaque lourde a été contrée).
 - L'**attaque lourde** part du dessus de la tête et fait un arc de cercle jusqu'aux pieds, devant soi. Elle est plus lente et projette plus fort.

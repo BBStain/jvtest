@@ -212,15 +212,21 @@ func _resolve_clashes() -> void:
 			var b := fighters[j]
 			if not (a.is_attack_active() and b.is_attack_active()):
 				continue
-			# Deux attaques légères dans le même sens (l'un frappe le dos de l'autre) : pas de choc.
-			if not a.is_heavy_attack() and not b.is_heavy_attack() \
-					and a.attack_direction().dot(b.attack_direction()) > 0.0:
+			# Une attaque légère qui part à l'opposé de l'autre joueur ne peut pas faire de choc avec
+			# lui (ex. à 3 ou 4 : on frappe devant soi pendant qu'un autre nous frappe dans le dos).
+			# Ça couvre aussi deux attaques légères dans le même sens (l'un frappe le dos de l'autre).
+			if _points_away(a, b) or _points_away(b, a):
 				continue
 			var closest := Geometry2D.get_closest_points_between_segments(
 				a.attack_start(), a.attack_center(), b.attack_start(), b.attack_center())
 			if closest[0].distance_to(closest[1]) > a.attack_radius() + b.attack_radius():
 				continue
 			_clash(a, b, (closest[0] + closest[1]) / 2.0)
+
+
+## L'attaque légère de a part-elle à l'opposé de b ?
+func _points_away(a: Fighter, b: Fighter) -> bool:
+	return not a.is_heavy_attack() and a.attack_direction().dot(b.global_position - a.global_position) <= 0.0
 
 
 ## Les attaques de a et b s'annulent : les deux sont repoussés et une marque apparaît à "where".
