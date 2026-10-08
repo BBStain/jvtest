@@ -76,6 +76,7 @@ var input_source: InputSource
 var target: Fighter                     ## l'adversaire visé par l'attaque (choisi par game.gd)
 
 var lives := START_LIVES
+var max_lives := START_LIVES  ## vies au début de la partie (pour le dessin des vies)
 var eliminated := false
 var facing := 1.0                       ## 1 = regarde à droite, -1 = à gauche
 
@@ -664,9 +665,9 @@ func _draw() -> void:
 		var alpha := clampf(_lives_show_timer / 0.4, 0.0, 1.0)
 		var size := 10.0
 		var gap := 5.0
-		var total := START_LIVES * size + (START_LIVES - 1) * gap
+		var total := max_lives * size + (max_lives - 1) * gap
 		var y := -stats.body_size.y / 2.0 - (32.0 if (_blocking or _shield_broken_timer > 0.0) else 22.0)
-		for i in START_LIVES:
+		for i in max_lives:
 			var pip := Rect2(-total / 2.0 + i * (size + gap), y, size, size)
 			if i < lives:
 				draw_rect(pip, Color(color, alpha))

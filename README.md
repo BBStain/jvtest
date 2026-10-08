@@ -4,15 +4,23 @@ Prototype de jeu de combat 2D en plateformes, inspiré de Brawlhalla, fait avec 
 
 **Jouer dans le navigateur (téléphone ou ordinateur) : https://bbstain.github.io/jvtest/**
 
-## Avant la partie : l'écran de connexion
+## Avant la partie : le menu
 
-Chaque joueur se connecte avec son appareil, puis on lance la partie (il faut au moins 2 joueurs, jusqu'à 4) :
+1. **Appuie sur une touche** : le premier qui appuie (manette ou clavier) devient le **joueur 1** et ouvre le menu.
+2. **Le menu** a 3 boutons : **JOUER**, **COMMANDES** (le tableau des touches) et **OPTIONS** (le nombre de vies, de 1 à 5).
+   Tant qu'on est dans le menu, chaque nouvelle manette ou côté du clavier qui appuie sur une touche devient le joueur suivant (J2, J3, J4).
+   Deux joueurs peuvent partager un clavier : côté gauche (Z Q S D) et côté droit (flèches).
+3. **JOUER** ouvre le choix du personnage : une case par joueur, avec sa manette ou son clavier. Gauche / droite pour faire défiler les persos, valider pour être prêt.
+   Revenir en arrière annule « prêt », ou fait quitter le joueur (le joueur 1 revient au menu). Il faut au moins 2 joueurs.
+4. Quand tout le monde est prêt : le choix de la map. Valider lance la partie.
 
-- **Manette** : appuie sur **A** pour rejoindre, **B** pour partir.
-- **Clavier** : deux joueurs peuvent partager un clavier. **Espace** pour le côté gauche (Z Q S D), **L** pour le côté droit (flèches). **Échap** retire le dernier joueur clavier.
-- **Lancer la partie** : clique sur le bouton, ou appuie sur **Start** / **Entrée**.
+| Dans le menu | Manette | Clavier gauche | Clavier droit |
+|---|---|---|---|
+| Choisir | Stick ou croix | Z Q S D | Flèches |
+| Valider | A ou Start | Espace, F ou Entrée | L ou K |
+| Revenir | B | Échap ou C | U ou Retour arrière |
 
-À la fin d'une partie : **Start** ou **A** pour rejouer, **B** ou **Échap** pour revenir à cet écran.
+À la fin d'une partie : **Start** ou **A** pour rejouer, **B** ou **Échap** pour revenir au menu (les joueurs restent connectés).
 
 La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quand ils se rapprochent.
 
@@ -20,7 +28,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 
 - **La map** : elle monte haut ! Au centre, le sol avec quatre plateformes, puis des étages de plateformes jusqu'à un sommet, et un grand mur de chaque côté. À gauche, une zone aérienne de pylônes flottants et de petites corniches, avec des pylônes jusqu'en haut, deux ascenseurs qui montent et descendent et une navette qui passe en bas pour rattraper ceux qui tombent. À droite, une zone de duel avec deux petites marches, des étages de plateformes, deux navettes en hauteur et un grand mur au bout. Les plateformes violettes bougent et transportent les joueurs posés dessus.
 
-- 2 joueurs (le code est prêt pour 4), chacun a **3 vies**.
+- De 2 à 4 joueurs, chacun a **3 vies** (réglable dans OPTIONS).
 - Un coup reçu = une vie perdue. Tomber hors de la map = une vie perdue, et on réapparaît au milieu.
 - Après un coup, on clignote : on est invincible un court instant et on ne peut pas attaquer.
 - L'attaque légère part toujours vers l'adversaire le plus proche. S'il est trop loin, elle frappe dans le vide.
@@ -57,13 +65,13 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - Garder le saut appuyé = saut plus haut. Le lâcher tôt = petit saut.
 - En l'air, on a droit à un seul dash avant de retoucher le sol. Un dash vers le haut sert de 3e saut.
 - **Murs** : en l'air, pousse le stick vers un mur pour t'y coller. Tu glisses doucement vers le bas, et tes 2 sauts et ton dash sont rechargés. Saute pour rebondir dans l'autre sens.
-- Le premier qui rejoint sur l'écran de connexion est le joueur 1, le suivant le joueur 2, etc.
+- Le premier qui appuie sur une touche est le joueur 1, le suivant le joueur 2, etc.
 
 ## Jouer sur ton téléphone avec une manette Bluetooth
 
 1. Connecte ta manette au téléphone dans les réglages Bluetooth du téléphone.
 2. Ouvre le lien du jeu dans Chrome (ou Safari sur iPhone) et tourne le téléphone à l'horizontale.
-3. Appuie sur **A** : ta manette apparaît dans la case du joueur 1.
+3. Appuie sur **A** : ta manette devient le joueur 1.
 
 Sur ordinateur, la manette PS5 marche dans Chrome ou Edge, mais Firefox la reconnaît mal.
 
@@ -95,7 +103,7 @@ Si Godot est en anglais : Editor > Editor Settings > Interface > Editor > Editor
 
 ### 4. Lancer le jeu
 
-Appuie sur **F5**, ou clique sur le triangle ▶ en haut à droite. Une fenêtre s'ouvre sur l'écran de connexion.
+Appuie sur **F5**, ou clique sur le triangle ▶ en haut à droite. Une fenêtre s'ouvre sur l'écran « Appuie sur une touche ».
 Astuce : ouvre `scenes/main.tscn` et appuie sur **F6** pour aller directement au combat (joueur 1 = Z Q S D ou manette 1, joueur 2 = flèches ou manette 2).
 Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir à l'éditeur.
 
@@ -119,7 +127,7 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 ## Prochaines étapes
 
 1. Utiliser le moteur de temps (`scripts/time_engine.gd`) pour d'autres moments forts (ralentis et accélérations).
-2. Un menu (écran titre, commandes, options).
+2. D'autres personnages (avec leurs propres caractéristiques) et d'autres maps.
 3. Des attaques spéciales avec des combinaisons de touches.
 4. Le jeu en ligne.
 
@@ -127,7 +135,7 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 
 | Fichier | Rôle |
 |---|---|
-| `scenes/lobby.tscn` + `scripts/lobby.gd` | L'écran de connexion des joueurs |
+| `scenes/menu.tscn` + `scripts/menu.gd` | Le menu : « Appuie sur une touche », les boutons, le choix du perso et de la map |
 | `scripts/game_setup.gd` | La liste des maps et des personnages, et les choix des joueurs (appareil, personnage, map) |
 | `scenes/main.tscn` | Le combat : la caméra et l'écran de fin (la map est chargée à part) |
 | `scenes/maps/` + `scripts/game_map.gd` | Les maps : le décor, les points d'apparition et la zone de jeu |

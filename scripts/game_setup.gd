@@ -1,6 +1,6 @@
 class_name GameSetup
 extends RefCounted
-## Ce que l'écran de connexion (et plus tard le menu) transmet à la partie :
+## Ce que le menu transmet à la partie :
 ## quels appareils, quel personnage pour quel joueur, et sur quelle map.
 ## (Les "static var" gardent leur valeur quand on change de scène.)
 
@@ -19,10 +19,12 @@ static var player_devices: Array = []
 static var player_characters: Array = []
 ## La map de la partie (chemin d'une scène de MAPS).
 static var map_path: String = MAPS[0]
+## Le nombre de vies de chaque joueur (réglable dans OPTIONS).
+static var lives := 3
 
 
-## Si on lance directement la scène de combat (F6 dans l'éditeur), sans passer par l'écran
-## de connexion : 2 joueurs, J1 = clavier gauche + manette 1, J2 = clavier droit + manette 2.
+## Si on lance directement la scène de combat (F6 dans l'éditeur), sans passer par le
+## menu : 2 joueurs, J1 = clavier gauche + manette 1, J2 = clavier droit + manette 2.
 static func devices_or_default() -> Array:
 	if not player_devices.is_empty():
 		return player_devices
