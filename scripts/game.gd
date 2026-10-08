@@ -21,9 +21,17 @@ const CAMERA_ZOOM_MIN := 0.3               ## zoom le plus éloigné (plus petit
 const CAMERA_ZOOM_MAX := 1.2               ## zoom le plus proche
 const CAMERA_SMOOTHING := 6.0              ## plus grand = la caméra réagit plus vite
 
+# --- Micro-duel : une attaque lourde contrée par une légère -> zoom et ralenti ---
+const DUEL_TIME_SCALE := 0.5               ## le jeu va 2 fois moins vite
+const DUEL_DURATION := 5.0                 ## pendant 5 vraies secondes
+const DUEL_CAMERA_MARGIN := Vector2(320, 220)  ## la caméra serre les deux duellistes
+const DUEL_ZOOM_MAX := 2.0
+
 var fighters: Array[Fighter] = []
 var _match_over := false
 var _match_over_time := 0.0
+var _time_engine := TimeEngine.new()
+var _duel: Array[Fighter] = []             ## les deux joueurs du micro-duel en cours
 
 @onready var _spawn_points: Array[Node] = $SpawnPoints.get_children()
 @onready var _respawn_point: Marker2D = $RespawnPoint
@@ -33,6 +41,7 @@ var _match_over_time := 0.0
 
 
 func _ready() -> void:
+	add_child(_time_engine)
 	InputBindings.register_menu_actions()
 	var player_devices := GameSetup.devices_or_default()
 	for i in player_devices.size():
@@ -45,13 +54,16 @@ func _ready() -> void:
 		fighter.position = (_spawn_points[i] as Node2D).position
 		fighter.facing = 1.0 if fighter.position.x < _respawn_point.position.x else -1.0
 		add_child(fighter)
+		fighter.life_lost.connect(_on_life_lost)
 		fighter.show_lives()
 		fighters.append(fighter)
 	_update_camera(1.0, true)
 
 
 func _process(delta: float) -> void:
-	_update_camera(delta, false)
+	if not _time_engine.is_active():
+		_duel.clear()
+	_update_camera(delta / Engine.time_scale, false)  # la caméra garde sa vitesse pendant un ralenti
 
 
 func _physics_process(delta: float) -> void:
@@ -76,10 +88,12 @@ func _physics_process(delta: float) -> void:
 
 
 ## Cadre tous les joueurs encore en jeu : centre au milieu d'eux, zoom selon leur écart.
+## Pendant un micro-duel, la caméra zoome sur les deux duellistes.
 func _update_camera(delta: float, instant: bool) -> void:
 	var box := Rect2()
 	var first := true
-	for fighter in fighters:
+	var framed := _duel if not _duel.is_empty() else fighters
+	for fighter in framed:
 		if fighter.eliminated:
 			continue
 		if first:
@@ -90,8 +104,9 @@ func _update_camera(delta: float, instant: bool) -> void:
 	if first:
 		return
 	var view_size := get_viewport_rect().size
-	var needed := box.size + CAMERA_MARGIN
-	var target_zoom := clampf(minf(view_size.x / needed.x, view_size.y / needed.y), CAMERA_ZOOM_MIN, CAMERA_ZOOM_MAX)
+	var needed := box.size + (DUEL_CAMERA_MARGIN if not _duel.is_empty() else CAMERA_MARGIN)
+	var zoom_max := DUEL_ZOOM_MAX if not _duel.is_empty() else CAMERA_ZOOM_MAX
+	var target_zoom := clampf(minf(view_size.x / needed.x, view_size.y / needed.y), CAMERA_ZOOM_MIN, zoom_max)
 	var target_position := box.get_center()
 	if instant:
 		_camera.position = target_position
@@ -130,6 +145,8 @@ func _resolve_clashes() -> void:
 
 
 ## Les attaques de a et b s'annulent : les deux sont repoussés et une marque apparaît à "where".
+## Lourde contre lourde : micro-explosion qui éjecte fort les deux joueurs.
+## Lourde contrée par une légère : micro-duel, la caméra zoome et le temps ralentit.
 func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
 	var push := a.global_position - b.global_position
 	if push.length() < 1.0:
@@ -137,9 +154,28 @@ func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
 	push.y = 0.0
 	push = push.normalized()
 	var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
-	_spawn_clash_mark(where, heavy_countered)
-	a.clash(push, heavy_countered)
-	b.clash(-push, heavy_countered)
+	var explosion := a.is_heavy_attack() and b.is_heavy_attack()
+	_spawn_clash_mark(where, heavy_countered or explosion)
+	a.clash(push, heavy_countered, explosion)
+	b.clash(-push, heavy_countered, explosion)
+	if explosion:
+		var boom := MicroExplosion.new()
+		boom.position = where
+		add_child(boom)
+	elif heavy_countered:
+		_start_duel(a, b)
+
+
+## Micro-duel : la caméra serre les deux joueurs et le jeu ralentit pendant quelques secondes.
+func _start_duel(a: Fighter, b: Fighter) -> void:
+	_duel = [a, b]
+	_time_engine.play(DUEL_TIME_SCALE, DUEL_DURATION)
+
+
+## Un duelliste touché ou tombé : le duel est tranché, le temps revient à la normale.
+func _on_life_lost(fighter: Fighter) -> void:
+	if fighter in _duel:
+		_time_engine.stop()
 
 
 ## Laisse une marque sur le terrain à l'endroit du contre (orange si une attaque lourde a été contrée).
@@ -222,6 +258,8 @@ func _check_end_of_match() -> void:
 		return
 	_match_over = true
 	_match_over_time = 0.0
+	_duel.clear()
+	_time_engine.stop(true)
 	if alive.size() == 1:
 		var winner := alive[0]
 		_winner_label.text = "Joueur %d gagne !" % (winner.player_index + 1)
