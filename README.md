@@ -43,17 +43,33 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - Si deux joueurs se touchent exactement en même temps, c'est aussi un choc : les deux attaques s'annulent et personne ne perd de vie.
 - Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés. Une marque apparaît à l'endroit du choc et s'efface en quelques secondes (orange si une attaque lourde a été contrée).
 - L'**attaque lourde** part du dessus de la tête et fait un arc de cercle jusqu'aux pieds, devant soi. Elle est plus lente et projette plus fort.
-- **Charger l'attaque lourde** : garde Y appuyé. Plus tu charges, plus l'arme grandit (jusqu'à 2 fois plus longue), frappe loin et projette fort. Tu frappes en lâchant Y, ou tout seul au bout d'1 seconde. Pendant la charge tu avances lentement, et pendant la frappe tu es immobilisé.
-- Contrer une attaque lourde (pendant sa frappe) avec une attaque légère annule les deux : les deux joueurs sont repoussés loin et ne peuvent plus attaquer pendant 1,4 seconde. C'est un **micro-duel** : la caméra zoome sur eux et le temps ralentit (2 fois moins vite) pendant 5 secondes, ou jusqu'à ce que l'un des deux perde une vie.
+- **Charger l'attaque lourde** : garde Y appuyé. Plus tu charges, plus l'arme grandit (jusqu'à 2 fois plus longue), frappe loin et projette fort. Tu frappes en lâchant Y, ou tout seul quand la charge est pleine (1 seconde, 0,7 pour Jib). Pendant la charge tu avances lentement, et pendant la frappe tu es immobilisé.
+- Contrer une attaque lourde (pendant sa frappe) avec une attaque légère annule les deux : les deux joueurs sont repoussés loin. Celui qui a lancé la lourde ne peut plus attaquer pendant **1 seconde**, celui qui a contré peut refrapper **tout de suite**. C'est un **micro-duel** : la caméra zoome sur eux et le temps ralentit (2 fois moins vite) pendant 5 secondes, ou jusqu'à ce que l'un des deux perde une vie.
+- **Pendant un ralenti, chaque contre** (attaques qui se percutent, lourde contrée, blocage parfait) **relance le ralenti** pour toute sa durée : plus on se contre, plus le duel au ralenti dure.
+- Quand on se contre, chacun est repoussé d'autant plus loin que l'autre est **lourd** : un gros perso repousse loin un petit, et recule peu.
 - Deux attaques lourdes qui se percutent font une **micro-explosion** qui éjecte fort les deux joueurs, sans perte de vie.
 - Pendant un dash, on ne peut pas être touché, mais on ne peut pas attaquer.
 - **Blocage** (tenir B) : le personnage s'entoure d'un contour lumineux. Un coup sur le bouclier ne fait pas perdre de vie, et l'attaquant est repoussé mais peut refrapper tout de suite. Mais chaque coup fait **craquer** un peu plus la surbrillance : il faut **20 coups** pour la casser (une attaque lourde compte pour 2).
+- **Blocage parfait** : appuie sur B **pile au moment** où le coup arrive (au plus 0,15 seconde avant). C'est un contre : personne ne perd de vie, le bouclier ne craque pas, les deux sont repoussés, une marque bleue apparaît, et celui qui frappait ne peut plus attaquer pendant **1 seconde** alors que toi tu peux riposter tout de suite. Si tu bloquais déjà depuis plus longtemps, c'est un blocage normal.
 - Pendant le blocage, on avance beaucoup plus lentement, on saute moins haut, et on ne peut ni dasher ni attaquer.
 - Le bouclier se répare lentement quand on ne bloque pas (une fissure en moins toutes les 2 secondes).
 - Si le bouclier casse : **ralenti**, les deux joueurs sont éjectés, et celui qui l'a perdu ne peut plus attaquer pendant 2 secondes (il peut toujours bouger, sauter et dasher). Son bouclier reste **cassé jusqu'à la fin de la partie** : il ne peut plus bloquer.
 - **Course** (tenir LT ou Shift) : on va 1,5 fois plus vite, donc on saute aussi plus loin. Toutes les actions marchent en courant.
 - Courir vide une **jauge d'endurance**, qui apparaît à côté du perso, du côté opposé à l'adversaire. Bloquer en courant la vide plus de 2 fois plus vite. Quand on arrête de courir, elle remonte. Si elle est vide, on ne peut plus courir tant qu'elle n'est pas remontée un peu.
 - La partie s'arrête quand il ne reste qu'un joueur en vie.
+
+### Les personnages
+
+| | Barre | Jumb | Jib |
+|---|---|---|---|
+| Taille | normale | plus grand et plus large | plus petit |
+| Poids (calculé selon la taille) | 1 | 1,4 : recule moins, repousse plus | 0,78 : recule plus, repousse moins |
+| Vitesse | normale | plus lent | plus rapide |
+| Saut | normal | un tout petit peu moins haut | plus haut |
+| Attaques | normales | plus longues, projettent plus loin | plus courtes, projettent moins loin |
+| Dash | normal | même longueur, plus lent | même longueur, plus rapide |
+| Endurance (course) | normale | se vide plus vite | se vide plus lentement |
+| Attaque lourde | charge pleine en 1 s | charge pleine en 1 s | charge pleine en 0,7 s |
 
 ## Les commandes
 
@@ -125,7 +141,10 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
   (son nom et sa courte `description` s'affichent dans le choix du perso), puis ajoute son chemin dans la liste `CHARACTERS`
   de `scripts/game_setup.gd`. Tout suit ses réglages : sa taille, ses sauts, son dash, la longueur et l'épaisseur de ses attaques
   (le dessin suit la zone qui touche), son bouclier, son endurance, et son **poids** (un perso 2 fois plus lourd est
-  repoussé 2 fois moins loin par les coups, les chocs et le bouclier).
+  repoussé 2 fois moins loin par les coups, les chocs et le bouclier, et repousse plus loin les plus légers quand ils se contrent).
+  Le poids se **calcule tout seul selon la taille** : laisse `weight` à 0 et change `body_size`, le perso devient plus lourd
+  s'il prend plus de place (mets un autre chiffre dans `weight` pour forcer un poids). Le reste (vitesse, sauts…) se règle
+  à la main : c'est ce qui donne à chaque perso son caractère.
 - **Les règles communes à tous** (bouclier, contre, invincibilité…) : en haut de `scripts/fighter.gd`, chaque règle est une ligne `const` avec une explication.
 - **La map** : ouvre `scenes/maps/arene.tscn`. Dans l'arbre à gauche, clique sur `Sol`, `PlateformeMilieu`, `PlateformeHaut`, `MurGauche`, `MurDroit`
   ou une pièce de `ZoneAerienne` / `ZoneDuel`, et déplace-les avec la souris dans la vue du milieu. Attention, chaque plateforme a deux enfants à garder de la même taille :
@@ -144,7 +163,7 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 ## Prochaines étapes
 
 1. Utiliser le moteur de temps (`scripts/time_engine.gd`) pour d'autres moments forts (ralentis et accélérations).
-2. D'autres personnages (avec leurs propres caractéristiques) et d'autres maps.
+2. Une deuxième map.
 3. Des attaques spéciales avec des combinaisons de touches.
 4. Le jeu en ligne.
 

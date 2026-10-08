@@ -27,6 +27,7 @@ const DUEL_CAMERA_MARGIN := Vector2(320, 220)  ## la caméra serre les deux duel
 const DUEL_ZOOM_MAX := 2.0
 const SHIELD_BREAK_TIME_SCALE := 0.3        ## bouclier cassé : ralenti (3 fois moins vite)...
 const SHIELD_BREAK_SLOWMO := 1.2            ## ... pendant 1,2 vraie seconde
+const PARRY_COLOR := Color(0.55, 0.85, 1.0)  ## la marque d'un blocage parfait
 
 var fighters: Array[Fighter] = []
 var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
@@ -217,25 +218,55 @@ func _resolve_clashes() -> void:
 
 
 ## Les attaques de a et b s'annulent : les deux sont repoussés et une marque apparaît à "where".
+## Chacun est repoussé d'autant plus fort que l'autre est lourd (voir CharacterStats.mass()).
+## Légère contre légère : petit temps mort pour les deux.
 ## Lourde contre lourde : micro-explosion qui éjecte fort les deux joueurs.
-## Lourde contrée par une légère : micro-duel, la caméra zoome et le temps ralentit.
+## Lourde contrée par une légère : micro-duel, la caméra zoome et le temps ralentit ; celui qui
+## a lancé la lourde ne frappe plus pendant 1 s, celui qui a contré peut refrapper tout de suite.
+## Pendant un ralenti, chaque contre le fait repartir pour toute sa durée.
 func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
-	var push := a.global_position - b.global_position
-	if push.length() < 1.0:
-		push = Vector2(-1.0, 0.0)
-	push.y = 0.0
-	push = push.normalized()
+	var push := _push_dir(a, b)
 	var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
 	var explosion := a.is_heavy_attack() and b.is_heavy_attack()
 	_spawn_clash_mark(where, heavy_countered or explosion)
-	a.clash(push, heavy_countered, explosion)
-	b.clash(-push, heavy_countered, explosion)
 	if explosion:
+		a.clash(push * Fighter.HEAVY_CLASH_PUSH * b.stats.mass(), Fighter.CLASH_LOCKOUT, Fighter.HEAVY_CLASH_LIFT)
+		b.clash(-push * Fighter.HEAVY_CLASH_PUSH * a.stats.mass(), Fighter.CLASH_LOCKOUT, Fighter.HEAVY_CLASH_LIFT)
 		var boom := MicroExplosion.new()
 		boom.position = where
 		add_child(boom)
+		_time_engine.renew()
 	elif heavy_countered:
+		for fighter in [a, b]:
+			var other: Fighter = b if fighter == a else a
+			var cooldown := Fighter.HEAVY_COUNTERED_COOLDOWN if fighter.is_heavy_attack() else 0.0
+			var direction := push if fighter == a else -push
+			fighter.clash(direction * Fighter.HEAVY_COUNTER_PUSH * other.stats.mass(), cooldown)
 		_start_duel(a, b)
+	else:
+		a.clash(push * Fighter.CLASH_PUSH * b.stats.mass())
+		b.clash(-push * Fighter.CLASH_PUSH * a.stats.mass())
+		_time_engine.renew()
+
+
+## Blocage parfait : le défenseur a appuyé sur B pile au moment du coup. C'est un contre :
+## les deux sont repoussés, le bouclier ne craque pas, celui qui frappait ne frappe plus
+## pendant 1 s et le défenseur peut riposter tout de suite.
+func _parry(attacker: Fighter, defender: Fighter) -> void:
+	var push := _push_dir(attacker, defender)
+	_spawn_clash_mark((attacker.global_position + defender.global_position) / 2.0, false, PARRY_COLOR)
+	attacker.clash(push * Fighter.CLASH_PUSH * defender.stats.mass(), Fighter.PARRY_COOLDOWN)
+	defender.clash(-push * Fighter.CLASH_PUSH * attacker.stats.mass(), 0.0)
+	_time_engine.renew()
+
+
+## Direction (horizontale) qui éloigne a de b.
+func _push_dir(a: Fighter, b: Fighter) -> Vector2:
+	var push := a.global_position - b.global_position
+	push.y = 0.0
+	if push.length() < 1.0:
+		return Vector2(-1.0, 0.0)
+	return push.normalized()
 
 
 ## Micro-duel : la caméra serre les deux joueurs et le jeu ralentit pendant quelques secondes.
@@ -250,11 +281,14 @@ func _on_life_lost(fighter: Fighter) -> void:
 		_time_engine.stop()
 
 
-## Laisse une marque sur le terrain à l'endroit du contre (orange si une attaque lourde a été contrée).
-func _spawn_clash_mark(where: Vector2, heavy_countered: bool) -> void:
+## Laisse une marque sur le terrain à l'endroit du contre (orange si une attaque lourde a été contrée,
+## bleu clair pour un blocage parfait).
+func _spawn_clash_mark(where: Vector2, heavy_countered: bool, color := Color.TRANSPARENT) -> void:
 	var mark := ClashMark.new()
 	mark.position = where
-	mark.color = Color(1.0, 0.6, 0.2) if heavy_countered else Color(1, 1, 1)
+	if color == Color.TRANSPARENT:
+		color = Color(1.0, 0.6, 0.2) if heavy_countered else Color(1, 1, 1)
+	mark.color = color
 	add_child(mark)
 
 
@@ -292,6 +326,9 @@ func _resolve_hits() -> void:
 			continue
 		if not victim.can_be_hit():
 			continue  # déjà touché cette frame par quelqu'un d'autre
+		if victim.is_parrying():
+			_parry(attacker, victim)
+			continue
 		if victim.is_blocking():
 			_hit_shield(attacker, victim, hit.heavy)
 			continue

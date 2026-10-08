@@ -35,13 +35,13 @@ const CLASH_LOCKOUT := 0.08             ## petit temps mort après un choc d'att
 # On la charge en gardant Y appuyé : plus on charge, plus l'arme grandit et frappe loin.
 # On frappe en lâchant Y (ou tout seul quand la charge est au maximum).
 # Pendant la frappe, le perso est immobilisé.
-const HEAVY_CHARGE_MAX := 1.0           ## au bout de ce temps la charge est pleine et on frappe tout seul
 const HEAVY_CHARGE_GROWTH := 2.0        ## à pleine charge, l'arme est 2 fois plus longue
 const HEAVY_CHARGE_TIP_GROWTH := 1.5    ## à pleine charge, la zone qui touche est 1,5 fois plus grosse
 const HEAVY_CHARGE_KNOCKBACK := 1.5     ## à pleine charge, on projette 1,5 fois plus fort
 const HEAVY_ARC_START := -100.0         ## angle de départ en degrés (-90 = droit au-dessus de la tête)
 const HEAVY_ARC_END := 32.0             ## angle d'arrivée (à hauteur des pieds, devant soi)
-const HEAVY_COUNTER_COOLDOWN := 1.4     ## attaque lourde contrée par une légère : recharge des DEUX joueurs
+const HEAVY_COUNTERED_COOLDOWN := 1.0   ## attaque lourde contrée par une légère : celui qui l'a lancée ne frappe
+                                        ## plus pendant 1 s ; celui qui contre peut refrapper tout de suite
 const HEAVY_COUNTER_PUSH := 750.0       ## ... et les deux sont repoussés plus loin
 const HEAVY_CLASH_PUSH := 1150.0        ## deux attaques lourdes qui se percutent : micro-explosion, éjectés fort
 const HEAVY_CLASH_LIFT := 320.0         ## ... et un peu soulevés
@@ -56,6 +56,8 @@ const BLOCK_SPEED_MULT := 0.3           ## en bloquant, on se déplace beaucoup 
 const BLOCK_JUMP_MULT := 0.7            ## en bloquant, on saute environ 2 fois moins haut
 const SHIELD_HIT_PUSH := 380.0          ## l'attaquant qui frappe le bouclier est repoussé
 const SHIELD_BLOCKER_PUSH := 120.0      ## celui qui bloque recule un tout petit peu
+const PARRY_WINDOW := 0.15              ## blocage parfait : B appuyé au plus tant de secondes avant le coup...
+const PARRY_COOLDOWN := 1.0             ## ... c'est un contre : celui qui frappait ne frappe plus pendant 1 s
 
 # --- Course (LT / Shift, à maintenir) et endurance ---
 const STAMINA_BLOCK_SPRINT_DRAIN := 70.0  ## ... et en bloquant tout en courant
@@ -116,6 +118,7 @@ var shield := 0
 var shield_broken := false              ## cassé : plus de blocage jusqu'à la fin de la partie
 var _cracks: Array[PackedVector2Array] = []  ## les fissures du bouclier, une par point perdu
 var _blocking := false
+var _block_time := 0.0                  ## depuis combien de temps on bloque (pour le blocage parfait)
 var _shield_regen_timer := 0.0
 var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
 var _shield_flash_timer := 0.0          ## petit éclat quand le bouclier encaisse un coup
@@ -251,6 +254,7 @@ func _update_sprint(input: InputState, delta: float) -> void:
 func _update_block(input: InputState, delta: float) -> void:
 	_blocking = input.block_held and not shield_broken and not is_dashing() \
 		and not _is_attack_startup_or_active()
+	_block_time = _block_time + delta if _blocking else 0.0
 	if _blocking or shield_broken or shield >= stats.shield_max:
 		_shield_regen_timer = 0.0
 		return
@@ -368,8 +372,8 @@ func _tick_attack(input: InputState, delta: float) -> void:
 	if _heavy_charging:
 		# On charge tant que Y est gardé ; on frappe en le lâchant, ou quand la charge est pleine.
 		_charge_time += delta
-		_heavy_charge = clampf((_charge_time - stats.heavy_startup) / (HEAVY_CHARGE_MAX - stats.heavy_startup), 0.0, 1.0)
-		if (_charge_time >= stats.heavy_startup and not input.heavy_held) or _charge_time >= HEAVY_CHARGE_MAX:
+		_heavy_charge = clampf((_charge_time - stats.heavy_startup) / (stats.heavy_charge_time - stats.heavy_startup), 0.0, 1.0)
+		if (_charge_time >= stats.heavy_startup and not input.heavy_held) or _charge_time >= stats.heavy_charge_time:
 			_heavy_charging = false
 			_aim_at_target()  # l'adversaire a pu bouger pendant la charge
 			_attack_time = stats.heavy_startup
@@ -449,6 +453,11 @@ func is_blocking() -> bool:
 	return _blocking
 
 
+## Blocage parfait : on vient tout juste de commencer à bloquer.
+func is_parrying() -> bool:
+	return _blocking and _block_time <= PARRY_WINDOW
+
+
 func can_attack() -> bool:
 	return not eliminated and not is_dashing() and not is_invincible() and not _blocking \
 		and not is_attacking() and _attack_cooldown_timer <= 0.0
@@ -507,17 +516,13 @@ func mark_attack_hit() -> void:
 	_attack_has_hit = true
 
 
-## Deux attaques se sont touchées : elles s'annulent et on est repoussé.
-## heavy_countered = une attaque lourde a été contrée par une légère : les deux joueurs
-## ont une longue recharge et sont repoussés plus loin.
-## explosion = deux attaques lourdes se sont percutées : les deux sont éjectés fort.
-func clash(push_dir: Vector2, heavy_countered := false, explosion := false) -> void:
+## Un contre : notre attaque est annulée (s'il y en avait une), on est repoussé par "push"
+## (game.gd la calcule : plus l'autre est lourd, plus elle est forte) et on ne peut plus
+## attaquer pendant "cooldown".
+func clash(push: Vector2, cooldown := CLASH_LOCKOUT, lift := 150.0) -> void:
 	_cancel_attack()
-	_attack_cooldown_timer = HEAVY_COUNTER_COOLDOWN if heavy_countered else CLASH_LOCKOUT
-	if explosion:
-		velocity = _pushed(push_dir * HEAVY_CLASH_PUSH) + Vector2(0.0, -HEAVY_CLASH_LIFT)
-	else:
-		velocity = _pushed(push_dir * (HEAVY_COUNTER_PUSH if heavy_countered else CLASH_PUSH)) + Vector2(0.0, -150.0)
+	_attack_cooldown_timer = cooldown
+	velocity = _pushed(push) + Vector2(0.0, -lift)
 	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
 
@@ -574,7 +579,7 @@ func take_hit(hit_dir: Vector2, knockback := -1.0) -> void:
 ## Toutes les poussées reçues (coups, chocs, bouclier) passent par ici : plus le perso est lourd,
 ## moins il est repoussé (poids 2 = 2 fois moins loin).
 func _pushed(force: Vector2) -> Vector2:
-	return force / maxf(stats.weight, 0.1)
+	return force / stats.mass()
 
 
 ## Sorti de la map : on perd une vie et on réapparaît au milieu.

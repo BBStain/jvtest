@@ -6,6 +6,13 @@ extends Resource
 ## Pour créer un perso : duplique characters/barre.tres, ouvre-le dans Godot, change ses chiffres
 ## dans l'inspecteur, puis ajoute-le dans CHARACTERS de scripts/game_setup.gd.
 ## Les valeurs ci-dessous sont celles par défaut (celles de la Barre).
+##
+## Le poids est calculé tout seul à partir de la taille (sauf si on le règle à la main) :
+## un perso qui prend plus de place est plus lourd. Plus on est lourd, moins on recule, et plus
+## on repousse loin un adversaire plus léger quand on se contre. Le reste (vitesse, sauts...)
+## se règle à la main, pour garder chaque perso bien à lui.
+
+const BASE_SIZE := Vector2(20, 60)  ## la taille de la Barre : poids 1
 
 @export var display_name := "Barre"
 @export var description := ""
@@ -53,6 +60,7 @@ extends Resource
 @export var heavy_tip_radius: float = 24.0  ## taille de la zone qui touche au bout de l'arme
 @export var heavy_knockback: float = 940.0
 @export var heavy_charge_move_mult: float = 0.6  ## en chargeant, on avance lentement
+@export var heavy_charge_time: float = 1.0  ## temps pour arriver à la charge pleine (on frappe alors tout seul)
 
 @export_group("Blocage")
 @export var shield_max: int = 20  ## nombre de coups que le bouclier encaisse avant de casser
@@ -64,4 +72,12 @@ extends Resource
 @export var stamina_regen: float = 25.0  ## endurance regagnée par seconde sans courir
 
 @export_group("Poids")
-@export var weight: float = 1.0  ## plus lourd = repoussé moins loin par les coups, les chocs et le bouclier (2 = 2 fois moins loin)
+@export var weight: float = 0.0  ## 0 = calculé selon la taille ; sinon le poids voulu (2 = 2 fois moins repoussé)
+
+
+## Le poids du perso : celui réglé à la main, ou sinon calculé selon sa taille
+## (2 fois plus de surface que la Barre = environ 1,4 fois plus lourd).
+func mass() -> float:
+	if weight > 0.0:
+		return weight
+	return sqrt((body_size.x * body_size.y) / (BASE_SIZE.x * BASE_SIZE.y))
