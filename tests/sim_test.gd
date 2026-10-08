@@ -653,5 +653,53 @@ func _ready() -> void:
 	check(game.fighters[0].lives == 5 and game.fighters[0].max_lives == 5, "Partie : les vies réglées dans OPTIONS sont utilisées")
 	GameSetup.lives = 3
 
+	# 11) Menu pause : Reprendre, Restart, Remap, Quitter
+	var pad0 := {"type": "joypad", "id": 0}
+	var pad1 := {"type": "joypad", "id": 1}
+	GameSetup.player_devices = [[pad0], [pad1]]
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	await step(10)
+	var start_event := InputEventJoypadButton.new()
+	start_event.device = 1
+	start_event.button_index = JOY_BUTTON_START
+	start_event.pressed = true
+	game._input(start_event)
+	check(get_tree().paused and game.pause_menu != null, "Pause : Start ouvre le menu pause, le jeu est figé")
+	var x_paused := p1.position.x
+	p1.velocity.x = 500.0
+	await step(10)
+	check(p1.position.x == x_paused, "Pause : plus rien ne bouge")
+	await shot("14_pause")
+	var pause: PauseMenu = game.pause_menu
+	pause.change_scene = false
+	pause.handle(pad1, "down")
+	pause.handle(pad1, "down")
+	pause.handle(pad1, "confirm")
+	check(pause.screen == PauseMenu.Screen.REMAP, "Pause : REMAP s'ouvre")
+	pause.handle(pad0, "right")
+	check(game.player_devices == [[pad1], [pad0]] and GameSetup.player_devices == [[pad1], [pad0]],
+		"Remap : la manette 1 passe au joueur 2 (et la 2 au joueur 1)")
+	var p1_jump_device := -1
+	for ev in InputMap.action_get_events("p1_jump"):
+		p1_jump_device = ev.device
+	check(p1_jump_device == 1, "Remap : J1 saute maintenant avec la manette 2")
+	await shot("15_remap")
+	pause.handle(pad0, "back")
+	check(pause.screen == PauseMenu.Screen.LIST, "Remap : B revient à la liste")
+	pause.handle(pad0, "up")
+	pause.handle(pad0, "up")
+	pause.handle(pad0, "confirm")
+	await get_tree().process_frame
+	check(not get_tree().paused and game.pause_menu == null, "Pause : REPRENDRE relance le jeu")
+	await step(10)
+	check(p1.position.x != x_paused, "Pause : après Reprendre, ça rebouge")
+	game.open_pause()
+	game.pause_menu.change_scene = false
+	game.pause_menu.choose(1)
+	check(not get_tree().paused, "Pause : RESTART relance (sans rester en pause)")
+	GameSetup.player_devices = []
+	GameSetup.lives = 3
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)

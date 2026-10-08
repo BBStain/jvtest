@@ -29,6 +29,9 @@ const SHIELD_BREAK_TIME_SCALE := 0.3        ## bouclier cassé : ralenti (3 fois
 const SHIELD_BREAK_SLOWMO := 1.2            ## ... pendant 1,2 vraie seconde
 
 var fighters: Array[Fighter] = []
+var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
+var pause_menu: PauseMenu                  ## le menu pause, quand il est ouvert
+var _resume_grace := 0                     ## en sortant de la pause, on ignore les touches un instant
 var _match_over := false
 var _match_over_time := 0.0
 var _time_engine := TimeEngine.new()
@@ -46,7 +49,7 @@ func _ready() -> void:
 	add_child(map)
 	move_child(map, 0)  # le décor est dessiné derrière les joueurs
 	InputBindings.register_menu_actions()
-	var player_devices := GameSetup.devices_or_default()
+	player_devices = GameSetup.devices_or_default().duplicate(true)
 	for i in player_devices.size():
 		InputBindings.register_player(i, player_devices[i])
 		var fighter := Fighter.new()
@@ -85,12 +88,69 @@ func _physics_process(delta: float) -> void:
 	for fighter in fighters:
 		fighter.target = _closest_opponent(fighter)
 	for fighter in fighters:
-		fighter.physics_tick(fighter.input_source.poll(), delta)
+		var input := fighter.input_source.poll()
+		if _resume_grace > 0:
+			input = InputState.new()  # la touche qui a fermé la pause ne fait pas sauter / frapper
+		fighter.physics_tick(input, delta)
+	_resume_grace -= 1
 
 	_resolve_clashes()
 	_resolve_hits()
 	_check_blast_zone()
 	_check_end_of_match()
+
+
+## Start (manette), Échap ou P (clavier) : ouvre le menu pause.
+func _input(event: InputEvent) -> void:
+	if _match_over or pause_menu != null:
+		return
+	var pause_pressed := false
+	if event is InputEventJoypadButton:
+		pause_pressed = event.pressed and event.button_index == JOY_BUTTON_START
+	elif event is InputEventKey:
+		pause_pressed = event.pressed and not event.echo and event.physical_keycode in [KEY_ESCAPE, KEY_P]
+	if pause_pressed:
+		get_viewport().set_input_as_handled()
+		open_pause()
+
+
+func _exit_tree() -> void:
+	get_tree().paused = false  # on ne quitte jamais la partie en laissant le jeu en pause
+
+
+func open_pause() -> void:
+	pause_menu = PauseMenu.new()
+	pause_menu.game = self
+	$UI.add_child(pause_menu)
+	get_tree().paused = true
+
+
+func close_pause() -> void:
+	if pause_menu != null:
+		pause_menu.queue_free()
+		pause_menu = null
+	get_tree().paused = false
+	_resume_grace = 2
+
+
+## Le joueur contrôlé par cet appareil (-1 si aucun).
+func player_of_device(device: Dictionary) -> int:
+	for i in player_devices.size():
+		if device in player_devices[i]:
+			return i
+	return -1
+
+
+## Échange les manettes (ou claviers) de deux joueurs. Gardé pour les prochaines parties.
+func swap_devices(a: int, b: int) -> void:
+	if a == b:
+		return
+	var devices_a = player_devices[a]
+	player_devices[a] = player_devices[b]
+	player_devices[b] = devices_a
+	InputBindings.register_player(a, player_devices[a])
+	InputBindings.register_player(b, player_devices[b])
+	GameSetup.player_devices = player_devices.duplicate(true)
 
 
 ## Cadre tous les joueurs encore en jeu : centre au milieu d'eux, zoom selon leur écart.

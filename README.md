@@ -22,6 +22,12 @@ Prototype de jeu de combat 2D en plateformes, inspiré de Brawlhalla, fait avec 
 
 À la fin d'une partie : **Start** ou **A** pour rejouer, **B** ou **Échap** pour revenir au menu (les joueurs restent connectés).
 
+**Pause** : **Start** sur la manette, **Échap** ou **P** au clavier. Le menu pause propose :
+- **Reprendre** : on continue (Start ou Échap marchent aussi).
+- **Restart** : on recommence la partie avec les mêmes joueurs.
+- **Remap** : on échange les manettes entre joueurs. Chacun pousse gauche / droite pour envoyer sa manette (ou son clavier) au joueur d'à côté : par exemple la manette 1 passe au joueur 2, et la manette 2 au joueur 1. La manette vibre quand elle change de joueur.
+- **Quitter** : retour au menu.
+
 La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quand ils se rapprochent.
 
 ## Les règles
@@ -61,6 +67,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 | Descendre d'une plateforme | Bas (même en diagonale) | S | Flèche bas |
 | Rejouer à la fin | Start ou A | Entrée | Entrée |
 | Revenir au menu à la fin | B | Échap | Échap |
+| Pause | Start | Échap ou P | Échap ou P |
 
 - Garder le saut appuyé = saut plus haut. Le lâcher tôt = petit saut.
 - En l'air, on a droit à un seul dash avant de retoucher le sol. Un dash vers le haut sert de 3e saut.
@@ -136,6 +143,8 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 | Fichier | Rôle |
 |---|---|
 | `scenes/menu.tscn` + `scripts/menu.gd` | Le menu : « Appuie sur une touche », les boutons, le choix du perso et de la map |
+| `scripts/pause_menu.gd` | Le menu pause : Reprendre, Restart, Remap, Quitter |
+| `scripts/menu_input.gd` + `scripts/ui_kit.gd` | Ce que les deux menus partagent : la lecture des touches et les morceaux d'affichage |
 | `scripts/game_setup.gd` | La liste des maps et des personnages, et les choix des joueurs (appareil, personnage, map) |
 | `scenes/main.tscn` | Le combat : la caméra et l'écran de fin (la map est chargée à part) |
 | `scenes/maps/` + `scripts/game_map.gd` | Les maps : le décor, les points d'apparition et la zone de jeu |

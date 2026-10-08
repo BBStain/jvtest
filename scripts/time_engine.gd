@@ -42,8 +42,8 @@ func is_active() -> bool:
 
 
 func _process(delta: float) -> void:
-	if _time_left <= 0.0:
-		return
+	if _time_left <= 0.0 or get_tree().paused:
+		return  # pendant la pause, le ralenti attend
 	_time_left -= delta / Engine.time_scale  # delta est déjà ralenti : on retrouve le vrai temps
 	if _time_left <= 0.0:
 		Engine.time_scale = 1.0

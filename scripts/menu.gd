@@ -10,6 +10,7 @@ extends Control
 ##   manette : stick ou croix pour choisir, A (ou Start) pour valider, B pour revenir
 ##   clavier gauche : Z Q S D, Espace / F / Entrée pour valider, Échap / C pour revenir
 ##   clavier droit : flèches, L / K pour valider, U / Retour arrière pour revenir
+## (voir MenuInput pour la lecture des touches et UiKit pour les morceaux d'affichage communs)
 
 enum Screen { TITLE, MAIN, CONTROLS, OPTIONS, CHARACTERS, MAPS }
 
@@ -19,30 +20,6 @@ const GAME_SCENE := "res://scenes/main.tscn"
 const MAIN_BUTTONS := ["JOUER", "COMMANDES", "OPTIONS"]
 const MIN_LIVES := 1
 const MAX_LIVES := 5
-const STICK_PRESS := 0.6     ## stick poussé au-delà : compte comme un appui
-const STICK_RELEASE := 0.3   ## stick revenu en deçà : prêt pour l'appui suivant
-
-const BG_COLOR := Color(0.08, 0.09, 0.13)
-const TEXT_DIM := Color(1, 1, 1, 0.55)
-const HIGHLIGHT := Color(1.0, 0.85, 0.3)
-
-# Touches du clavier gauche et du clavier droit pour se déplacer dans le menu (touches physiques).
-const KEYS_LEFT_SIDE := {
-	KEY_W: "up", KEY_S: "down", KEY_A: "left", KEY_D: "right",
-	KEY_SPACE: "confirm", KEY_F: "confirm", KEY_ENTER: "confirm", KEY_KP_ENTER: "confirm",
-	KEY_ESCAPE: "back", KEY_C: "back",
-}
-const KEYS_RIGHT_SIDE := {
-	KEY_UP: "up", KEY_DOWN: "down", KEY_LEFT: "left", KEY_RIGHT: "right",
-	KEY_L: "confirm", KEY_K: "confirm", KEY_KP_0: "confirm", KEY_KP_1: "confirm",
-	KEY_U: "back", KEY_BACKSPACE: "back", KEY_KP_4: "back",
-	KEY_I: "", KEY_J: "", KEY_KP_2: "", KEY_KP_3: "",  # autres touches du joueur de droite
-}
-const JOY_BUTTON_ACTIONS := {
-	JOY_BUTTON_DPAD_UP: "up", JOY_BUTTON_DPAD_DOWN: "down",
-	JOY_BUTTON_DPAD_LEFT: "left", JOY_BUTTON_DPAD_RIGHT: "right",
-	JOY_BUTTON_A: "confirm", JOY_BUTTON_START: "confirm", JOY_BUTTON_B: "back",
-}
 
 var screen := Screen.TITLE
 var change_scene_on_start := true        ## false dans les tests : on ne quitte pas la scène
@@ -51,7 +28,7 @@ var _choice := 0                         ## bouton sélectionné (menu principal
 var _character_choice: Array[int] = []   ## perso sélectionné par chaque joueur
 var _locked: Array[bool] = []            ## le joueur a validé son perso
 var _map_choice := 0
-var _stick_held := {}                    ## "manette:axe" -> le stick est déjà poussé
+var _input_reader := MenuInput.new()
 var _blink_label: Label
 var _blink_time := 0.0
 var _content: VBoxContainer
@@ -60,7 +37,7 @@ var _content: VBoxContainer
 func _ready() -> void:
 	InputBindings.fix_web_triggers()
 	var background := ColorRect.new()
-	background.color = BG_COLOR
+	background.color = UiKit.BG_COLOR
 	background.set_anchors_preset(Control.PRESET_FULL_RECT)
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(background)
@@ -91,30 +68,14 @@ func _process(delta: float) -> void:
 # --- Lecture des manettes et du clavier ---
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		var key: int = event.physical_keycode
-		if KEYS_RIGHT_SIDE.has(key):
-			handle({"type": "keyboard", "layout": 1}, KEYS_RIGHT_SIDE[key])
-		else:
-			handle({"type": "keyboard", "layout": 0}, KEYS_LEFT_SIDE.get(key, ""))
-	elif event is InputEventJoypadButton and event.pressed:
-		handle({"type": "joypad", "id": event.device}, JOY_BUTTON_ACTIONS.get(event.button_index, ""))
-	elif event is InputEventJoypadMotion and event.axis in [JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y]:
-		var latch := "%d:%d" % [event.device, event.axis]
-		if absf(event.axis_value) < STICK_RELEASE:
-			_stick_held[latch] = false
-		elif absf(event.axis_value) > STICK_PRESS and not _stick_held.get(latch, false):
-			_stick_held[latch] = true
-			var action := ""
-			if event.axis == JOY_AXIS_LEFT_X:
-				action = "right" if event.axis_value > 0.0 else "left"
-			else:
-				action = "down" if event.axis_value > 0.0 else "up"
-			var device := {"type": "joypad", "id": event.device}
-			if device in players:  # un stick ne fait pas rejoindre (il peut bouger tout seul)
-				handle(device, action)
-	elif event is InputEventMouseButton and event.pressed and screen == Screen.TITLE:
-		handle({"type": "keyboard", "layout": 0}, "confirm")
+	var press := _input_reader.read(event)
+	if press.is_empty():
+		if event is InputEventMouseButton and event.pressed and screen == Screen.TITLE:
+			handle({"type": "keyboard", "layout": 0}, "confirm")
+		return
+	if press.stick and not (press.device in players):
+		return  # un stick ne fait pas rejoindre (il peut bouger tout seul)
+	handle(press.device, "confirm" if press.action == "start" else press.action)
 
 
 ## Un appareil vient d'appuyer sur une touche. action = "up", "down", "left", "right",
@@ -282,27 +243,27 @@ func _show() -> void:
 	match screen:
 		Screen.TITLE:
 			_add_title(72)
-			_content.add_child(_spacer(40))
-			_blink_label = _label("Appuie sur une touche", 34)
+			_content.add_child(UiKit.spacer(40))
+			_blink_label = UiKit.label("Appuie sur une touche", 34)
 			_content.add_child(_blink_label)
-			_content.add_child(_label("manette ou clavier", 18, TEXT_DIM))
+			_content.add_child(UiKit.label("manette ou clavier", 18, UiKit.TEXT_DIM))
 		Screen.MAIN:
 			_add_title(56)
 			for i in MAIN_BUTTONS.size():
-				_content.add_child(_menu_button(MAIN_BUTTONS[i], i == _choice, _open_main_button.bind(i)))
-			_content.add_child(_spacer(10))
+				_content.add_child(UiKit.menu_button(MAIN_BUTTONS[i], i == _choice, _open_main_button.bind(i)))
+			_content.add_child(UiKit.spacer(10))
 			_content.add_child(_player_chips())
 			_content.add_child(_join_hint())
 		Screen.CONTROLS:
-			_content.add_child(_label("COMMANDES", 44))
+			_content.add_child(UiKit.label("COMMANDES", 44))
 			_content.add_child(_controls_table())
-			_content.add_child(_label("B / Échap : retour", 18, TEXT_DIM))
+			_content.add_child(UiKit.label("B / Échap : retour", 18, UiKit.TEXT_DIM))
 		Screen.OPTIONS:
-			_content.add_child(_label("OPTIONS", 44))
-			_content.add_child(_label("Vies par joueur :   <   %d   >" % GameSetup.lives, 30, HIGHLIGHT))
-			_content.add_child(_label("gauche / droite pour changer, B / Échap : retour", 18, TEXT_DIM))
+			_content.add_child(UiKit.label("OPTIONS", 44))
+			_content.add_child(UiKit.label("Vies par joueur :   <   %d   >" % GameSetup.lives, 30, UiKit.HIGHLIGHT))
+			_content.add_child(UiKit.label("gauche / droite pour changer, B / Échap : retour", 18, UiKit.TEXT_DIM))
 		Screen.CHARACTERS:
-			_content.add_child(_label("CHOISIS TON PERSONNAGE", 40))
+			_content.add_child(UiKit.label("CHOISIS TON PERSONNAGE", 40))
 			var slots := HBoxContainer.new()
 			slots.alignment = BoxContainer.ALIGNMENT_CENTER
 			slots.add_theme_constant_override("separation", 18)
@@ -312,49 +273,15 @@ func _show() -> void:
 			var hint := "gauche / droite pour choisir, A pour valider, B pour revenir"
 			if players.size() < MIN_PLAYERS:
 				hint = "Il faut au moins 2 joueurs : appuie sur une touche d'une autre manette ou de l'autre côté du clavier"
-			_content.add_child(_label(hint, 18, TEXT_DIM))
+			_content.add_child(UiKit.label(hint, 18, UiKit.TEXT_DIM))
 		Screen.MAPS:
-			_content.add_child(_label("CHOISIS LA MAP", 40))
+			_content.add_child(UiKit.label("CHOISIS LA MAP", 40))
 			_content.add_child(_map_card())
-			_content.add_child(_label("gauche / droite pour choisir, A pour lancer la partie, B pour revenir", 18, TEXT_DIM))
+			_content.add_child(UiKit.label("gauche / droite pour choisir, A pour lancer la partie, B pour revenir", 18, UiKit.TEXT_DIM))
 
 
 func _add_title(size: int) -> void:
-	_content.add_child(_label("BRAWLER DU SWAG", size))
-
-
-func _label(text: String, size: int, color := Color.WHITE) -> Label:
-	var label := Label.new()
-	label.text = text
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", size)
-	label.add_theme_color_override("font_color", color)
-	return label
-
-
-func _spacer(height: float) -> Control:
-	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0, height)
-	return spacer
-
-
-func _menu_button(text: String, selected: bool, on_click: Callable) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.focus_mode = Control.FOCUS_NONE
-	button.custom_minimum_size = Vector2(380, 70)
-	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	button.add_theme_font_size_override("font_size", 30)
-	var style := StyleBoxFlat.new()
-	style.set_corner_radius_all(10)
-	style.bg_color = Color(HIGHLIGHT, 0.22) if selected else Color(1, 1, 1, 0.06)
-	style.border_color = HIGHLIGHT if selected else Color(1, 1, 1, 0.15)
-	style.set_border_width_all(3 if selected else 1)
-	for state in ["normal", "hover", "pressed"]:
-		button.add_theme_stylebox_override(state, style)
-	button.add_theme_color_override("font_color", HIGHLIGHT if selected else Color.WHITE)
-	button.pressed.connect(on_click, CONNECT_DEFERRED)  # différé : le bouton est recréé par _show()
-	return button
+	_content.add_child(UiKit.label("BRAWLER DU SWAG", size))
 
 
 ## Les joueurs déjà connectés, en petites pastilles de leur couleur.
@@ -364,11 +291,11 @@ func _player_chips() -> HBoxContainer:
 	row.add_theme_constant_override("separation", 14)
 	for i in players.size():
 		var chip := PanelContainer.new()
-		chip.add_theme_stylebox_override("panel", _slot_style(Game.PLAYER_COLORS[i], true))
+		chip.add_theme_stylebox_override("panel", UiKit.slot_style(Game.PLAYER_COLORS[i], true))
 		var box := HBoxContainer.new()
 		box.add_theme_constant_override("separation", 8)
-		box.add_child(_device_icon(players[i], Game.PLAYER_COLORS[i], Vector2(44, 28)))
-		box.add_child(_label("J%d" % (i + 1), 20, Game.PLAYER_COLORS[i]))
+		box.add_child(UiKit.device_icon(players[i], Game.PLAYER_COLORS[i], Vector2(44, 28)))
+		box.add_child(UiKit.label("J%d" % (i + 1), 20, Game.PLAYER_COLORS[i]))
 		chip.add_child(box)
 		row.add_child(chip)
 	return row
@@ -376,24 +303,8 @@ func _player_chips() -> HBoxContainer:
 
 func _join_hint() -> Label:
 	if players.size() >= MAX_PLAYERS:
-		return _label("4 joueurs connectés", 18, TEXT_DIM)
-	return _label("Autres joueurs : appuie sur une touche de ta manette ou de l'autre côté du clavier pour rejoindre", 18, TEXT_DIM)
-
-
-func _slot_style(color: Color, active: bool) -> StyleBoxFlat:
-	var style := StyleBoxFlat.new()
-	style.set_corner_radius_all(10)
-	style.content_margin_left = 12
-	style.content_margin_right = 12
-	style.content_margin_top = 8
-	style.content_margin_bottom = 8
-	if active:
-		style.bg_color = Color(color, 0.18)
-		style.border_color = color
-		style.set_border_width_all(3)
-	else:
-		style.bg_color = Color(1, 1, 1, 0.04)
-	return style
+		return UiKit.label("4 joueurs connectés", 18, UiKit.TEXT_DIM)
+	return UiKit.label("Autres joueurs : appuie sur une touche de ta manette ou de l'autre côté du clavier pour rejoindre", 18, UiKit.TEXT_DIM)
 
 
 ## Une case du choix de perso : le joueur, son appareil, et le perso qu'il fait défiler.
@@ -402,26 +313,26 @@ func _character_slot(index: int) -> PanelContainer:
 	var joined := index < players.size()
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(230, 300)
-	panel.add_theme_stylebox_override("panel", _slot_style(color, joined))
+	panel.add_theme_stylebox_override("panel", UiKit.slot_style(color, joined))
 	var box := VBoxContainer.new()
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", 10)
 	panel.add_child(box)
-	box.add_child(_label("Joueur %d" % (index + 1), 26, color if joined else Color(1, 1, 1, 0.3)))
+	box.add_child(UiKit.label("Joueur %d" % (index + 1), 26, color if joined else Color(1, 1, 1, 0.3)))
 	if not joined:
-		box.add_child(_label("Appuie sur\nune touche\npour rejoindre", 18, Color(1, 1, 1, 0.35)))
+		box.add_child(UiKit.label("Appuie sur\nune touche\npour rejoindre", 18, Color(1, 1, 1, 0.35)))
 		return panel
-	var icon := _device_icon(players[index], color, Vector2(64, 40))
+	var icon := UiKit.device_icon(players[index], color, Vector2(64, 40))
 	icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	box.add_child(icon)
 	var stats := load(GameSetup.CHARACTERS[_character_choice[index]]) as CharacterStats
 	box.add_child(_character_preview(stats, color))
 	var arrows := "%s" if _locked[index] else "<   %s   >"
-	box.add_child(_label(arrows % stats.display_name, 22))
+	box.add_child(UiKit.label(arrows % stats.display_name, 22))
 	if _locked[index]:
-		box.add_child(_label("PRÊT !", 24, HIGHLIGHT))
+		box.add_child(UiKit.label("PRÊT !", 24, UiKit.HIGHLIGHT))
 	else:
-		box.add_child(_label("%s pour valider" % _confirm_key(players[index]), 16, TEXT_DIM))
+		box.add_child(UiKit.label("%s pour valider" % _confirm_key(players[index]), 16, UiKit.TEXT_DIM))
 	return panel
 
 
@@ -441,38 +352,9 @@ func _character_preview(stats: CharacterStats, color: Color) -> Control:
 		var body := stats.body_size * 1.5
 		var origin := Vector2(preview.size.x / 2.0 - body.x / 2.0, preview.size.y - body.y)
 		preview.draw_rect(Rect2(origin, body), color)
-		preview.draw_rect(Rect2(origin + Vector2(body.x / 2.0 + 2.0, 12.0), Vector2(7, 7)), BG_COLOR)
+		preview.draw_rect(Rect2(origin + Vector2(body.x / 2.0 + 2.0, 12.0), Vector2(7, 7)), UiKit.BG_COLOR)
 	)
 	return preview
-
-
-## Un petit dessin de manette ou de clavier.
-func _device_icon(device: Dictionary, color: Color, icon_size: Vector2) -> Control:
-	var icon := Control.new()
-	icon.custom_minimum_size = icon_size
-	icon.draw.connect(func() -> void:
-		var s := icon.size
-		if device.type == "joypad":
-			var body := Rect2(s.x * 0.18, s.y * 0.15, s.x * 0.64, s.y * 0.55)
-			icon.draw_rect(body, color)
-			icon.draw_circle(Vector2(s.x * 0.22, s.y * 0.55), s.y * 0.3, color)
-			icon.draw_circle(Vector2(s.x * 0.78, s.y * 0.55), s.y * 0.3, color)
-			var dark := BG_COLOR
-			var c := Vector2(s.x * 0.3, s.y * 0.45)
-			icon.draw_rect(Rect2(c - Vector2(s.y * 0.15, s.y * 0.05), Vector2(s.y * 0.3, s.y * 0.1)), dark)
-			icon.draw_rect(Rect2(c - Vector2(s.y * 0.05, s.y * 0.15), Vector2(s.y * 0.1, s.y * 0.3)), dark)
-			for offset in [Vector2(0, -1), Vector2(1, 0), Vector2(0, 1), Vector2(-1, 0)]:
-				icon.draw_circle(Vector2(s.x * 0.7, s.y * 0.45) + offset * s.y * 0.11, s.y * 0.05, dark)
-		else:
-			var frame := Rect2(1, s.y * 0.1, s.x - 2, s.y * 0.8)
-			icon.draw_rect(frame, color, false, 2.0)
-			var key := Vector2((s.x - 10.0) / 8.0, s.y * 0.14)
-			for row in 3:
-				for col in 7:
-					icon.draw_rect(Rect2(5.0 + col * key.x * 1.12, s.y * 0.2 + row * key.y * 1.4, key.x * 0.85, key.y), color)
-			icon.draw_rect(Rect2(s.x * 0.3, s.y * 0.68, s.x * 0.4, key.y * 0.8), color)
-	)
-	return icon
 
 
 ## La carte de la map choisie : son nom et un petit plan de son décor.
@@ -498,11 +380,11 @@ func _map_card() -> VBoxContainer:
 		var offset := (preview.size - bounds.size * k) / 2.0
 		for r in rects:
 			preview.draw_rect(Rect2(offset + (r.position - bounds.position) * k, r.size * k), Color(0.62, 0.66, 0.8))
-		preview.draw_rect(Rect2(Vector2.ZERO, preview.size), HIGHLIGHT, false, 3.0)
+		preview.draw_rect(Rect2(Vector2.ZERO, preview.size), UiKit.HIGHLIGHT, false, 3.0)
 	)
 	box.add_child(preview)
 	var arrows := "<   %s   >" if GameSetup.MAPS.size() > 1 else "%s"
-	box.add_child(_label(arrows % map_name, 30, HIGHLIGHT))
+	box.add_child(UiKit.label(arrows % map_name, 30, UiKit.HIGHLIGHT))
 	return box
 
 
@@ -536,10 +418,11 @@ func _controls_table() -> GridContainer:
 		["Dash", "LB", "G", "J"],
 		["Courir (garder)", "LT", "Shift gauche", "Shift droit"],
 		["Bloquer (garder)", "B", "C", "U"],
+		["Pause", "Start", "Échap ou P", "Échap ou P"],
 	]
 	for r in rows.size():
 		for cell in rows[r]:
-			var label := _label(cell, 20, HIGHLIGHT if r == 0 else Color.WHITE)
+			var label := UiKit.label(cell, 20, UiKit.HIGHLIGHT if r == 0 else Color.WHITE)
 			label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 			grid.add_child(label)
 	return grid
