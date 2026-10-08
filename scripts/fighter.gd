@@ -18,6 +18,7 @@ const PLATFORM_LAYER := 3  ## numéro de la couche "plateformes_traversables"
 const COYOTE_TIME := 0.1                ## on peut encore sauter un instant après avoir quitté le bord
 const JUMP_BUFFER := 0.12               ## un saut appuyé juste avant d'atterrir compte quand même
 const DROP_THROUGH_TIME := 0.22         ## temps pendant lequel on traverse les plateformes après "bas"
+const DROP_STICK := 0.3                 ## stick poussé vers le bas au-delà de ça (1 = tout en bas) : on descend
 
 # --- Murs ---
 const WALL_JUMP_LOCK := 0.1             ## petit temps où l'on contrôle moins bien après un saut mural
@@ -45,10 +46,12 @@ const HEAVY_COUNTER_PUSH := 750.0       ## ... et les deux sont repoussés plus 
 const HEAVY_CLASH_PUSH := 1150.0        ## deux attaques lourdes qui se percutent : micro-explosion, éjectés fort
 const HEAVY_CLASH_LIFT := 320.0         ## ... et un peu soulevés
 
-# --- Blocage (B) : un bouclier de 3 points ---
+# --- Blocage (B) : un bouclier qui craque peu à peu (ses points sont dans les stats du perso) ---
 const SHIELD_REGEN_TIME := 2.0          ## 1 point regagné toutes les 2 s quand on ne bloque pas
-const SHIELD_BREAK_COOLDOWN := 1.5      ## bouclier cassé : pas d'attaque pendant ce temps (on peut bouger)
-const HEAVY_SHIELD_DAMAGE := 2          ## l'attaque lourde enlève 2 points, la légère 1
+const SHIELD_BREAK_COOLDOWN := 2.0      ## bouclier cassé : pas d'attaque pendant ce temps (on peut bouger)
+const SHIELD_BREAK_PUSH := 1000.0       ## bouclier cassé : les deux joueurs sont éjectés...
+const SHIELD_BREAK_LIFT := 300.0        ## ... et un peu soulevés
+const HEAVY_SHIELD_DAMAGE := 2          ## l'attaque lourde compte pour 2 coups, la légère pour 1
 const BLOCK_SPEED_MULT := 0.3           ## en bloquant, on se déplace beaucoup plus lentement
 const BLOCK_JUMP_MULT := 0.7            ## en bloquant, on saute environ 2 fois moins haut
 const SHIELD_HIT_PUSH := 380.0          ## l'attaquant qui frappe le bouclier est repoussé
@@ -110,6 +113,8 @@ var _stamina_regen_timer := 0.0
 var _stamina_show_timer := 0.0
 
 var shield := 0
+var shield_broken := false              ## cassé : plus de blocage jusqu'à la fin de la partie
+var _cracks: Array[PackedVector2Array] = []  ## les fissures du bouclier, une par point perdu
 var _blocking := false
 var _shield_regen_timer := 0.0
 var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
@@ -127,6 +132,7 @@ func _ready() -> void:
 	_air_dashes_left = stats.air_dashes
 	stamina = stats.stamina_max
 	shield = stats.shield_max
+	_make_cracks()
 	collision_layer = 0
 	set_collision_layer_value(2, true)          # on est un "joueur"
 	collision_mask = 0
@@ -166,8 +172,8 @@ func physics_tick(input: InputState, delta: float) -> void:
 			_dash_cooldown_timer = 0.0
 			facing = _wall_normal_x
 
-	# Descendre d'une plateforme traversable avec "bas".
-	if input.down_pressed and on_floor:
+	# Descendre d'une plateforme traversable avec "bas" (pas besoin d'aller tout en bas avec le stick).
+	if on_floor and (input.down_pressed or input.stick.y > DROP_STICK):
 		_drop_timer = DROP_THROUGH_TIME
 	set_collision_mask_value(PLATFORM_LAYER, _drop_timer <= 0.0)
 
@@ -240,12 +246,12 @@ func _update_sprint(input: InputState, delta: float) -> void:
 		_stamina_show_timer -= delta
 
 
-## On bloque tant que B est maintenu, si le bouclier n'est pas vide et qu'on n'est pas
-## en train de dasher ou de frapper. Le bouclier se recharge quand on ne bloque pas.
+## On bloque tant que B est maintenu, si le bouclier n'est pas cassé et qu'on n'est pas
+## en train de dasher ou de frapper. Le bouclier se répare lentement quand on ne bloque pas.
 func _update_block(input: InputState, delta: float) -> void:
-	_blocking = input.block_held and shield > 0 and not is_dashing() \
+	_blocking = input.block_held and not shield_broken and not is_dashing() \
 		and not _is_attack_startup_or_active()
-	if _blocking or shield >= stats.shield_max:
+	if _blocking or shield_broken or shield >= stats.shield_max:
 		_shield_regen_timer = 0.0
 		return
 	_shield_regen_timer += delta
@@ -516,7 +522,7 @@ func hit_shield(push_dir: Vector2) -> void:
 	_knockback_timer = KNOCKBACK_TIME
 
 
-## Notre bouclier encaisse un coup. Renvoie true s'il vient de casser.
+## Notre bouclier encaisse un coup (il craque un peu plus). Renvoie true s'il vient de casser.
 func absorb_hit(push_dir: Vector2, heavy: bool) -> bool:
 	shield = maxi(shield - (HEAVY_SHIELD_DAMAGE if heavy else 1), 0)
 	_shield_regen_timer = 0.0
@@ -524,12 +530,24 @@ func absorb_hit(push_dir: Vector2, heavy: bool) -> bool:
 	velocity.x = push_dir.x * SHIELD_BLOCKER_PUSH
 	if shield > 0:
 		return false
-	# Bouclier cassé : on arrête de bloquer et on ne peut plus attaquer un moment.
+	# Bouclier cassé pour le reste de la partie.
+	shield_broken = true
 	_blocking = false
-	_cancel_attack()
-	_attack_cooldown_timer = SHIELD_BREAK_COOLDOWN
-	_shield_broken_timer = SHIELD_BREAK_COOLDOWN
 	return true
+
+
+## Un bouclier vient de casser : on est éjecté. Celui dont le bouclier a cassé ne peut plus
+## attaquer pendant SHIELD_BREAK_COOLDOWN (mais peut bouger).
+func shield_burst(push_dir: Vector2, own_shield_broke: bool) -> void:
+	_cancel_attack()
+	velocity = push_dir * SHIELD_BREAK_PUSH + Vector2(0.0, -SHIELD_BREAK_LIFT)
+	_jump_rising = false
+	_knockback_timer = KNOCKBACK_TIME
+	if own_shield_broke:
+		_attack_cooldown_timer = SHIELD_BREAK_COOLDOWN
+		_shield_broken_timer = SHIELD_BREAK_COOLDOWN
+	else:
+		_attack_cooldown_timer = 0.0
 
 
 ## knockback = force du coup reçu (-1 = celle d'une attaque légère). Plus on est lourd, moins on recule.
@@ -601,14 +619,16 @@ func _draw() -> void:
 		body_color = body_color.lightened(0.4)
 	draw_rect(body, body_color)
 
-	# En surbrillance quand on bloque, avec les points de bouclier qui restent
+	# En surbrillance quand on bloque : plus le bouclier a pris de coups, plus il est fissuré et terne
 	if _blocking:
-		var glow := 1.0 if _shield_flash_timer > 0.0 else 0.8
+		var damage := 1.0 - float(shield) / stats.shield_max
+		var glow := (1.0 if _shield_flash_timer > 0.0 else 0.8) * lerpf(1.0, 0.6, damage)
 		draw_rect(body.grow(12.0), Color(color.lightened(0.5), 0.12 * glow))
 		draw_rect(body.grow(7.0), Color(color.lightened(0.6), 0.25 * glow))
 		draw_rect(body, Color(1, 1, 1, 0.35 * glow))
 		draw_rect(body.grow(7.0), Color(1, 1, 1, glow), false, 3.0)
-		_draw_shield_points(-stats.body_size.y / 2.0 - 16.0, 1.0)
+		for i in mini(stats.shield_max - shield, _cracks.size()):
+			draw_polyline(_cracks[i], Color(0.1, 0.1, 0.15, 0.9), 2.0)
 	elif _shield_flash_timer > 0.0:
 		draw_rect(body.grow(5.0), Color(1, 1, 1, 0.8), false, 3.0)
 
@@ -660,13 +680,13 @@ func _draw() -> void:
 	if _stamina_show_timer > 0.0:
 		_draw_stamina_gauge()
 
-	# Les vies au-dessus de la tête (plus haut si les points de bouclier sont affichés)
+	# Les vies au-dessus de la tête (plus haut si la croix du bouclier cassé est affichée)
 	if _lives_show_timer > 0.0:
 		var alpha := clampf(_lives_show_timer / 0.4, 0.0, 1.0)
 		var size := 10.0
 		var gap := 5.0
 		var total := max_lives * size + (max_lives - 1) * gap
-		var y := -stats.body_size.y / 2.0 - (32.0 if (_blocking or _shield_broken_timer > 0.0) else 22.0)
+		var y := -stats.body_size.y / 2.0 - (32.0 if _shield_broken_timer > 0.0 else 22.0)
 		for i in max_lives:
 			var pip := Rect2(-total / 2.0 + i * (size + gap), y, size, size)
 			if i < lives:
@@ -675,17 +695,33 @@ func _draw() -> void:
 				draw_rect(pip, Color(1, 1, 1, 0.5 * alpha), false, 2.0)
 
 
-## Petits traits au-dessus de la tête : un par point de bouclier.
-func _draw_shield_points(y: float, alpha: float) -> void:
-	var w := 8.0
-	var gap := 3.0
-	var total := stats.shield_max * w + (stats.shield_max - 1) * gap
+## Prépare les fissures du bouclier : chacune part du bord de la surbrillance vers le perso
+## en zigzag. Elles sont tirées au hasard une fois pour toutes (toujours les mêmes pour un joueur).
+func _make_cracks() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7 + player_index
+	var outline := Rect2(-stats.body_size / 2.0, stats.body_size).grow(7.0)
+	var perimeter := 2.0 * (outline.size.x + outline.size.y)
 	for i in stats.shield_max:
-		var pip := Rect2(-total / 2.0 + i * (w + gap), y, w, 4.0)
-		if i < shield:
-			draw_rect(pip, Color(1, 1, 1, 0.95 * alpha))
+		# Un point sur le bord, réparti tout autour
+		var d := fposmod((i * 0.618034 + rng.randf_range(-0.05, 0.05)) * perimeter, perimeter)
+		var start: Vector2
+		if d < outline.size.x:
+			start = outline.position + Vector2(d, 0.0)
+		elif d < outline.size.x + outline.size.y:
+			start = outline.position + Vector2(outline.size.x, d - outline.size.x)
+		elif d < 2.0 * outline.size.x + outline.size.y:
+			start = outline.end - Vector2(d - outline.size.x - outline.size.y, 0.0)
 		else:
-			draw_rect(pip, Color(1, 1, 1, 0.25 * alpha))
+			start = outline.position + Vector2(0.0, outline.size.y - (d - 2.0 * outline.size.x - outline.size.y))
+		var crack := PackedVector2Array([start])
+		var dir := (-start).normalized()
+		var point := start
+		for step in 3:
+			dir = dir.rotated(rng.randf_range(-0.9, 0.9))
+			point += dir * rng.randf_range(5.0, 10.0)
+			crack.append(point)
+		_cracks.append(crack)
 
 
 ## Barre verticale à côté du perso, du côté où n'est pas l'adversaire (pour ne pas gêner le combat).

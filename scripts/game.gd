@@ -25,6 +25,8 @@ const DUEL_TIME_SCALE := 0.5               ## le jeu va 2 fois moins vite
 const DUEL_DURATION := 5.0                 ## pendant 5 vraies secondes
 const DUEL_CAMERA_MARGIN := Vector2(320, 220)  ## la caméra serre les deux duellistes
 const DUEL_ZOOM_MAX := 2.0
+const SHIELD_BREAK_TIME_SCALE := 0.3        ## bouclier cassé : ralenti (3 fois moins vite)...
+const SHIELD_BREAK_SLOWMO := 1.2            ## ... pendant 1,2 vraie seconde
 
 var fighters: Array[Fighter] = []
 var _match_over := false
@@ -232,14 +234,23 @@ func _resolve_hits() -> void:
 
 
 ## Le coup tombe sur un bouclier : personne ne perd de vie, l'attaquant est repoussé mais peut
-## refrapper tout de suite, et le bouclier perd 1 point (2 pour une attaque lourde).
+## refrapper tout de suite, et le bouclier craque un peu plus (2 fois plus pour une attaque lourde).
+## S'il casse : ralenti, les deux joueurs sont éjectés, et celui qui l'a perdu ne frappe plus 2 s.
 func _hit_shield(attacker: Fighter, victim: Fighter, heavy: bool) -> void:
 	var push := victim.global_position - attacker.global_position
 	push.y = 0.0
 	push = push.normalized() if push.length() > 1.0 else Vector2(attacker.facing, 0.0)
 	attacker.hit_shield(-push)
-	if victim.absorb_hit(push, heavy):
-		_spawn_clash_mark(victim.global_position, true)
+	if not victim.absorb_hit(push, heavy):
+		return
+	_spawn_clash_mark(victim.global_position, true)
+	victim.shield_burst(push, true)
+	attacker.shield_burst(-push, false)
+	var burst := MicroExplosion.new()
+	burst.color = Color(0.75, 0.9, 1.0)
+	burst.position = victim.global_position
+	add_child(burst)
+	_time_engine.play(SHIELD_BREAK_TIME_SCALE, SHIELD_BREAK_SLOWMO)
 
 
 func _circle_hits_rect(center: Vector2, radius: float, rect: Rect2) -> bool:

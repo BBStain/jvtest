@@ -55,7 +55,7 @@ extends Resource
 @export var heavy_charge_move_mult: float = 0.6  ## en chargeant, on avance lentement
 
 @export_group("Blocage")
-@export var shield_max: int = 3  ## points de bouclier
+@export var shield_max: int = 20  ## nombre de coups que le bouclier encaisse avant de casser
 
 @export_group("Course")
 @export var sprint_speed_mult: float = 1.5  ## en courant on va 1,5 fois plus vite (et on saute plus loin)
