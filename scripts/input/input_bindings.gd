@@ -129,7 +129,11 @@ static func register_menu_actions() -> void:
 		InputMap.action_add_event("back_to_menu", back_button)
 
 
+## Recrée une action vide. L'action est aussi relâchée : sinon, une touche ou un stick tenu au
+## moment du changement (par exemple pendant un Remap) resterait « appuyé » pour toujours,
+## et le perso courrait tout seul.
 static func _reset_action(action_name: String) -> void:
 	if InputMap.has_action(action_name):
 		InputMap.erase_action(action_name)
 	InputMap.add_action(action_name, DEADZONE)
+	Input.action_release(action_name)

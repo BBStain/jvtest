@@ -685,6 +685,21 @@ func _ready() -> void:
 		p1_jump_device = ev.device
 	check(p1_jump_device == 1, "Remap : J1 saute maintenant avec la manette 2")
 	await shot("15_remap")
+	# Bug : la manette dont on pousse le stick pour remapper ne doit pas laisser une direction « coincée »
+	var stick_push := InputEventJoypadMotion.new()
+	stick_push.device = 1; stick_push.axis = JOY_AXIS_LEFT_X; stick_push.axis_value = 1.0
+	Input.parse_input_event(stick_push)
+	Input.flush_buffered_events()
+	pause.handle(pad1, "right")  # la manette 2 (au J1) repasse au J2
+	check(not Input.is_action_pressed("p1_right"),
+		"Remap : le J1 ne garde pas la direction poussée par l'ancienne manette")
+	var stick_back := InputEventJoypadMotion.new()
+	stick_back.device = 1; stick_back.axis = JOY_AXIS_LEFT_X; stick_back.axis_value = 0.0
+	Input.parse_input_event(stick_back)
+	Input.flush_buffered_events()
+	check(not Input.is_action_pressed("p1_right") and not Input.is_action_pressed("p2_right"),
+		"Remap : aucune direction ne reste coincée après avoir poussé le stick")
+	pause.handle(pad0, "right")  # remet la manette 2 au J1 pour la suite
 	pause.handle(pad0, "back")
 	check(pause.screen == PauseMenu.Screen.LIST, "Remap : B revient à la liste")
 	pause.handle(pad0, "up")
@@ -694,6 +709,9 @@ func _ready() -> void:
 	check(not get_tree().paused and game.pause_menu == null, "Pause : REPRENDRE relance le jeu")
 	await step(10)
 	check(p1.position.x != x_paused, "Pause : après Reprendre, ça rebouge")
+	await step(40)
+	check(absf(p1.velocity.x) < 1.0 and absf(p2.velocity.x) < 1.0,
+		"Remap : après Reprendre, personne ne court tout seul (vx J1 %.0f, J2 %.0f)" % [p1.velocity.x, p2.velocity.x])
 	game.open_pause()
 	game.pause_menu.change_scene = false
 	game.pause_menu.choose(1)
