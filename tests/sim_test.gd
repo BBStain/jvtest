@@ -1091,6 +1091,61 @@ func _ready() -> void:
 		game._time_engine.stop(true)
 	check(duels.is_empty(), "3 joueurs : une lourde dans le dos d'un joueur qui frappe devant lui le touche, pas de duel %s" % [duels])
 
+	# 14) Attaque visée : une pichenette sur le stick droit lance un coup léger dans cette direction
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position = Vector2(500, 540); p2.position = Vector2(560, 540)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f):
+		s.aimed_attack_pressed = f == 1
+		s.aim = Vector2(-1, -1).normalized())
+	await step(3)
+	check(p1.is_attacking() and p1.attack_direction().is_equal_approx(Vector2(-1, -1).normalized()) and p1.facing < 0,
+		"Attaque visée : le coup part vers le stick droit (haut gauche), pas vers J2 (%s)" % p1.attack_direction())
+	await step(30)
+	check(p2.lives == 3, "Attaque visée : J2, derrière, n'est pas touché")
+	# X juste après : de nouveau la visée automatique vers J2
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
+	await step(3)
+	check(p1.is_attacking() and p1.attack_direction().x > 0.9, "Attaque visée : X vise de nouveau automatiquement J2")
+	# À 3 : on touche celui qu'on vise, même s'il n'est pas le plus proche
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}]]
+	await new_game()
+	GameSetup.player_devices = []
+	f3 = game.fighters
+	for fi in f3:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(40)
+	f3[0].position = Vector2(600, 540); f3[1].position = Vector2(650, 540); f3[2].position = Vector2(540, 540)
+	f3[0].input_source = Scripted.new(func(s, f):
+		s.aimed_attack_pressed = f == 1
+		s.aim = Vector2.LEFT)
+	await step(10)
+	check(f3[1].lives == 3 and f3[2].lives == 2,
+		"Attaque visée : à 3, on touche celui qu'on vise, pas le plus proche (J2 %d, J3 %d)" % [f3[1].lives, f3[2].lives])
+	# Manette : le stick droit poussé une fois = un seul coup, il faut le relâcher pour le suivant
+	InputBindings.register_player(0, [{"type": "joypad", "id": 7}])
+	var pad_source := LocalInputSource.new(0)
+	var stick_right := func(x: float, y: float) -> void:
+		for axis in [[JOY_AXIS_RIGHT_X, x], [JOY_AXIS_RIGHT_Y, y]]:
+			var motion := InputEventJoypadMotion.new()
+			motion.device = 7
+			motion.axis = axis[0]
+			motion.axis_value = axis[1]
+			Input.parse_input_event(motion)
+		Input.flush_buffered_events()
+	stick_right.call(0.0, -1.0)
+	var first := pad_source.poll()
+	var held := pad_source.poll()
+	stick_right.call(0.0, 0.0)
+	pad_source.poll()
+	stick_right.call(0.9, 0.0)
+	var second := pad_source.poll()
+	stick_right.call(0.0, 0.0)
+	check(first.aimed_attack_pressed and first.aim.is_equal_approx(Vector2.UP) and not held.aimed_attack_pressed
+		and second.aimed_attack_pressed and second.aim.is_equal_approx(Vector2.RIGHT),
+		"Manette : une pichenette du stick droit = un coup visé (haut %s, tenu %s, droite %s)" % [first.aim, held.aimed_attack_pressed, second.aim])
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 

@@ -104,6 +104,7 @@ var _attack_has_hit := false
 var _attack_heavy := false              ## true = attaque lourde en cours
 var _attack_cooldown_timer := 0.0
 var _attack_buffer_timer := 0.0
+var _aimed_dir := Vector2.ZERO   ## direction du coup visé en attente (stick droit), ou ZERO : visée auto
 var _heavy_buffer_timer := 0.0          ## pareil pour Y : appuyé un peu trop tôt, il compte quand même
 var _heavy_charging := false            ## true = on garde Y pour charger l'attaque lourde
 var _charge_time := 0.0
@@ -198,6 +199,10 @@ func physics_tick(input: InputState, delta: float) -> void:
 	# possible, et un Y appuyé juste avant la fin d'une recharge n'est pas perdu.
 	if input.attack_pressed:
 		_attack_buffer_timer = ATTACK_BUFFER
+		_aimed_dir = Vector2.ZERO
+	if input.aimed_attack_pressed and input.aim != Vector2.ZERO:
+		_attack_buffer_timer = ATTACK_BUFFER
+		_aimed_dir = input.aim.normalized()
 	if input.heavy_pressed:
 		_heavy_buffer_timer = ATTACK_BUFFER
 	if not _blocking and can_attack():  # pas d'attaque en bloquant
@@ -353,6 +358,9 @@ func _try_start_attack(heavy: bool) -> void:
 	if not can_attack():
 		return
 	_aim_at_target()
+	if not heavy and _aimed_dir != Vector2.ZERO:
+		_aim_towards(_aimed_dir)  # coup visé au stick droit
+	_aimed_dir = Vector2.ZERO
 	_attack_heavy = heavy
 	_attack_time = 0.0
 	_attack_has_hit = false
@@ -366,9 +374,14 @@ func _try_start_attack(heavy: bool) -> void:
 func _aim_at_target() -> void:
 	if target != null and not target.eliminated:
 		var to_target := target.global_position - global_position
-		_attack_dir = to_target.normalized() if to_target.length() > 1.0 else Vector2(facing, 0.0)
+		_aim_towards(to_target.normalized() if to_target.length() > 1.0 else Vector2(facing, 0.0))
 	else:
-		_attack_dir = Vector2(facing, 0.0)
+		_aim_towards(Vector2(facing, 0.0))
+
+
+## Oriente l'attaque dans une direction (et le perso du même côté).
+func _aim_towards(dir: Vector2) -> void:
+	_attack_dir = dir
 	if absf(_attack_dir.x) > 0.1:
 		facing = signf(_attack_dir.x)
 
