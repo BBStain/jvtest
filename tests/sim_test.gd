@@ -73,6 +73,29 @@ func _ready() -> void:
 	await step(80)
 	check(p2.lives == 3, "Attaque de loin rate, J2 vies = %d" % p2.lives)
 
+	# 3b) Toute la barre de l'attaque légère touche : même collé à l'adversaire, le coup porte
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	await step(25)
+	p1.position.x = 640; p2.position.x = 652
+	await step(10)
+	check(p2.lives == 2, "Attaque légère collé à l'adversaire : touché (vies = %d)" % p2.lives)
+
+	# 3c) Portée : le bout de la barre touche, juste au-delà ça rate
+	for gap in [base.attack_reach + base.body_size.x / 2.0 - 4.0, base.attack_reach + base.body_size.x / 2.0 + 6.0]:
+		await new_game()
+		p1 = game.fighters[0]; p2 = game.fighters[1]
+		p2.input_source = Scripted.new(func(s, f): pass)
+		p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+		await step(25)
+		p1.position.x = 600; p2.position.x = 600 + gap
+		p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+		await step(10)
+		var reached: bool = gap < base.attack_reach + base.body_size.x / 2.0
+		check((p2.lives == 2) == reached, "Portée de l'attaque légère : à %.0f px %s (vies = %d)" % [gap, "touche" if reached else "rate", p2.lives])
+
 	# 4) Choc d'attaques : personne ne perd de vie
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
@@ -239,14 +262,14 @@ func _ready() -> void:
 	var jump_height := start_y - top_y
 	check(jump_height > 30 and jump_height < 100, "Blocage : saut moins haut (%.0f px)" % jump_height)
 
-	# 4g) Attaque rapide plus longue : touche à 100 px
+	# 4g) Attaque rapide : touche à 90 px
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
-	p1.position.x = 600; p2.position.x = 700
+	p1.position.x = 600; p2.position.x = 690
 	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
 	p2.input_source = Scripted.new(func(s, f): pass)
 	await step(36)
-	check(p2.lives == 2, "Attaque rapide longue : touche à 100 px (vies = %d)" % p2.lives)
+	check(p2.lives == 2, "Attaque rapide : touche à 90 px (vies = %d)" % p2.lives)
 
 	# 4h) Attaque lourde non chargée : trop courte à 130 px
 	await new_game()
@@ -628,6 +651,54 @@ func _ready() -> void:
 	GameSetup.player_devices = []
 	await new_game()
 	check(game.fighters[0].lives == 5 and game.fighters[0].max_lives == 5, "Partie : les vies réglées dans OPTIONS sont utilisées")
+	GameSetup.lives = 3
+
+	# 11) Menu pause : Reprendre, Restart, Remap, Quitter
+	var pad0 := {"type": "joypad", "id": 0}
+	var pad1 := {"type": "joypad", "id": 1}
+	GameSetup.player_devices = [[pad0], [pad1]]
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	await step(10)
+	var start_event := InputEventJoypadButton.new()
+	start_event.device = 1
+	start_event.button_index = JOY_BUTTON_START
+	start_event.pressed = true
+	game._input(start_event)
+	check(get_tree().paused and game.pause_menu != null, "Pause : Start ouvre le menu pause, le jeu est figé")
+	var x_paused := p1.position.x
+	p1.velocity.x = 500.0
+	await step(10)
+	check(p1.position.x == x_paused, "Pause : plus rien ne bouge")
+	await shot("14_pause")
+	var pause: PauseMenu = game.pause_menu
+	pause.change_scene = false
+	pause.handle(pad1, "down")
+	pause.handle(pad1, "down")
+	pause.handle(pad1, "confirm")
+	check(pause.screen == PauseMenu.Screen.REMAP, "Pause : REMAP s'ouvre")
+	pause.handle(pad0, "right")
+	check(game.player_devices == [[pad1], [pad0]] and GameSetup.player_devices == [[pad1], [pad0]],
+		"Remap : la manette 1 passe au joueur 2 (et la 2 au joueur 1)")
+	var p1_jump_device := -1
+	for ev in InputMap.action_get_events("p1_jump"):
+		p1_jump_device = ev.device
+	check(p1_jump_device == 1, "Remap : J1 saute maintenant avec la manette 2")
+	await shot("15_remap")
+	pause.handle(pad0, "back")
+	check(pause.screen == PauseMenu.Screen.LIST, "Remap : B revient à la liste")
+	pause.handle(pad0, "up")
+	pause.handle(pad0, "up")
+	pause.handle(pad0, "confirm")
+	await get_tree().process_frame
+	check(not get_tree().paused and game.pause_menu == null, "Pause : REPRENDRE relance le jeu")
+	await step(10)
+	check(p1.position.x != x_paused, "Pause : après Reprendre, ça rebouge")
+	game.open_pause()
+	game.pause_menu.change_scene = false
+	game.pause_menu.choose(1)
+	check(not get_tree().paused, "Pause : RESTART relance (sans rester en pause)")
+	GameSetup.player_devices = []
 	GameSetup.lives = 3
 
 	print("ECHECS: %d" % failures)

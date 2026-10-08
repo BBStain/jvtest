@@ -29,6 +29,9 @@ const SHIELD_BREAK_TIME_SCALE := 0.3        ## bouclier cassé : ralenti (3 fois
 const SHIELD_BREAK_SLOWMO := 1.2            ## ... pendant 1,2 vraie seconde
 
 var fighters: Array[Fighter] = []
+var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
+var pause_menu: PauseMenu                  ## le menu pause, quand il est ouvert
+var _resume_grace := 0                     ## en sortant de la pause, on ignore les touches un instant
 var _match_over := false
 var _match_over_time := 0.0
 var _time_engine := TimeEngine.new()
@@ -46,7 +49,7 @@ func _ready() -> void:
 	add_child(map)
 	move_child(map, 0)  # le décor est dessiné derrière les joueurs
 	InputBindings.register_menu_actions()
-	var player_devices := GameSetup.devices_or_default()
+	player_devices = GameSetup.devices_or_default().duplicate(true)
 	for i in player_devices.size():
 		InputBindings.register_player(i, player_devices[i])
 		var fighter := Fighter.new()
@@ -85,12 +88,69 @@ func _physics_process(delta: float) -> void:
 	for fighter in fighters:
 		fighter.target = _closest_opponent(fighter)
 	for fighter in fighters:
-		fighter.physics_tick(fighter.input_source.poll(), delta)
+		var input := fighter.input_source.poll()
+		if _resume_grace > 0:
+			input = InputState.new()  # la touche qui a fermé la pause ne fait pas sauter / frapper
+		fighter.physics_tick(input, delta)
+	_resume_grace -= 1
 
 	_resolve_clashes()
 	_resolve_hits()
 	_check_blast_zone()
 	_check_end_of_match()
+
+
+## Start (manette), Échap ou P (clavier) : ouvre le menu pause.
+func _input(event: InputEvent) -> void:
+	if _match_over or pause_menu != null:
+		return
+	var pause_pressed := false
+	if event is InputEventJoypadButton:
+		pause_pressed = event.pressed and event.button_index == JOY_BUTTON_START
+	elif event is InputEventKey:
+		pause_pressed = event.pressed and not event.echo and event.physical_keycode in [KEY_ESCAPE, KEY_P]
+	if pause_pressed:
+		get_viewport().set_input_as_handled()
+		open_pause()
+
+
+func _exit_tree() -> void:
+	get_tree().paused = false  # on ne quitte jamais la partie en laissant le jeu en pause
+
+
+func open_pause() -> void:
+	pause_menu = PauseMenu.new()
+	pause_menu.game = self
+	$UI.add_child(pause_menu)
+	get_tree().paused = true
+
+
+func close_pause() -> void:
+	if pause_menu != null:
+		pause_menu.queue_free()
+		pause_menu = null
+	get_tree().paused = false
+	_resume_grace = 2
+
+
+## Le joueur contrôlé par cet appareil (-1 si aucun).
+func player_of_device(device: Dictionary) -> int:
+	for i in player_devices.size():
+		if device in player_devices[i]:
+			return i
+	return -1
+
+
+## Échange les manettes (ou claviers) de deux joueurs. Gardé pour les prochaines parties.
+func swap_devices(a: int, b: int) -> void:
+	if a == b:
+		return
+	var devices_a = player_devices[a]
+	player_devices[a] = player_devices[b]
+	player_devices[b] = devices_a
+	InputBindings.register_player(a, player_devices[a])
+	InputBindings.register_player(b, player_devices[b])
+	GameSetup.player_devices = player_devices.duplicate(true)
 
 
 ## Cadre tous les joueurs encore en jeu : centre au milieu d'eux, zoom selon leur écart.
@@ -145,9 +205,15 @@ func _resolve_clashes() -> void:
 			var b := fighters[j]
 			if not (a.is_attack_active() and b.is_attack_active()):
 				continue
-			if a.attack_center().distance_to(b.attack_center()) > a.attack_radius() + b.attack_radius():
+			# Deux attaques légères dans le même sens (l'un frappe le dos de l'autre) : pas de choc.
+			if not a.is_heavy_attack() and not b.is_heavy_attack() \
+					and a.attack_direction().dot(b.attack_direction()) > 0.0:
 				continue
-			_clash(a, b, (a.attack_center() + b.attack_center()) / 2.0)
+			var closest := Geometry2D.get_closest_points_between_segments(
+				a.attack_start(), a.attack_center(), b.attack_start(), b.attack_center())
+			if closest[0].distance_to(closest[1]) > a.attack_radius() + b.attack_radius():
+				continue
+			_clash(a, b, (closest[0] + closest[1]) / 2.0)
 
 
 ## Les attaques de a et b s'annulent : les deux sont repoussés et une marque apparaît à "where".
@@ -202,7 +268,7 @@ func _resolve_hits() -> void:
 		for victim in fighters:
 			if victim == attacker or not victim.can_be_hit():
 				continue
-			if _circle_hits_rect(attacker.attack_center(), attacker.attack_radius(), victim.body_rect()):
+			if _segment_hits_rect(attacker.attack_start(), attacker.attack_center(), attacker.attack_radius(), victim.body_rect()):
 				var hit_dir := (victim.global_position - attacker.global_position).normalized()
 				if not attacker.is_heavy_attack():
 					hit_dir = attacker.attack_direction()
@@ -253,9 +319,21 @@ func _hit_shield(attacker: Fighter, victim: Fighter, heavy: bool) -> void:
 	_time_engine.play(SHIELD_BREAK_TIME_SCALE, SHIELD_BREAK_SLOWMO)
 
 
-func _circle_hits_rect(center: Vector2, radius: float, rect: Rect2) -> bool:
-	var closest := center.clamp(rect.position, rect.end)
-	return center.distance_to(closest) <= radius
+## Un segment épais (de a à b, d'épaisseur radius de chaque côté) touche-t-il le rectangle ?
+func _segment_hits_rect(a: Vector2, b: Vector2, radius: float, rect: Rect2) -> bool:
+	if rect.has_point(a) or rect.has_point(b):
+		return true
+	var corners := [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]
+	for i in 4:
+		if Geometry2D.segment_intersects_segment(a, b, corners[i], corners[(i + 1) % 4]) != null:
+			return true
+	for corner in corners:
+		if Geometry2D.get_closest_point_to_segment(corner, a, b).distance_to(corner) <= radius:
+			return true
+	for end in [a, b]:
+		if end.distance_to(end.clamp(rect.position, rect.end)) <= radius:
+			return true
+	return false
 
 
 func _check_blast_zone() -> void:

@@ -41,8 +41,8 @@ extends Resource
 @export var attack_startup: float = 0.02  ## délai avant que le coup touche
 @export var attack_active: float = 0.08  ## durée pendant laquelle le coup peut toucher
 @export var attack_cooldown: float = 0.13  ## temps de recharge entre deux attaques (à peine plus que le coup)
-@export var attack_reach: float = 72.0  ## distance entre le centre du perso et le centre du coup
-@export var attack_radius: float = 28.0  ## taille de la zone qui touche
+@export var attack_reach: float = 84.0  ## longueur du coup : du centre du perso jusqu'au bout de la barre
+@export var attack_radius: float = 16.0  ## demi-épaisseur de la zone qui touche (toute la barre touche)
 @export var hit_knockback: float = 700.0  ## un coup léger repousse d'environ 100 px
 
 @export_group("Attaque lourde")
