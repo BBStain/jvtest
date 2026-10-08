@@ -590,7 +590,7 @@ func _hit_close_up(attacker: Fighter, victim: Fighter) -> void:
 		return
 	_hit_focus = [attacker, victim]
 	_hit_focus_left = HIT_ZOOM_TIME
-	_time_engine.play(HIT_TIME_SCALE, HIT_SLOWMO)
+	_time_engine.play(HIT_TIME_SCALE, HIT_SLOWMO, false)  # un contre juste après ne le prolonge pas
 
 
 ## Le coup tombe sur un bouclier : personne ne perd de vie, l'attaquant est repoussé mais peut

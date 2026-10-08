@@ -95,7 +95,7 @@ const NET_VARS := [
 	"stamina", "_exhausted", "_sprinting", "_stamina_show_timer",
 	"shield", "shield_broken", "_blocking", "_shield_broken_timer", "_shield_flash_timer",
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
-	"_stun_timer",
+	"_stun_timer", "_block_hold_time",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -807,8 +807,9 @@ func _draw() -> void:
 			draw_line(star + Vector2(-6, 0), star + Vector2(6, 0), star_color, 3.0)
 			draw_line(star + Vector2(0, -6), star + Vector2(0, 6), star_color, 3.0)
 
-	# En surbrillance quand on bloque : plus le bouclier a pris de coups, plus il est fissuré et terne
-	if _blocking:
+	# En surbrillance quand on bloque : plus le bouclier a pris de coups, plus il est fissuré et terne.
+	# Sonné, le bouclier ne protège plus : il ne s'allume que le temps d'un blocage parfait.
+	if _blocking and (not is_stunned() or is_parrying()):
 		var damage := 1.0 - float(shield) / stats.shield_max
 		var glow := (1.0 if _shield_flash_timer > 0.0 else 0.8) * lerpf(1.0, 0.6, damage)
 		draw_rect(body.grow(12.0), Color(color.lightened(0.5), 0.12 * glow))

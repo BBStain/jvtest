@@ -1450,6 +1450,11 @@ func _ready() -> void:
 	await shot("16_coup_zoom")
 	await step(60)
 	check(game._hit_focus.is_empty() and is_equal_approx(Engine.time_scale, 1.0), "Coup en 1 contre 1 : tout revient à la normale")
+	game._time_engine.play(Game.HIT_TIME_SCALE, Game.HIT_SLOWMO, false)
+	game._time_engine._time_left = 0.2
+	game._clash(p1, p2, p1.position)
+	check(game._time_engine._time_left <= 0.2, "Ralenti d'impact : un contre juste après ne le prolonge pas")
+	game._time_engine.stop(true)
 	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}]]
 	await new_game()
 	GameSetup.player_devices = []
