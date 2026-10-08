@@ -10,6 +10,8 @@ extends Control
 ##   manette : stick ou croix pour choisir, A (ou Start) pour valider, B pour revenir
 ##   clavier gauche : Z Q S D, Espace / F / Entrée pour valider, Échap / C pour revenir
 ##   clavier droit : flèches, L / K pour valider, U / Retour arrière pour revenir
+## Dans le choix du perso, chaque joueur peut se retirer de la partie : Y (manette), R (clavier
+## gauche) ou I (clavier droit).
 ## (voir MenuInput pour la lecture des touches et UiKit pour les morceaux d'affichage communs)
 
 enum Screen { TITLE, MAIN, CONTROLS, OPTIONS, CHARACTERS, MAPS }
@@ -20,6 +22,8 @@ const GAME_SCENE := "res://scenes/main.tscn"
 const MAIN_BUTTONS := ["JOUER", "COMMANDES", "OPTIONS"]
 const MIN_LIVES := 1
 const MAX_LIVES := 5
+const SLOT_SIZE := Vector2(230, 450)    ## taille fixe des cases du choix de perso (rien ne bouge)
+const PREVIEW_SIZE := Vector2(120, 130) ## la zone où le perso est dessiné
 
 var screen := Screen.TITLE
 var change_scene_on_start := true        ## false dans les tests : on ne quitte pas la scène
@@ -175,8 +179,8 @@ func _handle_characters(player: int, action: String) -> void:
 				_show()
 			elif player == 0:
 				_go(Screen.MAIN, 0)
-			else:
-				_remove_player(player)  # le joueur quitte la partie
+		"quit":
+			_remove_player(player)  # le joueur se retire (les suivants remontent d'une place)
 
 
 func _all_locked() -> bool:
@@ -312,11 +316,13 @@ func _join_hint() -> Label:
 
 
 ## Une case du choix de perso : le joueur, son appareil, et le perso qu'il fait défiler.
+## La case et chacune de ses lignes ont une taille fixe : changer de perso (plus grand, plus
+## petit, description plus longue...) ne fait rien bouger à l'écran.
 func _character_slot(index: int) -> PanelContainer:
 	var color: Color = Game.PLAYER_COLORS[index]
 	var joined := index < players.size()
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size = Vector2(230, 300)
+	panel.custom_minimum_size = SLOT_SIZE
 	panel.add_theme_stylebox_override("panel", UiKit.slot_style(color, joined))
 	var box := VBoxContainer.new()
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -332,17 +338,38 @@ func _character_slot(index: int) -> PanelContainer:
 	var stats := load(GameSetup.CHARACTERS[_character_choice[index]]) as CharacterStats
 	box.add_child(_character_preview(stats, color))
 	var arrows := "%s" if _locked[index] else "<   %s   >"
-	box.add_child(UiKit.label(arrows % stats.display_name, 22))
-	if stats.description != "":
-		var description := UiKit.label(stats.description, 14, UiKit.TEXT_DIM)
-		description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		description.custom_minimum_size.x = 200
-		box.add_child(description)
+	box.add_child(_fixed_row(UiKit.label(arrows % stats.display_name, 22), 32))
+	# La description a toujours 3 lignes de place : une description plus longue ou plus courte
+	# ne change pas la hauteur de la case.
+	var description_box := Control.new()
+	description_box.custom_minimum_size = Vector2(200, 60)
+	description_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var description := UiKit.label(stats.description, 14, UiKit.TEXT_DIM)
+	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	description.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	description.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	description_box.add_child(description)
+	box.add_child(description_box)
 	if _locked[index]:
-		box.add_child(UiKit.label("PRÊT !", 24, UiKit.HIGHLIGHT))
+		box.add_child(_fixed_row(UiKit.label("PRÊT !", 24, UiKit.HIGHLIGHT), 34))
 	else:
-		box.add_child(UiKit.label("%s pour valider" % _confirm_key(players[index]), 16, UiKit.TEXT_DIM))
+		box.add_child(_fixed_row(UiKit.label("%s pour valider" % _confirm_key(players[index]), 16, UiKit.TEXT_DIM), 34))
+	box.add_child(_fixed_row(UiKit.label("%s : se retirer" % _quit_key(players[index]), 14, UiKit.TEXT_DIM), 22))
 	return panel
+
+
+## Donne une hauteur fixe à une ligne de texte (centrée dedans), pour que rien ne bouge.
+func _fixed_row(label: Label, height: float) -> Label:
+	label.custom_minimum_size.y = height
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return label
+
+
+## La touche pour se retirer de la partie, selon l'appareil du joueur.
+func _quit_key(device: Dictionary) -> String:
+	if device.type == "joypad":
+		return "Y"
+	return "R" if device.layout == 0 else "I"
 
 
 ## La touche pour valider, selon l'appareil du joueur.
@@ -352,20 +379,29 @@ func _confirm_key(device: Dictionary) -> String:
 	return "Espace" if device.layout == 0 else "L"
 
 
-## Le perso dessiné en grand (une barre de sa taille, à sa couleur). Un très grand perso est
-## réduit pour tenir dans la case.
+## Le perso dessiné en grand (une barre de sa taille, à sa couleur), posé en bas d'une zone
+## de taille fixe. Tous les persos sont dessinés à la même échelle : on voit qui est plus grand.
 func _character_preview(stats: CharacterStats, color: Color) -> Control:
 	var preview := Control.new()
-	preview.custom_minimum_size = Vector2(120, 110)
+	preview.custom_minimum_size = PREVIEW_SIZE
 	preview.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var zoom := _preview_zoom()
 	preview.draw.connect(func() -> void:
-		var zoom := minf(1.5, minf(preview.size.x / stats.body_size.x, preview.size.y / stats.body_size.y))
 		var body := stats.body_size * zoom
 		var origin := Vector2(preview.size.x / 2.0 - body.x / 2.0, preview.size.y - body.y)
 		preview.draw_rect(Rect2(origin, body), color)
 		preview.draw_rect(Rect2(origin + Vector2(body.x / 2.0 + 2.0, 12.0), Vector2(7, 7)), UiKit.BG_COLOR)
 	)
 	return preview
+
+
+## L'échelle commune des aperçus : le plus grand perso remplit la zone (sans dépasser 1,7 fois).
+func _preview_zoom() -> float:
+	var biggest := Vector2.ONE
+	for path in GameSetup.CHARACTERS:
+		var size := (load(path) as CharacterStats).body_size
+		biggest = Vector2(maxf(biggest.x, size.x), maxf(biggest.y, size.y))
+	return minf(1.7, minf(PREVIEW_SIZE.x / biggest.x, PREVIEW_SIZE.y / biggest.y))
 
 
 ## La carte de la map choisie : son nom et un petit plan de son décor.
