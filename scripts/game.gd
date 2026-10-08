@@ -12,7 +12,7 @@ const PLAYER_COLORS := [
 	Color(1.0, 0.85, 0.3),    # Joueur 4 : jaune
 ]
 const RESTART_DELAY := 1.0   ## évite de relancer par erreur en martelant les boutons
-const LOBBY_SCENE := "res://scenes/lobby.tscn"
+const MENU_SCENE := "res://scenes/menu.tscn"
 
 # --- Caméra : elle suit le milieu des joueurs et dézoome quand ils s'éloignent ---
 const CAMERA_MARGIN := Vector2(700, 450)   ## espace gardé autour des joueurs (en pixels)
@@ -51,6 +51,8 @@ func _ready() -> void:
 		fighter.name = "Joueur%d" % (i + 1)
 		fighter.player_index = i
 		fighter.stats = GameSetup.character_for(i)
+		fighter.max_lives = GameSetup.lives
+		fighter.lives = GameSetup.lives
 		fighter.color = PLAYER_COLORS[i]
 		fighter.input_source = LocalInputSource.new(i)
 		fighter.position = map.spawn_position(i)
@@ -75,7 +77,7 @@ func _physics_process(delta: float) -> void:
 			if Input.is_action_just_pressed("restart"):
 				get_tree().reload_current_scene()
 			elif Input.is_action_just_pressed("back_to_menu"):
-				get_tree().change_scene_to_file(LOBBY_SCENE)
+				get_tree().change_scene_to_file(MENU_SCENE)
 		return
 
 	for fighter in fighters:

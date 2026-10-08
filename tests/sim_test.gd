@@ -527,21 +527,76 @@ func _ready() -> void:
 		was_attacking = p1.is_attacking()
 	check(swings >= 7, "Spam de l'attaque rapide : %d coups en 1 s" % swings)
 
-	# 10) Écran de connexion : il faut 2 joueurs pour lancer
+	# 10) Menu : écran titre, joueurs qui rejoignent, choix du perso et de la map
 	game.queue_free(); game = null
-	var lobby: Node = load("res://scenes/lobby.tscn").instantiate()
-	add_child(lobby)
+	GameSetup.player_devices = []
+	var menu: Node = load("res://scenes/menu.tscn").instantiate()
+	menu.change_scene_on_start = false
+	add_child(menu)
 	await get_tree().process_frame
-	var button: Button = lobby.get_node("Center/Layout/StartButton")
-	check(button.disabled, "Lobby : bouton désactivé sans joueur")
-	lobby._join({"type": "keyboard", "layout": 0})
-	lobby._join({"type": "keyboard", "layout": 0})
-	check(button.disabled and lobby._joined.size() == 1, "Lobby : 1 joueur (pas de doublon), toujours désactivé")
-	lobby._join({"type": "joypad", "id": 0})
-	check(not button.disabled, "Lobby : 2 joueurs, bouton activé")
-	await shot("06_lobby")
-	lobby._leave({"type": "joypad", "id": 0})
-	check(button.disabled, "Lobby : un joueur part, bouton désactivé")
+	check(menu.screen == menu.Screen.TITLE, "Menu : on arrive sur « Appuie sur une touche »")
+	await shot("06_titre")
+	var pad := {"type": "joypad", "id": 0}
+	var kb_left := {"type": "keyboard", "layout": 0}
+	var kb_right := {"type": "keyboard", "layout": 1}
+	menu.handle(pad, "")
+	check(menu.screen == menu.Screen.MAIN and menu.players == [pad], "Menu : le premier qui appuie devient J1 et ouvre le menu")
+	menu.handle(kb_right, "down")
+	menu.handle(kb_left, "confirm")
+	check(menu.players == [pad, kb_right, kb_left] and menu._choice == 0, "Menu : les appareils suivants deviennent J2, J3 (sans agir)")
+	await shot("07_menu")
+	menu.handle(pad, "down")
+	menu.handle(pad, "down")
+	menu.handle(pad, "confirm")
+	check(menu.screen == menu.Screen.OPTIONS, "Menu : OPTIONS s'ouvre")
+	menu.handle(kb_left, "right")
+	menu.handle(kb_left, "right")
+	menu.handle(kb_left, "right")
+	check(GameSetup.lives == 5, "Options : vies réglées à %d (max 5)" % GameSetup.lives)
+	menu.handle(pad, "back")
+	menu.handle(pad, "up")
+	check(menu.screen == menu.Screen.MAIN and menu._choice == 1, "Menu : retour, COMMANDES sélectionné")
+	menu.handle(pad, "confirm")
+	check(menu.screen == menu.Screen.CONTROLS, "Menu : COMMANDES s'ouvre")
+	menu.handle(pad, "back")
+	menu.handle(pad, "up")
+	menu.handle(pad, "confirm")
+	check(menu.screen == menu.Screen.CHARACTERS, "Menu : JOUER ouvre le choix du perso")
+	menu.handle(kb_left, "back")
+	check(menu.players == [pad, kb_right], "Perso : B sans avoir validé = J3 quitte")
+	menu.handle(pad, "right")
+	menu.handle(pad, "confirm")
+	check(menu.screen == menu.Screen.CHARACTERS and menu._locked == [true, false], "Perso : J1 prêt, on attend J2")
+	await shot("08_persos")
+	menu.handle(kb_right, "confirm")
+	check(menu.screen == menu.Screen.MAPS, "Perso : tout le monde prêt, on passe au choix de la map")
+	await shot("09_map")
+	menu.handle(pad, "confirm")
+	check(GameSetup.player_devices == [[pad], [kb_right]] and GameSetup.player_characters.size() == 2 \
+		and GameSetup.map_path == GameSetup.MAPS[0], "Map : la partie est lancée avec les bons joueurs, persos et map")
+	menu.queue_free()
+
+	# 10b) Seul, on ne peut pas passer au choix de la map
+	GameSetup.player_devices = []
+	menu = load("res://scenes/menu.tscn").instantiate()
+	menu.change_scene_on_start = false
+	add_child(menu)
+	await get_tree().process_frame
+	menu.handle(kb_left, "confirm")
+	menu.handle(kb_left, "confirm")
+	menu.handle(kb_left, "confirm")
+	check(menu.screen == menu.Screen.CHARACTERS and menu.players.size() == 1, "Menu : seul, on reste au choix du perso")
+	menu.handle(pad, "confirm")
+	check(menu.screen == menu.Screen.CHARACTERS and menu.players.size() == 2, "Menu : un 2e joueur rejoint pendant le choix du perso")
+	menu._on_joy_connection_changed(0, false)
+	check(menu.players.size() == 1, "Menu : une manette débranchée quitte la partie")
+	menu.queue_free()
+
+	# 10c) Une partie avec 5 vies les affiche bien
+	GameSetup.player_devices = []
+	await new_game()
+	check(game.fighters[0].lives == 5 and game.fighters[0].max_lives == 5, "Partie : les vies réglées dans OPTIONS sont utilisées")
+	GameSetup.lives = 3
 
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
