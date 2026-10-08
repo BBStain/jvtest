@@ -10,6 +10,7 @@ const RAMP_TIME := 0.4   ## temps pour revenir en douceur à la vitesse normale 
 
 var _scale := 1.0        ## vitesse visée (1 = normale, 0.5 = 2 fois moins vite, 2 = 2 fois plus vite)
 var _time_left := 0.0    ## vraies secondes restantes avant le retour à la normale
+var _duration := 0.0     ## durée demandée au dernier play() (pour renew())
 
 
 func _ready() -> void:
@@ -24,8 +25,16 @@ func _exit_tree() -> void:
 ## Change la vitesse du jeu pendant "duration" vraies secondes.
 func play(time_scale: float, duration: float) -> void:
 	_scale = maxf(time_scale, 0.05)
+	_duration = duration
 	_time_left = duration
 	Engine.time_scale = _scale
+
+
+## Si un ralenti (ou une accélération) est en cours, il repart de zéro pour toute sa durée.
+## Ne fait rien sinon.
+func renew() -> void:
+	if is_active():
+		play(_scale, _duration)
 
 
 ## Revient à la vitesse normale : en douceur (sur RAMP_TIME), ou tout de suite.

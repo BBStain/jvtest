@@ -124,7 +124,8 @@ func _ready() -> void:
 	await step(10)
 	check(p2.lives == 2, "Attaque lourde : J2 touché (vies = %d)" % p2.lives)
 
-	# 4c) Attaque lourde contrée par une légère : personne touché, longue recharge pour les deux, repoussés loin
+	# 4c) Attaque lourde contrée par une légère : personne touché, 1 s sans frapper pour celui qui a lancé
+	# la lourde, celui qui contre peut refrapper tout de suite, et les deux sont repoussés loin
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
 	p1.position.x = 600; p2.position.x = 690
@@ -133,11 +134,12 @@ func _ready() -> void:
 	var clash_seen := false
 	for i in 60:
 		await step(1)
-		if p2._attack_cooldown_timer > base.attack_cooldown * 2.5:
+		if not p1.is_attacking() and p1._attack_cooldown_timer > base.heavy_cooldown + 0.2:
 			clash_seen = true
 			break
-	check(clash_seen, "Contre : longue recharge pour J2 qui a contré (%.2f s)" % p2._attack_cooldown_timer)
-	check(p1._attack_cooldown_timer > base.heavy_cooldown, "Contre : même longue recharge pour J1 qui a lancé la lourde (%.2f s)" % p1._attack_cooldown_timer)
+	check(clash_seen and absf(p1._attack_cooldown_timer - Fighter.HEAVY_COUNTERED_COOLDOWN) < 0.05,
+		"Contre : J1 qui a lancé la lourde ne frappe plus pendant 1 s (%.2f s)" % p1._attack_cooldown_timer)
+	check(p2.can_attack(), "Contre : J2 qui a contré peut refrapper tout de suite (%.2f s)" % p2._attack_cooldown_timer)
 	check(p1.lives == 3 and p2.lives == 3, "Contre : personne ne perd de vie (%d / %d)" % [p1.lives, p2.lives])
 	check(Engine.time_scale < 0.6, "Micro-duel : le temps ralentit (vitesse %.2f)" % Engine.time_scale)
 	var gap_before := p2.position.x - p1.position.x
@@ -191,11 +193,57 @@ func _ready() -> void:
 	await step(int(Fighter.SHIELD_REGEN_TIME * 60) + 5)
 	check(p2.shield == base.shield_max, "Bouclier : il se répare quand on ne bloque pas (%d)" % p2.shield)
 
+	# 4d bis) Blocage parfait : B appuyé juste avant le coup = contre. Pas de vie perdue, le bouclier
+	# ne craque pas, l'attaquant ne frappe plus pendant 1 s et le défenseur peut riposter
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 650
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= 29 and f < 40)
+	await step(34)
+	check(p2.lives == 3 and p2.shield == base.shield_max,
+		"Blocage parfait : pas de vie perdue, bouclier intact (vies %d, bouclier %d)" % [p2.lives, p2.shield])
+	check(not p1.can_attack() and p1._attack_cooldown_timer > Fighter.PARRY_COOLDOWN - 0.1,
+		"Blocage parfait : J1 ne peut plus frapper pendant 1 s (%.2f s)" % p1._attack_cooldown_timer)
+	check(p2._attack_cooldown_timer <= 0.0, "Blocage parfait : J2 peut riposter tout de suite")
+	marks = game.get_children().filter(func(n): return n is ClashMark and n.color == Game.PARRY_COLOR)
+	check(marks.size() == 1, "Blocage parfait : une marque bleue apparaît")
+	await step(10)
+	check(p1.position.x < 590 and p2.position.x > 660, "Blocage parfait : les deux sont repoussés (x = %.0f / %.0f)" % [p1.position.x, p2.position.x])
+	# Bloquer trop tôt : ce n'est plus un blocage parfait, le bouclier encaisse normalement
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 650
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= 10)
+	await step(34)
+	check(p2.shield == base.shield_max - 1 and p1.can_attack(),
+		"Blocage trop tôt : simple blocage (bouclier %d, J1 peut refrapper)" % p2.shield)
+
+	# 4d ter) Pendant un ralenti, chaque contre le fait repartir pour toute sa durée
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	game._clash(p1, p2, p1.position)
+	check(not game._time_engine.is_active(), "Ralenti : un contre sans ralenti en cours n'en lance pas")
+	game._time_engine.play(Game.DUEL_TIME_SCALE, Game.DUEL_DURATION)
+	game._time_engine._time_left = 0.3  # le ralenti allait se terminer...
+	game._clash(p1, p2, p1.position)     # ... un contre (légère contre légère) le relance
+	check(is_equal_approx(game._time_engine._time_left, Game.DUEL_DURATION) and is_equal_approx(Engine.time_scale, Game.DUEL_TIME_SCALE),
+		"Ralenti : un contre le relance pour toute sa durée (%.1f s, vitesse %.2f)" % [game._time_engine._time_left, Engine.time_scale])
+	game._time_engine._time_left = 0.3
+	game._parry(p1, p2)
+	check(is_equal_approx(game._time_engine._time_left, Game.DUEL_DURATION), "Ralenti : un blocage parfait le relance aussi")
+	game._time_engine.stop(true)
+
 	# 4d2) Il faut 20 attaques légères pour casser le bouclier
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
 	p1.position.x = 600; p2.position.x = 650
 	p2.input_source = Scripted.new(func(s, f): s.block_held = true)
+	await step(20)  # J2 bloque depuis un moment : ce ne sont pas des blocages parfaits
 	var shield_hits := 0
 	while not p2.shield_broken and shield_hits < 40:
 		p1.position = Vector2(p2.position.x - 50, p2.position.y); p1.velocity = Vector2.ZERO
@@ -546,8 +594,8 @@ func _ready() -> void:
 	await step(60)
 	check(p2.lives == 2 and p2.position.x - 680 < 70, "Persos : J2, 2 fois plus lourd, recule moins (%.0f px)" % (p2.position.x - 680))
 	check(game.map is GameMap and game.map.map_name == "Arène", "Map : chargée depuis scenes/maps/ (%s)" % game.map.map_name)
-	p1.clash(Vector2.LEFT)
-	p2.clash(Vector2.RIGHT)
+	p1.clash(Vector2.LEFT * Fighter.CLASH_PUSH)
+	p2.clash(Vector2.RIGHT * Fighter.CLASH_PUSH)
 	check(absf(p1.velocity.x + Fighter.CLASH_PUSH) < 1.0 and absf(p2.velocity.x - Fighter.CLASH_PUSH / 2.0) < 1.0,
 		"Persos : le poids compte aussi dans les chocs (J1 %.0f, J2 2 fois plus lourd %.0f)" % [p1.velocity.x, p2.velocity.x])
 
@@ -738,13 +786,51 @@ func _ready() -> void:
 	GameSetup.player_devices = []
 	GameSetup.lives = 3
 
+	# 11b) Jumb (grand, lourd) et Jib (petit, rapide)
+	var barre := load("res://characters/barre.tres") as CharacterStats
+	var jumb := load("res://characters/jumb.tres") as CharacterStats
+	var jib := load("res://characters/jib.tres") as CharacterStats
+	check(is_equal_approx(barre.mass(), 1.0) and jumb.mass() > 1.2 and jib.mass() < 0.85,
+		"Poids selon la taille : Barre %.2f, Jumb %.2f, Jib %.2f" % [barre.mass(), jumb.mass(), jib.mass()])
+	var jump_ratio := pow(jumb.jump_speed / barre.jump_speed, 2.0)
+	check(jump_ratio > 0.88 and jump_ratio < 0.97, "Jumb saute juste un peu moins haut (%d %%)" % roundi(jump_ratio * 100.0))
+	check(jumb.run_speed < barre.run_speed and jib.run_speed > barre.run_speed, "Jumb plus lent, Jib plus rapide")
+	check(absf(jumb.dash_speed * jumb.dash_time - barre.dash_speed * barre.dash_time) < 5.0 and jumb.dash_speed < barre.dash_speed,
+		"Jumb : dash de même longueur mais plus lent")
+	check(jib.dash_speed > barre.dash_speed and jib.heavy_charge_time < barre.heavy_charge_time
+		and jib.stamina_sprint_drain < barre.stamina_sprint_drain and jumb.stamina_sprint_drain > barre.stamina_sprint_drain,
+		"Jib : dash plus rapide, charge plus courte ; endurance : Jib la vide moins vite, Jumb plus vite")
+	GameSetup.player_characters = ["res://characters/jumb.tres", "res://characters/jib.tres"]
+	await new_game()
+	GameSetup.player_characters = []
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(40)
+	p1.position = Vector2(600, p1.position.y); p2.position = Vector2(680, p2.position.y)
+	game._clash(p1, p2, Vector2(640, 520))
+	check(absf(p2.velocity.x) > absf(p1.velocity.x) * 2.5,
+		"Contre Jumb / Jib : Jib (léger) repoussé bien plus loin (%.0f contre %.0f)" % [p2.velocity.x, p1.velocity.x])
+	await step(30)
+	p2.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = true)
+	var full_frames := 0
+	for i in 70:
+		await step(1)
+		if p2.is_heavy_swinging():
+			full_frames = i
+			break
+	await shot("16_jumb_jib")
+	check(full_frames > 0 and full_frames < 50, "Jib : sa lourde arrive au max plus vite (%.2f s)" % (full_frames / 60.0))
+
 	# 12) Contenu : chaque perso et chaque map de GameSetup est complet et jouable
 	# (si on ajoute un perso ou une map incomplet, la mise en ligne s'arrête ici)
 	for path in GameSetup.CHARACTERS:
 		var c := load(path) as CharacterStats
 		check(c != null and c.display_name != "" and c.body_size.x > 0.0 and c.body_size.y > 0.0 \
-			and c.shield_max >= 1 and c.weight > 0.0 and c.attack_reach > c.attack_radius \
-			and c.heavy_startup < Fighter.HEAVY_CHARGE_MAX and c.dash_time > 0.0,
+			and c.shield_max >= 1 and c.mass() > 0.0 and c.attack_reach > c.attack_radius \
+			and c.heavy_startup < c.heavy_charge_time and c.dash_time > 0.0,
 			"Contenu : le perso %s est complet" % path)
 	for path in GameSetup.MAPS:
 		var m := (load(path) as PackedScene).instantiate() as GameMap

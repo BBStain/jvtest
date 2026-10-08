@@ -11,6 +11,8 @@ const MAPS := [
 ## Tous les personnages du jeu. Pour en ajouter un : crée son fichier dans characters/ et ajoute-le ici.
 const CHARACTERS := [
 	"res://characters/barre.tres",
+	"res://characters/jumb.tres",
+	"res://characters/jib.tres",
 ]
 
 ## Un élément par joueur ; chaque élément est la liste de ses appareils (voir InputBindings).
