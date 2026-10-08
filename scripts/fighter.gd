@@ -61,27 +61,13 @@ const SHIELD_BLOCKER_PUSH := 120.0      ## celui qui bloque recule un tout petit
 const PARRY_WINDOW := 0.15              ## blocage parfait : B appuyé au plus tant de secondes avant le coup...
 const PARRY_COOLDOWN := 1.0             ## ... c'est un contre : celui qui frappait ne frappe plus pendant 1 s
 
-# --- Jauge de contre : chaque contre la remplit, elle redescend quand on ne contre plus ---
-# Phase 1 : normale. Phase 2 : recharge des attaques plus courte, bouclier adverse plus abîmé.
-# Phase 3 : recharge très courte, bouclier adverse très abîmé. Phase 4 : berserk, tout est boosté.
-const COUNTER_PHASE_POINTS := [4, 10, 18]  ## points pour passer en phase 2, 3, puis 4 (berserk)
-const COUNTER_GAUGE_MAX := 21.0         ## la jauge ne monte pas plus haut (un peu de réserve en berserk)
-const HEAVY_COUNTER_POINTS := 3         ## contrer une attaque lourde compte pour 3 contres
-const COUNTER_IDLE_TIME := 4.0          ## après 4 s sans contrer, la jauge redescend...
-const COUNTER_DECAY := 1.0              ## ... d'un point par seconde
+# --- Effets de la jauge de contre (une seule pour toute la partie, voir counter_gauge.gd) ---
 const PHASE_COOLDOWN := [1.0, 0.7, 0.45, 0.35]  ## recharge des attaques selon la phase (0,5 = 2 fois plus courte)
-const PHASE_SHIELD_DAMAGE := [1, 2, 3, 3]       ## nos coups abîment le bouclier adverse 1, 2 ou 3 fois plus
+const PHASE_SHIELD_DAMAGE := [1, 2, 3, 3]       ## les coups abîment les boucliers 1, 2 ou 3 fois plus
 const BERSERK_MOVE := 1.25              ## berserk : on court et on dashe 1,25 fois plus vite...
 const BERSERK_JUMP := 1.12              ## ... on saute plus haut...
 const BERSERK_ATTACK_SPEED := 1.4       ## ... les attaques partent et se chargent 1,4 fois plus vite...
 const BERSERK_RANGE := 1.3              ## ... et vont 1,3 fois plus loin
-const COUNTER_FLASH_TIME := 0.45        ## éclat autour du perso quand il passe une phase
-const PHASE_COLORS := [
-	Color(0.9, 0.92, 1.0),   # phase 1 : blanc
-	Color(1.0, 0.85, 0.3),   # phase 2 : jaune
-	Color(1.0, 0.55, 0.2),   # phase 3 : orange
-	Color(1.0, 0.22, 0.15),  # phase 4 : rouge (berserk)
-]
 
 # --- Course (LT / Shift, à maintenir) et endurance ---
 const STAMINA_BLOCK_SPRINT_MULT := 2.33  ## en bloquant tout en courant, l'endurance part 2,33 fois plus vite
@@ -90,7 +76,11 @@ const STAMINA_RESTART := 25.0           ## jauge vide : il faut remonter jusque-
 const STAMINA_SHOW_TIME := 1.0          ## la jauge reste affichée ce temps après être pleine
 
 # --- Coup reçu ---
-const INVINCIBLE_TIME := 1.2            ## doit rester plus long que la recharge de l'attaque légère
+# Un premier coup sonne (pas de vie perdue). Sonné, le coup suivant retire une vie : pour s'en
+# sortir, il faut contrer ou faire un blocage parfait (un blocage normal ne protège plus).
+const STUN_TIME := 2.0                  ## durée pendant laquelle on reste sonné
+const STUN_GRACE := 0.3                 ## juste après avoir été sonné, on ne peut pas être touché tout de suite
+const INVINCIBLE_TIME := 1.2            ## après avoir perdu une vie ; doit rester plus long que la recharge de l'attaque légère
 const CLASH_PUSH := 450.0
 const KNOCKBACK_TIME := 0.2             ## durée pendant laquelle on contrôle moins bien après un coup / un choc
 const KNOCKBACK_ACCEL := 2000.0
@@ -105,7 +95,7 @@ const NET_VARS := [
 	"stamina", "_exhausted", "_sprinting", "_stamina_show_timer",
 	"shield", "shield_broken", "_blocking", "_shield_broken_timer", "_shield_flash_timer",
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
-	"counter_points", "_counter_flash_timer",
+	"_stun_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -160,10 +150,9 @@ var _shield_regen_timer := 0.0
 var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
 var _shield_flash_timer := 0.0          ## petit éclat quand le bouclier encaisse un coup
 
-var counter_points := 0.0               ## la jauge de contre (voir COUNTER_PHASE_POINTS)
-var _counter_idle_timer := 0.0          ## temps avant que la jauge commence à redescendre
-var _counter_flash_timer := 0.0
+var gauge := CounterGauge.new()         ## la jauge de contre de la partie (partagée, donnée par game.gd)
 
+var _stun_timer := 0.0
 var _invincible_timer := 0.0
 var _knockback_timer := 0.0
 var _lives_show_timer := 0.0
@@ -272,11 +261,8 @@ func _tick_timers(delta: float) -> void:
 	_lives_show_timer -= delta
 	_shield_broken_timer -= delta
 	_shield_flash_timer -= delta
-	_counter_flash_timer -= delta
+	_stun_timer -= delta
 	_blink_clock += delta
-	_counter_idle_timer -= delta
-	if _counter_idle_timer <= 0.0:
-		counter_points = maxf(counter_points - COUNTER_DECAY * delta, 0.0)
 
 
 ## On court tant que LT / Shift est maintenu et qu'il reste de l'endurance.
@@ -657,8 +643,10 @@ func shield_burst(push_dir: Vector2, own_shield_broke: bool) -> void:
 		_attack_cooldown_timer = 0.0
 
 
+## Un coup reçu. Pas encore sonné : on est sonné, sans perdre de vie. Déjà sonné : on perd une vie.
+## Renvoie true si une vie est perdue.
 ## knockback = force du coup reçu (-1 = celle d'une attaque légère). Plus on est lourd, moins on recule.
-func take_hit(hit_dir: Vector2, knockback := -1.0) -> void:
+func take_hit(hit_dir: Vector2, knockback := -1.0) -> bool:
 	if knockback < 0.0:
 		knockback = stats.hit_knockback
 	_cancel_attack()
@@ -666,29 +654,30 @@ func take_hit(hit_dir: Vector2, knockback := -1.0) -> void:
 	velocity = _pushed(hit_dir * knockback) + Vector2(0.0, -200.0)
 	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
-	_lose_life()
+	if is_stunned():
+		_lose_life()
+		return true
+	_stun_timer = STUN_TIME
+	_invincible_timer = STUN_GRACE
+	return false
 
 
-## On vient de contrer quelqu'un : la jauge de contre monte (contrer une attaque lourde compte triple).
-func add_counter(countered_heavy: bool) -> void:
-	var phase := counter_phase()
-	counter_points = minf(counter_points + (HEAVY_COUNTER_POINTS if countered_heavy else 1), COUNTER_GAUGE_MAX)
-	_counter_idle_timer = COUNTER_IDLE_TIME
-	if counter_phase() > phase:
-		_counter_flash_timer = COUNTER_FLASH_TIME
+func is_stunned() -> bool:
+	return _stun_timer > 0.0
 
 
-## Phase de la jauge de contre : de 1 (normale) à 4 (berserk).
+## On a contré (ou fait un blocage parfait) : on n'est plus sonné.
+func recover() -> void:
+	_stun_timer = 0.0
+
+
+## Phase de la jauge de contre de la partie : de 1 (normale) à 4 (berserk).
 func counter_phase() -> int:
-	var phase := 1
-	for points in COUNTER_PHASE_POINTS:
-		if counter_points >= points:
-			phase += 1
-	return phase
+	return gauge.phase()
 
 
 func is_berserk() -> bool:
-	return counter_phase() == 4
+	return gauge.is_berserk()
 
 
 func _move_mult() -> float:
@@ -728,6 +717,7 @@ func fall_out(respawn_position: Vector2) -> void:
 
 func _lose_life() -> void:
 	lives -= 1
+	_stun_timer = 0.0
 	_invincible_timer = INVINCIBLE_TIME
 	show_lives()
 	if lives <= 0:
@@ -787,7 +777,7 @@ func _draw() -> void:
 		for i in 3:
 			var ghost := body
 			ghost.position -= velocity * 0.022 * (i + 1)
-			draw_rect(ghost, Color(PHASE_COLORS[3], 0.22 - i * 0.06))
+			draw_rect(ghost, Color(gauge.color(), 0.22 - i * 0.06))
 
 	# Clignote quand on est invincible
 	var body_color := color
@@ -799,13 +789,23 @@ func _draw() -> void:
 
 	# Jauge de contre en phase 2 et plus : un contour de la couleur de la phase (rouge qui pulse en berserk)
 	if phase >= 2:
-		var phase_color: Color = PHASE_COLORS[phase - 1]
+		var phase_color := gauge.color()
 		var pulse := 0.5 + 0.5 * sin(_blink_clock * 14.0) if phase == 4 else 0.0
 		draw_rect(body.grow(3.0 + 2.0 * pulse), Color(phase_color, 0.55 + 0.35 * pulse), false, 1.5 + phase * 0.5)
-	if _counter_flash_timer > 0.0:
-		var t := 1.0 - _counter_flash_timer / COUNTER_FLASH_TIME
+	if gauge.flash_timer > 0.0:
+		var t := 1.0 - gauge.flash_timer / CounterGauge.FLASH_TIME
 		var ring := lerpf(stats.body_size.y * 0.5, stats.body_size.y * 1.3, t)
-		draw_arc(Vector2.ZERO, ring, 0.0, TAU, 32, Color(PHASE_COLORS[phase - 1], 1.0 - t), 4.0)
+		draw_arc(Vector2.ZERO, ring, 0.0, TAU, 32, Color(gauge.color(), 1.0 - t), 4.0)
+
+	# Sonné : des étoiles tournent au-dessus de la tête
+	if is_stunned():
+		var fade := clampf(_stun_timer / 0.3, 0.0, 1.0)
+		for i in 3:
+			var angle := _blink_clock * 6.0 + i * TAU / 3.0
+			var star := Vector2(cos(angle) * 18.0, -stats.body_size.y / 2.0 - 10.0 + sin(angle) * 5.0)
+			var star_color := Color(1.0, 0.9, 0.3, fade * (0.6 + 0.4 * (sin(angle) * 0.5 + 0.5)))
+			draw_line(star + Vector2(-6, 0), star + Vector2(6, 0), star_color, 3.0)
+			draw_line(star + Vector2(0, -6), star + Vector2(0, 6), star_color, 3.0)
 
 	# En surbrillance quand on bloque : plus le bouclier a pris de coups, plus il est fissuré et terne
 	if _blocking:
@@ -880,10 +880,6 @@ func _draw() -> void:
 	if _stamina_show_timer > 0.0:
 		_draw_stamina_gauge()
 
-	# La jauge de contre, sous les pieds, dès qu'on a contré
-	if counter_points > 0.0:
-		_draw_counter_gauge()
-
 	# Les vies au-dessus de la tête (plus haut si la croix du bouclier cassé est affichée)
 	if _lives_show_timer > 0.0:
 		var alpha := clampf(_lives_show_timer / 0.4, 0.0, 1.0)
@@ -926,24 +922,6 @@ func _make_cracks() -> void:
 			point += dir * rng.randf_range(5.0, 10.0)
 			crack.append(point)
 		_cracks.append(crack)
-
-
-## Petite barre horizontale sous les pieds, avec un trait à chaque passage de phase.
-## Sa couleur est celle de la phase : blanc, jaune, orange, puis rouge en berserk.
-func _draw_counter_gauge() -> void:
-	var width := maxf(stats.body_size.x + 26.0, 44.0)
-	var frame := Rect2(-width / 2.0, stats.body_size.y / 2.0 + 6.0, width, 7.0)
-	var full: float = COUNTER_PHASE_POINTS[-1]
-	var phase := counter_phase()
-	var fill_color: Color = PHASE_COLORS[phase - 1]
-	if phase == 4:
-		fill_color = fill_color.lightened(0.35 * (0.5 + 0.5 * sin(_blink_clock * 14.0)))
-	draw_rect(frame, Color(0, 0, 0, 0.55))
-	draw_rect(Rect2(frame.position, Vector2(width * minf(counter_points / full, 1.0), frame.size.y)), fill_color)
-	for i in COUNTER_PHASE_POINTS.size() - 1:
-		var x: float = frame.position.x + width * COUNTER_PHASE_POINTS[i] / full
-		draw_line(Vector2(x, frame.position.y), Vector2(x, frame.end.y), Color(0, 0, 0, 0.85), 1.5)
-	draw_rect(frame, Color(1, 1, 1, 0.45), false, 1.0)
 
 
 ## Barre verticale à côté du perso, du côté où n'est pas l'adversaire (pour ne pas gêner le combat).

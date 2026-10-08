@@ -42,7 +42,7 @@ const HIT_CAMERA_MARGIN := Vector2(380, 260)
 const HIT_ZOOM_MAX := 1.8
 const HIT_CAMERA_SMOOTHING := 12.0         ## la caméra fonce sur l'impact
 
-const ONLINE_HEADER := 5                   ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
+const ONLINE_HEADER := 6                   ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
 var fighters: Array[Fighter] = []
 var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
@@ -54,6 +54,7 @@ var _time_engine := TimeEngine.new()
 var _duel: Array[Fighter] = []             ## les deux joueurs du micro-duel en cours
 var _hit_focus: Array[Fighter] = []        ## 1 contre 1 : les deux joueurs du coup qui vient de toucher
 var _hit_focus_left := 0.0
+var gauge := CounterGauge.new()            ## la jauge de contre, une seule pour tous les joueurs
 var online := false                        ## partie en ligne
 var _online_state: Array = []              ## (copain) le dernier état du jeu reçu de l'hôte
 
@@ -84,6 +85,7 @@ func _ready() -> void:
 		fighter.max_lives = GameSetup.lives
 		fighter.lives = GameSetup.lives
 		fighter.color = PLAYER_COLORS[i]
+		fighter.gauge = gauge
 		fighter.input_source = LocalInputSource.new(i)
 		if online and Online.players[i].id != Online.my_id:
 			# Un copain qui joue depuis un autre ordinateur : chez l'hôte ses touches arrivent par le
@@ -95,6 +97,10 @@ func _ready() -> void:
 		fighter.life_lost.connect(_on_life_lost)
 		fighter.show_lives()
 		fighters.append(fighter)
+	var gauge_bar := CounterGaugeBar.new()
+	gauge_bar.gauge = gauge
+	$UI.add_child(gauge_bar)
+	$UI.move_child(gauge_bar, 0)  # sous l'écran de fin et le menu pause
 	_update_camera(1.0, true)
 
 
@@ -130,6 +136,7 @@ func _physics_process(delta: float) -> void:
 			Online.send_state(online_state())
 		return
 
+	gauge.tick(delta)
 	for fighter in fighters:
 		fighter.target = _closest_opponent(fighter)
 	for fighter in fighters:
@@ -183,6 +190,8 @@ func _guest_tick() -> void:
 	_hit_focus.clear()
 	for index in state[4]:
 		_hit_focus.append(fighters[index])
+	gauge.flash_timer -= get_physics_process_delta_time()
+	gauge.set_points(state[5])
 	if state[2] != "" and not _match_over:
 		_show_end(state[2], fighters[state[3]].color if state[3] >= 0 else Color.WHITE)
 	for i in mini(fighters.size(), state.size() - ONLINE_HEADER):
@@ -190,7 +199,7 @@ func _guest_tick() -> void:
 
 
 ## (hôte) L'état du jeu envoyé aux copains : vitesse du temps, duel, fin de partie, zoom sur un coup,
-## puis chaque joueur.
+## jauge de contre, puis chaque joueur.
 func online_state() -> Array:
 	var duel := []
 	for fighter in _duel:
@@ -202,7 +211,7 @@ func online_state() -> Array:
 	for i in fighters.size():
 		if _match_over and not fighters[i].eliminated:
 			winner = i
-	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, hit_focus]
+	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, hit_focus, gauge.points]
 	for fighter in fighters:
 		state.append(fighter.net_state())
 	return state
@@ -390,7 +399,8 @@ func _points_away(a: Fighter, b: Fighter) -> bool:
 ## Chacun est repoussé d'autant plus fort que l'autre est lourd (voir CharacterStats.mass()).
 ## "counterer" : celui qui a contré, quand un seul l'a fait (il a été touché pendant qu'il armait son
 ## coup vers l'attaquant). Sinon, les deux attaques se sont percutées et chacun a contré l'autre.
-## Contrer remplit la jauge de contre et remet la recharge des attaques à zéro.
+## Un contre remplit la jauge de contre (partagée), remet la recharge des attaques à zéro et sort
+## de l'état sonné celui qui a contré.
 ## Légère contre légère : petit temps mort pour celui qui contre ; celui qui est contré attend la
 ## fin de sa recharge (de quoi riposter).
 ## Lourde contre lourde : micro-explosion qui éjecte fort les deux joueurs.
@@ -402,11 +412,10 @@ func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -
 	var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
 	var explosion := a.is_heavy_attack() and b.is_heavy_attack()
 	_spawn_clash_mark(where, heavy_countered or explosion)
-	# La jauge de contre : contrer une lourde compte triple, et celui dont la lourde est contrée n'a rien.
+	gauge.add_counter(heavy_countered or explosion)  # contrer une lourde compte triple
 	for fighter in [a, b]:
-		var other: Fighter = b if fighter == a else a
 		if (counterer == null or fighter == counterer) and not (heavy_countered and fighter.is_heavy_attack()):
-			fighter.add_counter(other.is_heavy_attack())
+			fighter.recover()
 	if explosion:
 		a.clash(push * Fighter.HEAVY_CLASH_PUSH * b.stats.mass(), Fighter.CLASH_LOCKOUT, Fighter.HEAVY_CLASH_LIFT)
 		b.clash(-push * Fighter.HEAVY_CLASH_PUSH * a.stats.mass(), Fighter.CLASH_LOCKOUT, Fighter.HEAVY_CLASH_LIFT)
@@ -435,11 +444,12 @@ func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -
 
 ## Blocage parfait : le défenseur a appuyé sur B pile au moment du coup. C'est un contre :
 ## les deux sont repoussés, le bouclier ne craque pas, celui qui frappait ne frappe plus
-## pendant 1 s et le défenseur peut riposter tout de suite.
+## pendant 1 s et le défenseur peut riposter tout de suite (et n'est plus sonné).
 func _parry(attacker: Fighter, defender: Fighter) -> void:
 	var push := _push_dir(attacker, defender)
 	_spawn_clash_mark((attacker.global_position + defender.global_position) / 2.0, false, PARRY_COLOR)
-	defender.add_counter(attacker.is_heavy_attack())
+	gauge.add_counter(attacker.is_heavy_attack())
+	defender.recover()
 	attacker.clash(push * Fighter.CLASH_PUSH * defender.stats.mass(), Fighter.PARRY_COOLDOWN)
 	defender.clash(-push * Fighter.CLASH_PUSH * attacker.stats.mass(), 0.0)
 	_renew_slowmo(attacker, defender)
@@ -507,6 +517,7 @@ func _spawn_explosion(where: Vector2, color: Color) -> void:
 
 ## On repère d'abord tous les coups de la frame, puis on les applique : si deux joueurs se
 ## touchent exactement en même temps, c'est un choc, les deux attaques s'annulent et personne ne perd de vie.
+## Un coup qui touche sonne d'abord ; c'est le coup suivant, pendant qu'on est sonné, qui retire une vie.
 func _resolve_hits() -> void:
 	# Qui chaque attaque touche-t-elle ?
 	var reached := {}
@@ -555,15 +566,15 @@ func _resolve_hits() -> void:
 		if victim.is_parrying():
 			_parry(attacker, victim)
 			continue
-		if victim.is_blocking():
+		if victim.is_blocking() and not victim.is_stunned():  # sonné, le bouclier ne protège plus
 			_hit_shield(attacker, victim, hit.heavy)
 			continue
 		if _counters(victim, attacker):
 			_clash(attacker, victim, (attacker.global_position + victim.global_position) / 2.0, victim)
 			continue
-		victim.take_hit(hit.dir, hit.knockback)
 		attacker.mark_attack_hit()
-		_hit_close_up(attacker, victim)
+		if victim.take_hit(hit.dir, hit.knockback):
+			_hit_close_up(attacker, victim)
 
 
 ## Le coup de l'attaquant arrive pendant que la victime arme (ou donne) une attaque légère vers lui :
@@ -572,7 +583,7 @@ func _counters(victim: Fighter, attacker: Fighter) -> bool:
 	return victim.is_light_attack_under_way() and not _points_away(victim, attacker)
 
 
-## En 1 contre 1, un coup qui touche : la caméra zoome vite sur les deux joueurs et le temps
+## En 1 contre 1, un coup qui retire une vie : la caméra zoome vite sur les deux joueurs et le temps
 ## ralentit un tout petit peu, pour bien sentir que le coup a porté.
 func _hit_close_up(attacker: Fighter, victim: Fighter) -> void:
 	if victim.eliminated or _alive_count() != 2:
