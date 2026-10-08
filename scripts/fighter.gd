@@ -73,6 +73,8 @@ const HEAVY_ARC_END := 32.0             ## angle d'arrivée (à hauteur des pied
 const HEAVY_KNOCKBACK := 940.0
 const HEAVY_COUNTER_COOLDOWN := 1.4     ## attaque lourde contrée par une légère : recharge des DEUX joueurs
 const HEAVY_COUNTER_PUSH := 750.0       ## ... et les deux sont repoussés plus loin
+const HEAVY_CLASH_PUSH := 1150.0        ## deux attaques lourdes qui se percutent : micro-explosion, éjectés fort
+const HEAVY_CLASH_LIFT := 320.0         ## ... et un peu soulevés
 
 # --- Blocage (B) : un bouclier de 3 points ---
 const SHIELD_MAX := 3                   ## points de bouclier
@@ -523,10 +525,14 @@ func mark_attack_hit() -> void:
 ## Deux attaques se sont touchées : elles s'annulent et on est repoussé.
 ## heavy_countered = une attaque lourde a été contrée par une légère : les deux joueurs
 ## ont une longue recharge et sont repoussés plus loin.
-func clash(push_dir: Vector2, heavy_countered := false) -> void:
+## explosion = deux attaques lourdes se sont percutées : les deux sont éjectés fort.
+func clash(push_dir: Vector2, heavy_countered := false, explosion := false) -> void:
 	_cancel_attack()
 	_attack_cooldown_timer = HEAVY_COUNTER_COOLDOWN if heavy_countered else CLASH_LOCKOUT
-	velocity = push_dir * (HEAVY_COUNTER_PUSH if heavy_countered else CLASH_PUSH) + Vector2(0.0, -150.0)
+	if explosion:
+		velocity = push_dir * HEAVY_CLASH_PUSH + Vector2(0.0, -HEAVY_CLASH_LIFT)
+	else:
+		velocity = push_dir * (HEAVY_COUNTER_PUSH if heavy_countered else CLASH_PUSH) + Vector2(0.0, -150.0)
 	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
 

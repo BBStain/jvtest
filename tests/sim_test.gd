@@ -115,10 +115,38 @@ func _ready() -> void:
 	check(clash_seen, "Contre : longue recharge pour J2 qui a contré (%.2f s)" % p2._attack_cooldown_timer)
 	check(p1._attack_cooldown_timer > Fighter.HEAVY_COOLDOWN, "Contre : même longue recharge pour J1 qui a lancé la lourde (%.2f s)" % p1._attack_cooldown_timer)
 	check(p1.lives == 3 and p2.lives == 3, "Contre : personne ne perd de vie (%d / %d)" % [p1.lives, p2.lives])
+	check(Engine.time_scale < 0.6, "Micro-duel : le temps ralentit (vitesse %.2f)" % Engine.time_scale)
 	var gap_before := p2.position.x - p1.position.x
-	await step(20)
+	for i in 90:
+		await get_tree().process_frame
+	var duel_zoom: float = game.get_node("Camera").zoom.x
+	check(duel_zoom > Game.CAMERA_ZOOM_MAX, "Micro-duel : la caméra zoome (zoom %.2f)" % duel_zoom)
+	await shot("12_micro_duel")
 	var gap_after := p2.position.x - p1.position.x
 	check(gap_after - gap_before > 150, "Contre : les deux sont repoussés loin (écart %.0f -> %.0f)" % [gap_before, gap_after])
+	check(Engine.time_scale < 0.6, "Micro-duel : toujours au ralenti après 1,5 s")
+	await step(int(Game.DUEL_DURATION * 60) - 60)
+	check(is_equal_approx(Engine.time_scale, 1.0), "Micro-duel : le temps revient à la normale après 5 s (vitesse %.2f)" % Engine.time_scale)
+
+	# 4c bis) Lourde contre lourde : micro-explosion, les deux éjectés fort, personne ne perd de vie
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 690
+	p1.input_source = Scripted.new(func(s, f): s.heavy_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): s.heavy_pressed = f == 30)
+	var boom_seen := false
+	for i in 50:
+		await step(1)
+		if not game.get_children().filter(func(n): return n is MicroExplosion).is_empty():
+			boom_seen = true
+			break
+	check(boom_seen, "Lourde contre lourde : micro-explosion")
+	await shot("13_micro_explosion")
+	var boom_gap := p2.position.x - p1.position.x
+	await step(20)
+	check(p2.position.x - p1.position.x - boom_gap > 250, "Lourde contre lourde : éjectés fort (écart %.0f -> %.0f)" % [boom_gap, p2.position.x - p1.position.x])
+	check(p1.lives == 3 and p2.lives == 3, "Lourde contre lourde : personne ne perd de vie")
+	check(is_equal_approx(Engine.time_scale, 1.0), "Lourde contre lourde : pas de ralenti")
 
 	# 4d) Blocage : le coup tombe sur le bouclier, personne ne perd de vie, l'attaquant peut refrapper
 	await new_game()
