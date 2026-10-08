@@ -36,6 +36,8 @@ var _stick_held := {}  ## "manette:axe" -> le stick est déjà poussé
 func read(event: InputEvent) -> Dictionary:
 	if event is InputEventKey and event.pressed and not event.echo:
 		var key: int = event.physical_keycode
+		if key == KEY_SHIFT and event.location == KEY_LOCATION_RIGHT:
+			return _press({"type": "keyboard", "layout": 1}, "")  # Shift droit = course du joueur de droite
 		if KEYS_RIGHT_SIDE.has(key):
 			return _press({"type": "keyboard", "layout": 1}, KEYS_RIGHT_SIDE[key])
 		return _press({"type": "keyboard", "layout": 0}, KEYS_LEFT_SIDE.get(key, ""))

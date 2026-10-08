@@ -53,9 +53,9 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - **Blocage parfait** : appuie sur B **pile au moment** où le coup arrive (au plus 0,15 seconde avant). C'est un contre : personne ne perd de vie, le bouclier ne craque pas, les deux sont repoussés, une marque bleue apparaît, et celui qui frappait ne peut plus attaquer pendant **1 seconde** alors que toi tu peux riposter tout de suite. Si tu bloquais déjà depuis plus longtemps, c'est un blocage normal.
 - Pendant le blocage, on avance beaucoup plus lentement, on saute moins haut, et on ne peut ni dasher ni attaquer.
 - Le bouclier se répare lentement quand on ne bloque pas (une fissure en moins toutes les 2 secondes).
-- Si le bouclier casse : **ralenti**, les deux joueurs sont éjectés, et celui qui l'a perdu ne peut plus attaquer pendant 2 secondes (il peut toujours bouger, sauter et dasher). Son bouclier reste **cassé jusqu'à la fin de la partie** : il ne peut plus bloquer.
+- Si le bouclier casse : **ralenti**, les deux joueurs sont éjectés, et celui qui l'a perdu ne peut plus attaquer pendant 2 secondes (il peut toujours bouger, sauter et dasher). Son bouclier reste **cassé jusqu'à la fin de la partie** : il ne peut plus bloquer. (Pendant un micro-duel, le duel continue au ralenti et repart pour toute sa durée.)
 - **Course** (tenir LT ou Shift) : on va 1,5 fois plus vite, donc on saute aussi plus loin. Toutes les actions marchent en courant.
-- Courir vide une **jauge d'endurance**, qui apparaît à côté du perso, du côté opposé à l'adversaire. Bloquer en courant la vide plus de 2 fois plus vite. Quand on arrête de courir, elle remonte. Si elle est vide, on ne peut plus courir tant qu'elle n'est pas remontée un peu.
+- Courir vide une **jauge d'endurance**, qui apparaît à côté du perso, du côté opposé à l'adversaire. Bloquer en courant la vide 2,33 fois plus vite (pour chaque perso). Quand on arrête de courir, elle remonte. Si elle est vide, on ne peut plus courir tant qu'elle n'est pas remontée un peu.
 - La partie s'arrête quand il ne reste qu'un joueur en vie.
 
 ### Les personnages

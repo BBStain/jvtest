@@ -91,7 +91,13 @@ func _physics_process(delta: float) -> void:
 	for fighter in fighters:
 		var input := fighter.input_source.poll()
 		if _resume_grace > 0:
-			input = InputState.new()  # la touche qui a fermé la pause ne fait pas sauter / frapper
+			# La touche qui a fermé la pause ne fait pas sauter / frapper. Les touches gardées
+			# (charge de la lourde, blocage, saut) restent, pour ne rien lâcher par erreur.
+			input.jump_pressed = false
+			input.attack_pressed = false
+			input.heavy_pressed = false
+			input.dash_pressed = false
+			input.down_pressed = false
 		fighter.physics_tick(input, delta)
 	_resume_grace -= 1
 
@@ -295,20 +301,33 @@ func _spawn_clash_mark(where: Vector2, heavy_countered: bool, color := Color.TRA
 ## On repère d'abord tous les coups de la frame, puis on les applique : si deux joueurs se
 ## touchent exactement en même temps, c'est un choc, les deux attaques s'annulent et personne ne perd de vie.
 func _resolve_hits() -> void:
-	var landed: Array[Dictionary] = []
+	# Qui chaque attaque touche-t-elle ?
+	var reached := {}
 	for attacker in fighters:
 		if not attacker.is_attack_active():
 			continue
+		reached[attacker] = []
 		for victim in fighters:
-			if victim == attacker or not victim.can_be_hit():
-				continue
-			if _segment_hits_rect(attacker.attack_start(), attacker.attack_center(), attacker.attack_radius(), victim.body_rect()):
-				var hit_dir := (victim.global_position - attacker.global_position).normalized()
-				if not attacker.is_heavy_attack():
-					hit_dir = attacker.attack_direction()
-				landed.append({"attacker": attacker, "victim": victim, "dir": hit_dir,
-					"knockback": attacker.attack_knockback(), "heavy": attacker.is_heavy_attack()})
+			if victim != attacker and victim.can_be_hit() and _segment_hits_rect(
+					attacker.attack_start(), attacker.attack_center(), attacker.attack_radius(), victim.body_rect()):
+				reached[attacker].append(victim)
+	# Une attaque touche un seul joueur : de préférence celui qui la frappe en retour (c'est alors
+	# un choc), sinon le premier. Ainsi, à 3 ou 4, l'ordre des joueurs ne change rien.
+	var landed: Array[Dictionary] = []
+	for attacker in reached:
+		var victims: Array = reached[attacker]
+		if victims.is_empty():
+			continue
+		var victim: Fighter = victims[0]
+		for other in victims:
+			if reached.has(other) and attacker in reached[other]:
+				victim = other
 				break
+		var hit_dir: Vector2 = (victim.global_position - attacker.global_position).normalized()
+		if not attacker.is_heavy_attack():
+			hit_dir = attacker.attack_direction()
+		landed.append({"attacker": attacker, "victim": victim, "dir": hit_dir,
+			"knockback": attacker.attack_knockback(), "heavy": attacker.is_heavy_attack()})
 	# Deux joueurs qui se touchent l'un l'autre : choc, leurs deux coups sont annulés.
 	var clashed: Array[Fighter] = []
 	for hit in landed:
@@ -353,7 +372,10 @@ func _hit_shield(attacker: Fighter, victim: Fighter, heavy: bool) -> void:
 	burst.color = Color(0.75, 0.9, 1.0)
 	burst.position = victim.global_position
 	add_child(burst)
-	_time_engine.play(SHIELD_BREAK_TIME_SCALE, SHIELD_BREAK_SLOWMO)
+	if _duel.is_empty():
+		_time_engine.play(SHIELD_BREAK_TIME_SCALE, SHIELD_BREAK_SLOWMO)
+	else:
+		_time_engine.renew()  # pendant un micro-duel, le duel continue (et repart pour toute sa durée)
 
 
 ## Un segment épais (de a à b, d'épaisseur radius de chaque côté) touche-t-il le rectangle ?
