@@ -226,8 +226,9 @@ func _on_player_arrived(id: int) -> void:
 
 func _add_connection(id: int) -> bool:
 	var connection := WebRTCPeerConnection.new()
-	if connection.initialize({"iceServers": OnlineConfig.ICE_SERVERS}) != OK:
-		_end("Le jeu en ligne ne marche que dans la version navigateur du jeu")
+	# Si le navigateur refuse les serveurs STUN, on essaie sans (ça suffit souvent sur le même réseau).
+	if connection.initialize({"iceServers": OnlineConfig.ICE_SERVERS}) != OK and connection.initialize({}) != OK:
+		_end(_webrtc_problem())
 		return false
 	connection.session_description_created.connect(func(type: String, sdp: String) -> void:
 		connection.set_local_description(type, sdp)
@@ -237,6 +238,19 @@ func _add_connection(id: int) -> bool:
 	_rtc.add_peer(connection, id)
 	_connections[id] = connection
 	return true
+
+
+## Le navigateur refuse la connexion directe entre joueurs (WebRTC) : on dit pourquoi, si on peut.
+func _webrtc_problem() -> String:
+	if not OS.has_feature("web"):
+		return "Le jeu en ligne ne marche que dans la version navigateur du jeu"
+	var why = JavaScriptBridge.eval("""(function () {
+		if (typeof RTCPeerConnection === 'undefined') return 'WebRTC est désactivé dans ce navigateur';
+		try { new RTCPeerConnection().close(); return 'erreur inconnue'; }
+		catch (e) { return String((e && e.message) || e); }
+	})()""")
+	printerr("En ligne : WebRTC refusé par le navigateur : %s" % why)
+	return "Ton navigateur bloque la connexion directe entre joueurs (%s). Essaie avec Chrome ou Edge, sans extension qui bloque WebRTC." % why
 
 
 func _on_signal(from: int, data) -> void:

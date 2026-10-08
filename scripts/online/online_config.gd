@@ -7,7 +7,8 @@ extends RefCounted
 const SERVER_URL := "wss://jvtest-salons.th-mcha.workers.dev"
 
 ## Serveurs publics gratuits qui aident deux navigateurs à se trouver sur internet (STUN).
-const ICE_SERVERS := [{"urls": ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"]}]
+## Une adresse par serveur, écrite simplement : c'est la forme que tous les navigateurs acceptent.
+const ICE_SERVERS := [{"urls": "stun:stun.cloudflare.com:3478"}, {"urls": "stun:stun.l.google.com:19302"}]
 
 
 static func server_url() -> String:
