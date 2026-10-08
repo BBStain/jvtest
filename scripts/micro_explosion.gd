@@ -7,7 +7,9 @@ const LIFETIME := 0.6
 const RADIUS := 90.0     ## taille de l'onde à la fin
 const SPARKS := 10
 
-var color := Color(1.0, 0.45, 0.2)
+const DEFAULT_COLOR := Color(1.0, 0.45, 0.2)
+
+var color := DEFAULT_COLOR
 var _age := 0.0
 var _spark_dirs: Array[Vector2] = []
 

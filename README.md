@@ -161,12 +161,23 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
   S'il manque quelque chose, la mise en ligne s'arrête et le jeu en ligne n'est pas cassé.
 - **La caméra** : en haut de `scripts/game.gd`, les réglages `CAMERA_...` (marge autour des joueurs, zoom le plus proche et le plus éloigné, vitesse).
 
+## Jouer en ligne avec les copains
+
+1. Dans le menu, choisis **EN LIGNE**, puis **CRÉER UN SALON**. Le jeu affiche un code de 4 lettres (ex. `KBZT`) : donne-le à tes copains.
+2. Chaque copain ouvre le jeu sur son ordinateur, choisit **EN LIGNE**, puis **REJOINDRE UN SALON**, et tape le code.
+3. Dans le salon, chacun choisit son perso (gauche / droite) et appuie sur A quand il est prêt.
+4. Quand tout le monde est prêt, l'hôte (celui qui a créé le salon) appuie sur A, choisit la map et lance la partie.
+
+Un seul joueur par ordinateur, jusqu'à 4. La partie tourne chez l'hôte : **l'hôte doit garder l'onglet du jeu affiché** (si son navigateur passe en arrière-plan, le jeu se fige pour tout le monde). Les copains envoient leurs touches à l'hôte, qui leur renvoie l'image du jeu.
+
+Comment ça marche : le petit serveur des salons (dossier `server/`, sur Cloudflare, gratuit) sert seulement à se retrouver avec le code. Ensuite, chaque navigateur est relié directement à celui de l'hôte (WebRTC). Si la box d'un copain bloque cette connexion directe, le jeu le dit au bout de 15 secondes.
+
 ## Prochaines étapes
 
 1. Utiliser le moteur de temps (`scripts/time_engine.gd`) pour d'autres moments forts (ralentis et accélérations).
 2. Une deuxième map.
 3. Des attaques spéciales avec des combinaisons de touches.
-4. Le jeu en ligne.
+4. Jeu en ligne : un relais pour les box qui bloquent la connexion directe, et rendre les mouvements plus fluides chez les copains.
 
 ## Comment le code est organisé
 
@@ -185,6 +196,9 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 | `scripts/clash_mark.gd` | La marque laissée sur le terrain quand deux attaques se contrent |
 | `scripts/micro_explosion.gd` | La micro-explosion quand deux attaques lourdes se percutent |
 | `scripts/time_engine.gd` | Le moteur de temps : ralentit ou accélère tout le jeu pendant un moment |
-| `scripts/input/` | Les commandes de chaque joueur, séparées du reste pour pouvoir ajouter le jeu en ligne plus tard |
+| `scripts/input/` | Les commandes de chaque joueur (clavier, manette, ou reçues par le réseau en ligne) |
+| `scripts/online/` | Le jeu en ligne : salons avec un code, connexion directe entre navigateurs, envoi des touches et de l'état du jeu |
+| `server/` | Le petit serveur des salons (Cloudflare Workers), avec ses tests |
 | `tests/` | Un test automatique qui simule des parties et vérifie les règles |
 | `.github/workflows/web.yml` | Construit la version web et la publie sur GitHub Pages à chaque modification de `main` |
+| `.github/workflows/server.yml` | Teste le serveur des salons et le met en ligne sur Cloudflare à chaque modification de `server/` sur `main` |

@@ -669,6 +669,7 @@ func _ready() -> void:
 	await shot("07_menu")
 	menu.handle(pad, "down")
 	menu.handle(pad, "down")
+	menu.handle(pad, "down")
 	menu.handle(pad, "confirm")
 	check(menu.screen == menu.Screen.OPTIONS, "Menu : OPTIONS s'ouvre")
 	menu.handle(kb_left, "right")
@@ -677,10 +678,11 @@ func _ready() -> void:
 	check(GameSetup.lives == 5, "Options : vies réglées à %d (max 5)" % GameSetup.lives)
 	menu.handle(pad, "back")
 	menu.handle(pad, "up")
-	check(menu.screen == menu.Screen.MAIN and menu._choice == 1, "Menu : retour, COMMANDES sélectionné")
+	check(menu.screen == menu.Screen.MAIN and menu._choice == 2, "Menu : retour, COMMANDES sélectionné")
 	menu.handle(pad, "confirm")
 	check(menu.screen == menu.Screen.CONTROLS, "Menu : COMMANDES s'ouvre")
 	menu.handle(pad, "back")
+	menu.handle(pad, "up")
 	menu.handle(pad, "up")
 	menu.handle(pad, "confirm")
 	check(menu.screen == menu.Screen.CHARACTERS, "Menu : JOUER ouvre le choix du perso")
@@ -1145,6 +1147,75 @@ func _ready() -> void:
 	check(first.aimed_attack_pressed and first.aim.is_equal_approx(Vector2.UP) and not held.aimed_attack_pressed
 		and second.aimed_attack_pressed and second.aim.is_equal_approx(Vector2.RIGHT),
 		"Manette : une pichenette du stick droit = un coup visé (haut %s, tenu %s, droite %s)" % [first.aim, held.aimed_attack_pressed, second.aim])
+
+	# 15) Jeu en ligne (sans réseau ici : on joue l'hôte puis un copain, et on passe les messages à la main)
+	# 15a) Les touches d'un copain arrivent par le réseau : un appui n'est jamais perdu
+	var net := NetworkInputSource.new()
+	net.push({"j": true, "jh": true, "sx": 1.0})
+	net.push({"jh": true, "sx": 1.0})  # 2e message dans la même frame : le saut appuyé reste
+	var polled := net.poll()
+	var polled_again := net.poll()
+	check(polled.jump_pressed and polled.jump_held and polled.stick.x == 1.0 and not polled_again.jump_pressed and polled_again.jump_held,
+		"En ligne : un saut envoyé par un copain compte une fois, même si deux messages arrivent ensemble")
+	# 15b) Chez l'hôte : le copain (J2) est piloté par ses touches reçues
+	Online.status = Online.Status.PLAYING
+	Online.is_host = true
+	Online.my_id = 1
+	Online.players = [{"id": 1, "character": 0, "ready": true}, {"id": 2, "character": 1, "ready": true}]
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], []]
+	GameSetup.player_characters = [GameSetup.CHARACTERS[0], GameSetup.CHARACTERS[1]]
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	check(game.online and p1.input_source is LocalInputSource and p2.input_source is NetworkInputSource,
+		"En ligne (hôte) : J1 joue sur cet ordinateur, J2 par le réseau")
+	await step(40)
+	var y_before := p2.position.y
+	game.receive_online_input(1, {"j": true, "jh": true})
+	for k in 8:
+		game.receive_online_input(1, {"jh": true})
+		await step(1)
+	check(p2.position.y < y_before - 30, "En ligne (hôte) : J2 saute avec la touche reçue du réseau (monté de %.0f px)" % (y_before - p2.position.y))
+	p1._attack_heavy = true; p1._heavy_charging = true; p1._attack_time = 0.0; p1._charge_time = 0.3; p1._heavy_charge = 0.4
+	p2.shield = 7; p2.lives = 2; p2._lives_show_timer = 1.0
+	var host_state: Array = game.online_state()
+	game.on_online_player_left(1)
+	await step(1)
+	check(p2.eliminated and game._match_over, "En ligne (hôte) : un copain qui quitte est éliminé (fin de partie à 2)")
+	# 15c) Chez un copain : rien n'est calculé, on affiche l'état reçu de l'hôte
+	Online.is_host = false
+	Online.my_id = 2
+	GameSetup.player_devices = [[], [{"type": "keyboard", "layout": 1}]]
+	await new_game()
+	var g1: Fighter = game.fighters[0]
+	var g2: Fighter = game.fighters[1]
+	check(g1.input_source is InputSource and not g1.input_source is LocalInputSource and g2.input_source is LocalInputSource,
+		"En ligne (copain) : J2 joue sur cet ordinateur, J1 est seulement affiché")
+	var spawn_y := g1.position.y
+	await step(20)
+	check(is_equal_approx(g1.position.y, spawn_y), "En ligne (copain) : sans message de l'hôte, rien ne bouge (pas de gravité calculée)")
+	game.receive_online_state(host_state)
+	await step(1)
+	check(g1.net_state() == host_state[4] and g2.net_state() == host_state[5],
+		"En ligne (copain) : les joueurs sont affichés exactement comme chez l'hôte")
+	check(g1.is_charging_heavy() and g2.shield == 7 and g2.lives == 2, "En ligne (copain) : charge de la lourde, bouclier et vies reçus")
+	game.spawn_online_effect({"k": "marque", "p": Vector2(600, 500), "c": Color.WHITE})
+	game.spawn_online_effect({"k": "explosion", "p": Vector2(600, 500), "c": Color.ORANGE})
+	var effects := 0
+	for child in game.get_children():
+		if child is ClashMark or child is MicroExplosion:
+			effects += 1
+	check(effects == 2, "En ligne (copain) : les effets envoyés par l'hôte s'affichent (%d)" % effects)
+	var end_state := host_state.duplicate()
+	end_state[2] = "Joueur 1 gagne !"
+	end_state[3] = 0
+	game.receive_online_state(end_state)
+	await step(1)
+	check(game._match_over and game._end_screen.visible and game._winner_label.text == "Joueur 1 gagne !",
+		"En ligne (copain) : l'écran de fin s'affiche quand l'hôte le dit")
+	Online.leave()
+	GameSetup.player_devices = []
+	GameSetup.player_characters = []
+	check(Online.status == Online.Status.OFF and Online.players.is_empty(), "En ligne : quitter remet tout à zéro")
 
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)

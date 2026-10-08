@@ -7,10 +7,13 @@ extends Control
 ##               pour envoyer sa manette au joueur d'à côté (ex. la manette du J1 passe au J2).
 ##   QUITTER   : retour au menu principal.
 ## Pendant la pause, tout le jeu est figé (get_tree().paused) ; seul ce menu tourne.
+## En ligne, le jeu continue (on ne peut pas arrêter celui des copains) : le menu propose
+## seulement REPRENDRE et QUITTER (quitter la partie en ligne).
 
 enum Screen { LIST, REMAP }
 
 const BUTTONS := ["REPRENDRE", "RESTART", "REMAP", "QUITTER"]
+const ONLINE_BUTTONS := ["REPRENDRE", "QUITTER"]
 
 var game: Game
 var screen := Screen.LIST
@@ -56,10 +59,10 @@ func handle(device: Dictionary, action: String) -> void:
 	if screen == Screen.LIST:
 		match action:
 			"up":
-				_choice = posmod(_choice - 1, BUTTONS.size())
+				_choice = posmod(_choice - 1, _buttons().size())
 				_show()
 			"down":
-				_choice = posmod(_choice + 1, BUTTONS.size())
+				_choice = posmod(_choice + 1, _buttons().size())
 				_show()
 			"confirm":
 				choose(_choice)
@@ -81,8 +84,22 @@ func handle(device: Dictionary, action: String) -> void:
 			_show()
 
 
+func _buttons() -> Array:
+	return ONLINE_BUTTONS if game.online else BUTTONS
+
+
 func choose(index: int) -> void:
 	_choice = index
+	if game.online:
+		if index == 0:
+			resume()
+		else:
+			Online.leave()
+			get_tree().paused = false
+			Engine.time_scale = 1.0
+			if change_scene:
+				get_tree().change_scene_to_file(Game.MENU_SCENE)
+		return
 	match index:
 		0:
 			resume()
@@ -109,8 +126,9 @@ func _show() -> void:
 		child.queue_free()
 	if screen == Screen.LIST:
 		_content.add_child(UiKit.label("PAUSE", 56))
-		for i in BUTTONS.size():
-			_content.add_child(UiKit.menu_button(BUTTONS[i], i == _choice, choose.bind(i)))
+		var buttons := _buttons()
+		for i in buttons.size():
+			_content.add_child(UiKit.menu_button(buttons[i], i == _choice, choose.bind(i)))
 		_content.add_child(UiKit.label("Start / Échap / P : reprendre", 18, UiKit.TEXT_DIM))
 		return
 	_content.add_child(UiKit.label("REMAP", 48))

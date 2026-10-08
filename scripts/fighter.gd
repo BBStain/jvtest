@@ -72,6 +72,16 @@ const KNOCKBACK_TIME := 0.2             ## durée pendant laquelle on contrôle 
 const KNOCKBACK_ACCEL := 2000.0
 
 const START_LIVES := 3
+
+## Jeu en ligne : ce que l'hôte envoie aux copains à chaque frame pour qu'ils dessinent ce joueur
+## (voir net_state). Tout ce que _draw() utilise doit être dans cette liste.
+const NET_VARS := [
+	"position", "velocity", "facing", "lives", "eliminated", "visible",
+	"_attack_time", "_attack_dir", "_attack_heavy", "_heavy_charging", "_charge_time", "_heavy_charge",
+	"stamina", "_exhausted", "_sprinting", "_stamina_show_timer",
+	"shield", "shield_broken", "_blocking", "_shield_broken_timer", "_shield_flash_timer",
+	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
+]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
 var stats: CharacterStats = CharacterStats.new()  ## le personnage joué (choisi par game.gd)
@@ -636,6 +646,29 @@ func _lose_life() -> void:
 
 func show_lives() -> void:
 	_lives_show_timer = LIVES_SHOW_TIME
+	queue_redraw()
+
+
+## Jeu en ligne : le joueur a quitté la partie, il est éliminé.
+func forfeit() -> void:
+	if eliminated:
+		return
+	lives = 1
+	_lose_life()
+
+
+## Jeu en ligne (hôte) : l'état de ce joueur à envoyer aux copains.
+func net_state() -> Array:
+	var state := []
+	for v in NET_VARS:
+		state.append(get(v))
+	return state
+
+
+## Jeu en ligne (copain) : on affiche le joueur tel que l'hôte l'a envoyé.
+func apply_net_state(state: Array) -> void:
+	for i in mini(state.size(), NET_VARS.size()):
+		set(NET_VARS[i], state[i])
 	queue_redraw()
 
 
