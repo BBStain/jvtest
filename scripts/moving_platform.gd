@@ -2,7 +2,7 @@ class_name MovingPlatform
 extends AnimatableBody2D
 ## Une plateforme traversable (on passe à travers par en dessous) qui fait des allers-retours.
 ## Les joueurs posés dessus sont transportés avec elle.
-## Réglages dans l'inspecteur de Godot, ou dans scenes/main.tscn.
+## Réglages dans l'inspecteur de Godot (size, travel, period), sur la plateforme dans la scène de la map.
 
 @export var size := Vector2(160, 16)        ## largeur, hauteur
 @export var travel := Vector2(400, 0)       ## trajet depuis la position de départ (x : droite, y : bas)

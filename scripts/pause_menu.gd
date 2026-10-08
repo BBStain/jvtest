@@ -39,6 +39,11 @@ func _ready() -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# P ouvre la pause (voir game.gd) : P la referme aussi, comme Start.
+	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_P:
+		get_viewport().set_input_as_handled()
+		handle({"type": "keyboard", "layout": 0}, "start")
+		return
 	var press := _input_reader.read(event)
 	if press.is_empty():
 		return
@@ -106,7 +111,7 @@ func _show() -> void:
 		_content.add_child(UiKit.label("PAUSE", 56))
 		for i in BUTTONS.size():
 			_content.add_child(UiKit.menu_button(BUTTONS[i], i == _choice, choose.bind(i)))
-		_content.add_child(UiKit.label("Start / Échap : reprendre", 18, UiKit.TEXT_DIM))
+		_content.add_child(UiKit.label("Start / Échap / P : reprendre", 18, UiKit.TEXT_DIM))
 		return
 	_content.add_child(UiKit.label("REMAP", 48))
 	var slots := HBoxContainer.new()

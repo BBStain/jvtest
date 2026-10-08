@@ -546,6 +546,25 @@ func _ready() -> void:
 	await step(60)
 	check(p2.lives == 2 and p2.position.x - 680 < 70, "Persos : J2, 2 fois plus lourd, recule moins (%.0f px)" % (p2.position.x - 680))
 	check(game.map is GameMap and game.map.map_name == "Arène", "Map : chargée depuis scenes/maps/ (%s)" % game.map.map_name)
+	p1.clash(Vector2.LEFT)
+	p2.clash(Vector2.RIGHT)
+	check(absf(p1.velocity.x + Fighter.CLASH_PUSH) < 1.0 and absf(p2.velocity.x - Fighter.CLASH_PUSH / 2.0) < 1.0,
+		"Persos : le poids compte aussi dans les chocs (J1 %.0f, J2 2 fois plus lourd %.0f)" % [p1.velocity.x, p2.velocity.x])
+
+	# 9g bis) Un grand perso apparaît posé sur le sol (les points d'apparition marquent les pieds)
+	var tall := CharacterStats.new()
+	tall.display_name = "Test grand"
+	tall.body_size = Vector2(40, 140)
+	ResourceSaver.save(tall, "user://perso_grand.tres")
+	GameSetup.player_characters = ["user://perso_grand.tres", ""]
+	await new_game()
+	GameSetup.player_characters = []
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(60)
+	check(p1.is_on_floor() and absf(p1.position.y - (570 - 70)) < 3 and p1.lives == 3,
+		"Persos : un perso de 140 px de haut apparaît posé sur le sol (y=%.1f)" % p1.position.y)
 
 	# 9d) Dash vers le haut sans tenir le saut : il n'est plus coupé net (vrai 3e saut)
 	await new_game()
@@ -719,5 +738,69 @@ func _ready() -> void:
 	GameSetup.player_devices = []
 	GameSetup.lives = 3
 
+	# 12) Contenu : chaque perso et chaque map de GameSetup est complet et jouable
+	# (si on ajoute un perso ou une map incomplet, la mise en ligne s'arrête ici)
+	for path in GameSetup.CHARACTERS:
+		var c := load(path) as CharacterStats
+		check(c != null and c.display_name != "" and c.body_size.x > 0.0 and c.body_size.y > 0.0 \
+			and c.shield_max >= 1 and c.weight > 0.0 and c.attack_reach > c.attack_radius \
+			and c.heavy_startup < Fighter.HEAVY_CHARGE_MAX and c.dash_time > 0.0,
+			"Contenu : le perso %s est complet" % path)
+	for path in GameSetup.MAPS:
+		var m := (load(path) as PackedScene).instantiate() as GameMap
+		var problems: Array[String] = []
+		if m == null:
+			problems.append("ce n'est pas une GameMap")
+		else:
+			if m.map_name == "":
+				problems.append("pas de nom")
+			if not m.has_node("SpawnPoints") or m.get_node("SpawnPoints").get_child_count() < 4:
+				problems.append("il faut 4 points dans SpawnPoints")
+			if not m.has_node("RespawnPoint"):
+				problems.append("pas de RespawnPoint")
+			else:
+				var points: Array = [m.get_node("RespawnPoint")]
+				if m.has_node("SpawnPoints"):
+					points.append_array(m.get_node("SpawnPoints").get_children())
+				for point in points:
+					if not m.blast_zone.has_point(point.position):
+						problems.append("%s est hors de la zone de jeu" % point.name)
+			_check_visuals(m, problems)
+			m.free()
+		check(problems.is_empty(), "Contenu : la map %s est complète %s" % [path, problems])
+		# Sur chaque map, chaque perso apparaît posé (4 joueurs) et ne perd pas de vie en arrivant
+		GameSetup.map_path = path
+		for c_path in GameSetup.CHARACTERS:
+			GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}],
+				[{"type": "joypad", "id": 5}], [{"type": "joypad", "id": 6}]]
+			GameSetup.player_characters = [c_path, c_path, c_path, c_path]
+			await new_game()
+			for fi in game.fighters:
+				fi.input_source = Scripted.new(func(s, f): pass)
+			await step(90)
+			var landed := 0
+			for fi in game.fighters:
+				if fi.is_on_floor() and fi.lives == GameSetup.lives:
+					landed += 1
+			check(landed == 4, "Contenu : sur %s, les 4 %s atterrissent (%d/4)" % [path.get_file(), c_path.get_file(), landed])
+	GameSetup.map_path = GameSetup.MAPS[0]
+	GameSetup.player_devices = []
+	GameSetup.player_characters = []
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
+
+
+## Chaque plateforme a une forme qui bloque (Collision) et un rectangle de couleur (Visuel) :
+## les deux doivent avoir la même taille, sinon on marche dans le vide ou on traverse un mur visible.
+func _check_visuals(node: Node, problems: Array[String]) -> void:
+	for child in node.get_children():
+		if child is CollisionShape2D and (child as CollisionShape2D).shape is RectangleShape2D \
+				and node.has_node("Visuel") and node.get_node("Visuel") is ColorRect:
+			var size: Vector2 = ((child as CollisionShape2D).shape as RectangleShape2D).size
+			var shape_rect := Rect2((child as Node2D).position - size / 2.0, size)
+			var v := node.get_node("Visuel") as ColorRect
+			var visual_rect := Rect2(v.offset_left, v.offset_top, v.offset_right - v.offset_left, v.offset_bottom - v.offset_top)
+			if not shape_rect.is_equal_approx(visual_rect):
+				problems.append("%s : Collision et Visuel n'ont pas la même taille" % node.name)
+		_check_visuals(child, problems)

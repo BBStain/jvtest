@@ -22,10 +22,10 @@ Après une mise à jour, le navigateur peut garder l'ancienne version jusqu'à 1
 | Valider | A ou Start | Espace, F ou Entrée | L ou K |
 | Revenir | B | Échap ou C | U ou Retour arrière |
 
-À la fin d'une partie : **Start** ou **A** pour rejouer, **B** ou **Échap** pour revenir au menu (les joueurs restent connectés).
+À la fin d'une partie : **Start**, **A** ou **Entrée** pour rejouer, **B** ou **Échap** pour revenir au menu (les joueurs restent connectés).
 
 **Pause** : **Start** sur la manette, **Échap** ou **P** au clavier. Le menu pause propose :
-- **Reprendre** : on continue (Start ou Échap marchent aussi).
+- **Reprendre** : on continue (Start, Échap ou P marchent aussi).
 - **Restart** : on recommence la partie avec les mêmes joueurs.
 - **Remap** : on échange les manettes entre joueurs. Chacun pousse gauche / droite pour envoyer sa manette (ou son clavier) au joueur d'à côté : par exemple la manette 1 passe au joueur 2, et la manette 2 au joueur 1. La manette vibre quand elle change de joueur.
 - **Quitter** : retour au menu.
@@ -121,8 +121,11 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 - **Un personnage** (vitesse, hauteur de saut, dash, attaques, poids…) : double-clique sur `characters/barre.tres`
   dans le panneau « Système de fichiers » en bas à gauche. Ses réglages s'affichent à droite dans l'inspecteur, rangés par groupes
   (Déplacement, Dash, Attaque légère…). Change un chiffre, fais **Ctrl+S**, puis **F5** pour tester.
-- **Ajouter un personnage** : clic droit sur `characters/barre.tres` > Dupliquer, donne-lui un nom, change ses réglages,
-  puis ajoute son chemin dans la liste `CHARACTERS` de `scripts/game_setup.gd`.
+- **Ajouter un personnage** : clic droit sur `characters/barre.tres` > Dupliquer, donne-lui un nom, change ses réglages
+  (son nom et sa courte `description` s'affichent dans le choix du perso), puis ajoute son chemin dans la liste `CHARACTERS`
+  de `scripts/game_setup.gd`. Tout suit ses réglages : sa taille, ses sauts, son dash, la longueur et l'épaisseur de ses attaques
+  (le dessin suit la zone qui touche), son bouclier, son endurance, et son **poids** (un perso 2 fois plus lourd est
+  repoussé 2 fois moins loin par les coups, les chocs et le bouclier).
 - **Les règles communes à tous** (bouclier, contre, invincibilité…) : en haut de `scripts/fighter.gd`, chaque règle est une ligne `const` avec une explication.
 - **La map** : ouvre `scenes/maps/arene.tscn`. Dans l'arbre à gauche, clique sur `Sol`, `PlateformeMilieu`, `PlateformeHaut`, `MurGauche`, `MurDroit`
   ou une pièce de `ZoneAerienne` / `ZoneDuel`, et déplace-les avec la souris dans la vue du milieu. Attention, chaque plateforme a deux enfants à garder de la même taille :
@@ -131,6 +134,11 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
   `size` (taille), `travel` (trajet) et `period` (durée d'un aller-retour en secondes).
 - **Ajouter une map** : clic droit sur `scenes/maps/arene.tscn` > Dupliquer, change le décor (garde les nœuds `SpawnPoints` et `RespawnPoint`),
   puis ajoute son chemin dans la liste `MAPS` de `scripts/game_setup.gd`. La zone hors de laquelle on tombe se règle dans l'inspecteur (`blast_zone`).
+  Les marqueurs de `SpawnPoints` et `RespawnPoint` indiquent les **pieds** du perso : place-les juste au-dessus d'un sol,
+  et un grand perso comme un petit apparaîtra posé dessus. Le petit plan du choix de la map se dessine tout seul.
+- **Filet de sécurité** : les tests automatiques vérifient chaque perso et chaque map des listes (réglages complets,
+  4 points d'apparition dans la zone de jeu, `Collision` et `Visuel` de la même taille, 4 joueurs qui atterrissent bien).
+  S'il manque quelque chose, la mise en ligne s'arrête et le jeu en ligne n'est pas cassé.
 - **La caméra** : en haut de `scripts/game.gd`, les réglages `CAMERA_...` (marge autour des joueurs, zoom le plus proche et le plus éloigné, vitesse).
 
 ## Prochaines étapes
