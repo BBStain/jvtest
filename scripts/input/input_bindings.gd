@@ -8,7 +8,7 @@ extends RefCounted
 ##   {"type": "joypad", "id": 2}        -> la manette n°2 connectée
 ##
 ## Manette : stick gauche ou croix pour bouger, A sauter, X attaque légère, Y attaque lourde,
-## B bloquer, gâchette gauche (LT) courir, LB dash.
+## B bloquer, gâchette gauche (LT) courir, LB dash, stick droit attaque légère visée.
 ## Les touches clavier sont des touches PHYSIQUES : "W A S D" ici = "Z Q S D" sur un clavier AZERTY.
 
 const KEYBOARD_LAYOUTS := [
@@ -42,8 +42,11 @@ const GAMEPAD_AXES := {
 	"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0],
 	"up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0],
 	"sprint": [JOY_AXIS_TRIGGER_LEFT, 1.0],
+	"aim_left": [JOY_AXIS_RIGHT_X, -1.0], "aim_right": [JOY_AXIS_RIGHT_X, 1.0],
+	"aim_up": [JOY_AXIS_RIGHT_Y, -1.0], "aim_down": [JOY_AXIS_RIGHT_Y, 1.0],
 }
-const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "heavy", "dash", "block", "sprint"]
+const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "heavy", "dash", "block", "sprint",
+	"aim_left", "aim_right", "aim_up", "aim_down"]
 const DEADZONE := 0.35
 
 ## Correctif pour la version navigateur (Godot 4.3) : le navigateur envoie les gâchettes LT / RT

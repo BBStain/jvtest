@@ -466,6 +466,7 @@ func _controls_table() -> GridContainer:
 		["Se déplacer", "Stick / croix", "Z Q S D", "Flèches"],
 		["Sauter", "A", "Espace", "L"],
 		["Attaque légère", "X", "F", "K"],
+		["Attaque visée", "Stick droit", "-", "-"],
 		["Attaque lourde (garder)", "Y", "R", "I"],
 		["Dash", "LB", "G", "J"],
 		["Courir (garder)", "LT", "Shift gauche", "Shift droit"],
