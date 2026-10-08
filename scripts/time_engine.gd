@@ -11,6 +11,7 @@ const RAMP_TIME := 0.4   ## temps pour revenir en douceur à la vitesse normale 
 var _scale := 1.0        ## vitesse visée (1 = normale, 0.5 = 2 fois moins vite, 2 = 2 fois plus vite)
 var _time_left := 0.0    ## vraies secondes restantes avant le retour à la normale
 var _duration := 0.0     ## durée demandée au dernier play() (pour renew())
+var _stopping := false   ## stop() demandé : le ralenti se termine, renew() ne le relance plus
 
 
 func _ready() -> void:
@@ -27,18 +28,20 @@ func play(time_scale: float, duration: float) -> void:
 	_scale = maxf(time_scale, 0.05)
 	_duration = duration
 	_time_left = duration
+	_stopping = false
 	Engine.time_scale = _scale
 
 
 ## Si un ralenti (ou une accélération) est en cours, il repart de zéro pour toute sa durée.
-## Ne fait rien sinon.
+## Ne fait rien sinon, ni s'il est en train de s'arrêter (par exemple un duel déjà tranché).
 func renew() -> void:
-	if is_active():
+	if is_active() and not _stopping:
 		play(_scale, _duration)
 
 
 ## Revient à la vitesse normale : en douceur (sur RAMP_TIME), ou tout de suite.
 func stop(instant := false) -> void:
+	_stopping = true
 	if instant:
 		_time_left = 0.0
 		Engine.time_scale = 1.0

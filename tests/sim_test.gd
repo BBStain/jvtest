@@ -824,6 +824,25 @@ func _ready() -> void:
 	await shot("16_jumb_jib")
 	check(full_frames > 0 and full_frames < 50, "Jib : sa lourde arrive au max plus vite (%.2f s)" % (full_frames / 60.0))
 
+	# 11c) Chaque perso monte sur la plateforme du milieu en un seul saut (Jumb saute un peu moins haut,
+	# mais ça ne doit pas l'empêcher d'aller là où va la Barre)
+	for c_path in GameSetup.CHARACTERS:
+		GameSetup.player_characters = [c_path, c_path]
+		await new_game()
+		GameSetup.player_characters = []
+		p1 = game.fighters[0]; p2 = game.fighters[1]
+		p2.input_source = Scripted.new(func(s, f): pass)
+		p1.input_source = Scripted.new(func(s, f): pass)
+		await step(40)
+		p1.position.x = 640  # sous la plateforme du milieu
+		p1.input_source = Scripted.new(func(s, f):
+			s.jump_pressed = f == 1
+			s.jump_held = f >= 1 and f < 40)
+		await step(70)
+		var feet := p1.position.y + p1.stats.body_size.y / 2.0
+		check(p1.is_on_floor() and absf(feet - 432.0) < 3.0,
+			"Saut : %s monte sur la plateforme du milieu en un saut (pieds à y=%.0f)" % [p1.stats.display_name, feet])
+
 	# 12) Contenu : chaque perso et chaque map de GameSetup est complet et jouable
 	# (si on ajoute un perso ou une map incomplet, la mise en ligne s'arrête ici)
 	for path in GameSetup.CHARACTERS:
@@ -872,6 +891,105 @@ func _ready() -> void:
 	GameSetup.map_path = GameSetup.MAPS[0]
 	GameSetup.player_devices = []
 	GameSetup.player_characters = []
+
+	# 13) Check-up : les petits défauts corrigés restent corrigés
+	# 13a) Garder B pendant sa propre attaque lourde ne donne pas un blocage parfait juste après
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 250; p2.position.x = 650
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f < 30
+		s.block_held = f >= 3)
+	await step(5)
+	check(p2.is_charging_heavy() and not p2.is_blocking(), "Blocage parfait : J2 charge sa lourde en gardant B")
+	for i in 80:  # jusqu'à la première frame où J2 peut enfin bloquer, après sa lourde
+		await step(1)
+		if p2.is_blocking():
+			break
+	check(p2.is_blocking() and not p2.is_parrying(), "Blocage parfait : B gardé depuis la lourde ne compte pas comme un appui pile")
+	p1.position = Vector2(p2.position.x - 50, p2.position.y); p1.velocity = Vector2.ZERO
+	p1._attack_heavy = false
+	p1._attack_has_hit = false
+	p1._attack_dir = Vector2.RIGHT
+	p1._attack_time = base.attack_startup
+	await step(1)
+	check(p2.lives == 3 and p2.shield == base.shield_max - 1, "Blocage parfait : là, c'est un blocage normal (bouclier %d)" % p2.shield)
+
+	# 13b) Pause pendant la charge d'une lourde : à la reprise, la charge continue (Y toujours tenu)
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 250; p2.position.x = 900
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = true)
+	await step(15)
+	game.open_pause()
+	await get_tree().process_frame
+	game.close_pause()
+	await step(3)
+	check(p1.is_charging_heavy(), "Pause : la lourde en charge n'est pas lâchée à la reprise")
+
+	# 13c) Y appuyé juste avant la fin de la recharge de l'attaque légère : la lourde part quand même
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 250; p2.position.x = 900
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f):
+		s.attack_pressed = f == 1
+		s.heavy_pressed = f == 4
+		s.heavy_held = f >= 4)
+	await step(20)
+	check(p1.is_charging_heavy(), "Attaque lourde : Y appuyé pendant la recharge n'est pas perdu")
+
+	# 13d) À 3 joueurs : J2 et J3 se frappent l'un l'autre avec J1 entre eux -> choc entre J2 et J3,
+	# J1 n'est pas touché (avant, ça dépendait de l'ordre des joueurs)
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}]]
+	await new_game()
+	GameSetup.player_devices = []
+	f3 = game.fighters
+	for fi in f3:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(40)
+	f3[0].position = Vector2(600, 540); f3[1].position = Vector2(560, 540); f3[2].position = Vector2(640, 540)
+	for k in [1, 2]:
+		var fi: Fighter = f3[k]
+		fi._attack_heavy = false
+		fi._attack_has_hit = false
+		fi._attack_dir = Vector2.RIGHT if k == 1 else Vector2.LEFT
+		fi._attack_time = base.attack_startup
+	game._resolve_hits()
+	check(f3[0].lives == 3 and f3[1].lives == 3 and f3[2].lives == 3 and not f3[1].is_attacking() and not f3[2].is_attacking(),
+		"3 joueurs : J2 et J3 se frappent = choc, J1 entre eux n'est pas touché (vies %d %d %d)" % [f3[0].lives, f3[1].lives, f3[2].lives])
+
+	# 13e) Un duel déjà tranché ne repart pas sur un contre, et un bouclier cassé pendant un duel ne l'écourte pas
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	game._start_duel(p1, p2)
+	game._time_engine.stop()
+	game._clash(p1, p2, p1.position)
+	check(game._time_engine._time_left <= TimeEngine.RAMP_TIME, "Ralenti : un duel tranché ne repart pas sur un contre")
+	game._start_duel(p1, p2)
+	game._time_engine._time_left = 2.0
+	p2.shield = 1
+	game._hit_shield(p1, p2, false)
+	check(p2.shield_broken and is_equal_approx(game._time_engine._time_left, Game.DUEL_DURATION) and is_equal_approx(Engine.time_scale, Game.DUEL_TIME_SCALE),
+		"Ralenti : bouclier cassé pendant un duel, le duel continue (%.1f s, vitesse %.2f)" % [game._time_engine._time_left, Engine.time_scale])
+	game._time_engine.stop(true)
+
+	# 13f) Menu : Shift droit appartient au joueur du clavier de droite
+	var reader := MenuInput.new()
+	var shift := InputEventKey.new()
+	shift.physical_keycode = KEY_SHIFT
+	shift.location = KEY_LOCATION_RIGHT
+	shift.pressed = true
+	var read: Dictionary = reader.read(shift)
+	check(read.get("device", {}) == {"type": "keyboard", "layout": 1}, "Menu : Shift droit = clavier de droite (%s)" % [read.get("device")])
 
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)

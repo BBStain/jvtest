@@ -60,7 +60,7 @@ const PARRY_WINDOW := 0.15              ## blocage parfait : B appuyé au plus t
 const PARRY_COOLDOWN := 1.0             ## ... c'est un contre : celui qui frappait ne frappe plus pendant 1 s
 
 # --- Course (LT / Shift, à maintenir) et endurance ---
-const STAMINA_BLOCK_SPRINT_DRAIN := 70.0  ## ... et en bloquant tout en courant
+const STAMINA_BLOCK_SPRINT_MULT := 2.33  ## en bloquant tout en courant, l'endurance part 2,33 fois plus vite
 const STAMINA_REGEN_DELAY := 0.6        ## temps avant que l'endurance remonte
 const STAMINA_RESTART := 25.0           ## jauge vide : il faut remonter jusque-là pour recourir
 const STAMINA_SHOW_TIME := 1.0          ## la jauge reste affichée ce temps après être pleine
@@ -104,6 +104,7 @@ var _attack_has_hit := false
 var _attack_heavy := false              ## true = attaque lourde en cours
 var _attack_cooldown_timer := 0.0
 var _attack_buffer_timer := 0.0
+var _heavy_buffer_timer := 0.0          ## pareil pour Y : appuyé un peu trop tôt, il compte quand même
 var _heavy_charging := false            ## true = on garde Y pour charger l'attaque lourde
 var _charge_time := 0.0
 var _heavy_charge := 0.0                ## 0 = pas chargée, 1 = charge pleine
@@ -118,7 +119,7 @@ var shield := 0
 var shield_broken := false              ## cassé : plus de blocage jusqu'à la fin de la partie
 var _cracks: Array[PackedVector2Array] = []  ## les fissures du bouclier, une par point perdu
 var _blocking := false
-var _block_time := 0.0                  ## depuis combien de temps on bloque (pour le blocage parfait)
+var _block_hold_time := 0.0             ## depuis combien de temps B est appuyé (pour le blocage parfait)
 var _shield_regen_timer := 0.0
 var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
 var _shield_flash_timer := 0.0          ## petit éclat quand le bouclier encaisse un coup
@@ -193,17 +194,20 @@ func physics_tick(input: InputState, delta: float) -> void:
 	else:
 		_tick_movement(input, on_floor, delta)
 
-	# X est gardé en mémoire un court instant : en martelant, le coup suivant part dès que possible.
+	# X et Y sont gardés en mémoire un court instant : en martelant, le coup suivant part dès que
+	# possible, et un Y appuyé juste avant la fin d'une recharge n'est pas perdu.
 	if input.attack_pressed:
 		_attack_buffer_timer = ATTACK_BUFFER
-	if _blocking:
-		pass  # pas d'attaque en bloquant
-	elif _attack_buffer_timer > 0.0:
-		if can_attack():
+	if input.heavy_pressed:
+		_heavy_buffer_timer = ATTACK_BUFFER
+	if not _blocking and can_attack():  # pas d'attaque en bloquant
+		if _attack_buffer_timer > 0.0:
 			_attack_buffer_timer = 0.0
+			_heavy_buffer_timer = 0.0
 			_try_start_attack(false)
-	elif input.heavy_pressed:
-		_try_start_attack(true)
+		elif _heavy_buffer_timer > 0.0:
+			_heavy_buffer_timer = 0.0
+			_try_start_attack(true)
 	_tick_attack(input, delta)
 
 	move_and_slide()
@@ -217,6 +221,7 @@ func _tick_timers(delta: float) -> void:
 	_dash_cooldown_timer -= delta
 	_attack_cooldown_timer -= delta
 	_attack_buffer_timer -= delta
+	_heavy_buffer_timer -= delta
 	_invincible_timer -= delta
 	_knockback_timer -= delta
 	_wall_jump_timer -= delta
@@ -234,7 +239,7 @@ func _update_sprint(input: InputState, delta: float) -> void:
 	var moving := absf(input.stick.x) > 0.2
 	_sprinting = input.sprint_held and not _exhausted and stamina > 0.0 and (moving or _blocking)
 	if _sprinting:
-		stamina -= (STAMINA_BLOCK_SPRINT_DRAIN if _blocking else stats.stamina_sprint_drain) * delta
+		stamina -= stats.stamina_sprint_drain * (STAMINA_BLOCK_SPRINT_MULT if _blocking else 1.0) * delta
 		_stamina_regen_timer = STAMINA_REGEN_DELAY
 		if stamina <= 0.0:
 			stamina = 0.0
@@ -254,7 +259,9 @@ func _update_sprint(input: InputState, delta: float) -> void:
 func _update_block(input: InputState, delta: float) -> void:
 	_blocking = input.block_held and not shield_broken and not is_dashing() \
 		and not _is_attack_startup_or_active()
-	_block_time = _block_time + delta if _blocking else 0.0
+	# Compté depuis l'appui sur B, même si on ne pouvait pas encore bloquer (pendant une attaque,
+	# un dash...) : garder B appuyé pendant sa propre attaque ne donne pas un blocage parfait gratuit.
+	_block_hold_time = _block_hold_time + delta if input.block_held else 0.0
 	if _blocking or shield_broken or shield >= stats.shield_max:
 		_shield_regen_timer = 0.0
 		return
@@ -372,7 +379,7 @@ func _tick_attack(input: InputState, delta: float) -> void:
 	if _heavy_charging:
 		# On charge tant que Y est gardé ; on frappe en le lâchant, ou quand la charge est pleine.
 		_charge_time += delta
-		_heavy_charge = clampf((_charge_time - stats.heavy_startup) / (stats.heavy_charge_time - stats.heavy_startup), 0.0, 1.0)
+		_heavy_charge = clampf((_charge_time - stats.heavy_startup) / maxf(stats.heavy_charge_time - stats.heavy_startup, 0.001), 0.0, 1.0)
 		if (_charge_time >= stats.heavy_startup and not input.heavy_held) or _charge_time >= stats.heavy_charge_time:
 			_heavy_charging = false
 			_aim_at_target()  # l'adversaire a pu bouger pendant la charge
@@ -395,7 +402,7 @@ func _attack_active() -> float:
 
 ## Angle actuel de l'arme pendant l'attaque lourde (en radians, côté "facing").
 func _heavy_angle() -> float:
-	var progress := clampf((_attack_time - stats.heavy_startup) / stats.heavy_active, 0.0, 1.0)
+	var progress := clampf((_attack_time - stats.heavy_startup) / maxf(stats.heavy_active, 0.001), 0.0, 1.0)
 	return deg_to_rad(lerpf(HEAVY_ARC_START, HEAVY_ARC_END, progress))
 
 
@@ -455,7 +462,7 @@ func is_blocking() -> bool:
 
 ## Blocage parfait : on vient tout juste de commencer à bloquer.
 func is_parrying() -> bool:
-	return _blocking and _block_time <= PARRY_WINDOW
+	return _blocking and _block_hold_time <= PARRY_WINDOW
 
 
 func can_attack() -> bool:
@@ -579,7 +586,7 @@ func take_hit(hit_dir: Vector2, knockback := -1.0) -> void:
 ## Toutes les poussées reçues (coups, chocs, bouclier) passent par ici : plus le perso est lourd,
 ## moins il est repoussé (poids 2 = 2 fois moins loin).
 func _pushed(force: Vector2) -> Vector2:
-	return force / stats.mass()
+	return force / maxf(stats.mass(), 0.1)  # jamais de division par zéro, même avec un réglage bizarre
 
 
 ## Sorti de la map : on perd une vie et on réapparaît au milieu.
