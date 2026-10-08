@@ -1021,6 +1021,76 @@ func _ready() -> void:
 	var read: Dictionary = reader.read(shift)
 	check(read.get("device", {}) == {"type": "keyboard", "layout": 1}, "Menu : Shift droit = clavier de droite (%s)" % [read.get("device")])
 
+	# 13g) À 3 ou 4 joueurs, l'attaque légère ne touche pas dans le dos de celui qui frappe
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}],
+		[{"type": "joypad", "id": 5}], [{"type": "joypad", "id": 6}]]
+	await new_game()
+	GameSetup.player_devices = []
+	var f4: Array = game.fighters
+	var set_light := func(fi: Fighter, dir: Vector2) -> void:
+		fi._attack_heavy = false
+		fi._attack_has_hit = false
+		fi._attack_dir = dir
+		fi._attack_time = base.attack_startup
+		fi._attack_cooldown_timer = 0.0
+	for fi in f4:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(40)
+	# J2 frappe J3 devant lui, J1 est juste derrière J2 : J3 perd une vie, pas J1.
+	f4[0].position = Vector2(600, 540); f4[1].position = Vector2(622, 540); f4[2].position = Vector2(640, 540)
+	f4[3].position = Vector2(1100, 540)
+	set_light.call(f4[1], Vector2.RIGHT)
+	game._resolve_hits()
+	check(f4[0].lives == 3 and f4[2].lives == 2,
+		"4 joueurs : le coup léger touche devant, pas le joueur dans le dos (J1 %d, J3 %d)" % [f4[0].lives, f4[2].lives])
+	# Dos à dos : J1 frappe J3 à gauche, J2 frappe J4 à droite -> pas de choc, J3 et J4 sont touchés.
+	await step(90)
+	for fi in f4:
+		fi.lives = 3
+		fi._invincible_timer = 0.0
+		fi._attack_time = -1.0
+		fi.velocity = Vector2.ZERO
+	f4[2].position = Vector2(575, 540); f4[0].position = Vector2(600, 540)
+	f4[1].position = Vector2(630, 540); f4[3].position = Vector2(655, 540)
+	set_light.call(f4[0], Vector2.LEFT)
+	set_light.call(f4[1], Vector2.RIGHT)
+	game._resolve_clashes()
+	game._resolve_hits()
+	check(f4[2].lives == 2 and f4[3].lives == 2 and f4[0].lives == 3 and f4[1].lives == 3,
+		"4 joueurs : deux coups légers dos à dos ne font pas de choc (vies %d %d %d %d)" % [f4[0].lives, f4[1].lives, f4[2].lives, f4[3].lives])
+	# J1 met une lourde dans le dos de J2 pendant que J2 frappe devant lui (vers la droite) :
+	# J2 est touché, ce n'est pas un contre (pas de duel au ralenti).
+	var duels: Array[String] = []
+	for offset in [Vector2(50, -30), Vector2(65, -30), Vector2(80, 0), Vector2(65, 0), Vector2(35, 0)]:
+		GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}]]
+		await new_game()
+		GameSetup.player_devices = []
+		f4 = game.fighters
+		for fi in f4:
+			fi.input_source = Scripted.new(func(s, f): pass)
+		await step(30)
+		f4[2].position = Vector2(1100, 540)
+		f4[0].position = Vector2(600, 540); f4[0].velocity = Vector2.ZERO
+		f4[0].input_source = Scripted.new(func(s, f): s.heavy_pressed = f == 1)
+		var b: Fighter = f4[1]
+		b.input_source = Scripted.new(func(s, f):
+			b.position = Vector2(600, 540) + offset; b.velocity = Vector2.ZERO
+			if b.lives == 3:
+				set_light.call(b, Vector2.RIGHT))
+		var outcome := ""
+		for k in 40:
+			await step(1)
+			if Engine.time_scale < 0.99:
+				outcome = "duel"
+				break
+			if b.lives < 3:
+				outcome = "touché"
+				break
+		if outcome != "touché":
+			duels.append("%s : %s" % [offset, outcome if outcome != "" else "rien"])
+		game._time_engine.stop(true)
+	check(duels.is_empty(), "3 joueurs : une lourde dans le dos d'un joueur qui frappe devant lui le touche, pas de duel %s" % [duels])
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 

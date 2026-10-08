@@ -481,12 +481,14 @@ func is_heavy_attack() -> bool:
 
 
 ## La zone qui touche est un segment épais (de attack_start() à attack_center(), d'épaisseur attack_radius()).
-## Attaque légère : toute la barre, du perso jusqu'au bout, comme un coup de poing ou d'épée,
-## donc on touche aussi un adversaire tout proche. Attaque lourde : seulement le bout de l'arme.
+## Attaque légère : toute la barre, du centre du perso jusqu'au bout, comme un coup de poing ou
+## d'épée, donc on touche aussi un adversaire tout proche. Le segment commence une épaisseur devant
+## le centre : la zone s'arrête pile au centre du perso et ne déborde pas dans son dos.
+## Attaque lourde : seulement le bout de l'arme.
 func attack_start() -> Vector2:
 	if _attack_heavy:
 		return attack_center()
-	return global_position
+	return global_position + _attack_dir * minf(stats.attack_radius, stats.attack_reach - stats.attack_radius)
 
 
 ## Le bout de la zone qui touche.
