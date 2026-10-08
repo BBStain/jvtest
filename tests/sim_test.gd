@@ -1261,6 +1261,40 @@ func _ready() -> void:
 	GameSetup.player_characters = []
 	check(Online.status == Online.Status.OFF and Online.players.is_empty(), "En ligne : quitter remet tout à zéro")
 
+	# 15b) Relais : quand la connexion directe est bloquée, les paquets passent par le serveur
+	var host_peer := HybridPeer.new()
+	var guest_peer := HybridPeer.new()
+	host_peer.create_server()
+	guest_peer.create_client(2)
+	var relayed := []
+	host_peer.send_relay = func(target: int, data: PackedByteArray) -> void:
+		relayed.append(target)
+		guest_peer.receive_relay(1, data)
+	guest_peer.send_relay = func(target: int, data: PackedByteArray) -> void:
+		host_peer.receive_relay(2, data)
+	var seen := []
+	host_peer.peer_connected.connect(func(id: int) -> void: seen.append("+%d" % id))
+	host_peer.peer_disconnected.connect(func(id: int) -> void: seen.append("-%d" % id))
+	check(guest_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTING, "Relais : le copain attend d'être relié")
+	host_peer.use_relay(2)
+	guest_peer.use_relay(1)
+	check(guest_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED and seen == ["+2"],
+		"Relais : l'hôte et le copain sont reliés par le serveur (%s)" % [seen])
+	guest_peer.set_target_peer(1)
+	guest_peer.put_packet(PackedByteArray([4, 5, 6]))
+	check(host_peer.get_available_packet_count() == 1 and host_peer.get_packet_peer() == 2 and host_peer.get_packet() == PackedByteArray([4, 5, 6]),
+		"Relais : le paquet du copain arrive chez l'hôte")
+	host_peer.set_target_peer(0)
+	host_peer.put_packet(PackedByteArray([7]))
+	check(relayed == [2] and guest_peer.get_available_packet_count() == 1 and guest_peer.get_packet() == PackedByteArray([7]),
+		"Relais : le paquet de l'hôte arrive chez le copain (%s)" % [relayed])
+	host_peer.receive_relay(3, PackedByteArray([9]))
+	check(host_peer.get_available_packet_count() == 0, "Relais : un paquet d'un joueur inconnu est ignoré")
+	host_peer.drop(2)
+	guest_peer.drop(1)
+	check(seen == ["+2", "-2"] and guest_peer.get_connection_status() == MultiplayerPeer.CONNECTION_DISCONNECTED,
+		"Relais : le copain parti est signalé, le copain sans hôte est déconnecté")
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 

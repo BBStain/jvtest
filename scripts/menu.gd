@@ -656,7 +656,7 @@ func _show_online() -> void:
 			for i in ONLINE_BUTTONS.size():
 				_content.add_child(UiKit.menu_button(ONLINE_BUTTONS[i], i == _choice, _open_online_button.bind(i)))
 			if Online.message != "":
-				_content.add_child(UiKit.label(Online.message, 20, UiKit.HIGHLIGHT))
+				_content.add_child(_online_message(20))
 			_content.add_child(UiKit.label("Un seul joueur par ordinateur. Celui qui crée le salon donne le code aux copains.", 18, UiKit.TEXT_DIM))
 			_content.add_child(UiKit.label("B / Échap : retour", 18, UiKit.TEXT_DIM))
 		Screen.ONLINE_CODE:
@@ -679,7 +679,7 @@ func _show_online() -> void:
 		Screen.ONLINE_LOBBY:
 			_content.add_child(UiKit.label("SALON  %s" % Online.code, 44))
 			if Online.status != Online.Status.LOBBY:
-				_content.add_child(UiKit.label(Online.message, 24, UiKit.HIGHLIGHT))
+				_content.add_child(_online_message(24))
 				_content.add_child(UiKit.label("B / Échap : annuler", 18, UiKit.TEXT_DIM))
 				return
 			if Online.is_host:
@@ -704,6 +704,15 @@ func _show_online() -> void:
 			_map_choice = Online.map_index
 			_content.add_child(_map_card())
 			_content.add_child(UiKit.label("gauche / droite pour choisir, A pour lancer la partie, B pour revenir", 18, UiKit.TEXT_DIM))
+
+
+## Le message du jeu en ligne (erreur ou attente), qui passe à la ligne s'il est long.
+func _online_message(size: int) -> Label:
+	var label := UiKit.label(Online.message, size, UiKit.HIGHLIGHT)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.custom_minimum_size = Vector2(900, 0)
+	label.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	return label
 
 
 ## Une case du salon en ligne : le joueur, son perso et s'il est prêt.

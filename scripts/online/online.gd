@@ -3,7 +3,8 @@ extends Node
 ##
 ## 1. Le salon : l'hôte crée un salon avec un code de 4 lettres, les copains le rejoignent avec
 ##    ce code. Le petit serveur des salons (dossier server/) les met en contact, puis chaque
-##    copain est relié directement au navigateur de l'hôte (WebRTC).
+##    copain est relié directement au navigateur de l'hôte (WebRTC). Si la connexion directe
+##    est bloquée (navigateur, antivirus, box), ce copain passe par le serveur (voir HybridPeer).
 ## 2. La partie : l'hôte fait tourner la vraie partie, exactement comme en local. Chaque copain
 ##    envoie ses touches à l'hôte à chaque frame, et l'hôte renvoie à tout le monde l'état du
 ##    jeu (position des joueurs, attaques, vies...) que les copains affichent.
@@ -18,6 +19,7 @@ enum Status { OFF, CONNECTING, LOBBY, PLAYING }
 const MAX_PLAYERS := 4
 const CODE_LETTERS := "ABCDEFGHJKLMNPQRSTUVWXYZ"  ## pas de I ni de O (on les confond avec 1 et 0)
 const CONNECT_TIMEOUT := 15.0       ## secondes pour se relier à l'hôte avant d'abandonner
+const RELAY_AFTER := 5.0            ## secondes d'essai en direct avant de passer par le serveur
 const GAME_SCENE := "res://scenes/main.tscn"
 const MENU_SCENE := "res://scenes/menu.tscn"
 
@@ -33,8 +35,8 @@ var game: Node                      ## la partie en cours (Game), qui reçoit to
 
 var _ws: WebSocketPeer
 var _ws_was_open := false
-var _rtc: WebRTCMultiplayerPeer
-var _connections := {}              ## id réseau -> WebRTCPeerConnection
+var _peer: HybridPeer
+var _connections := {}              ## id réseau -> WebRTCPeerConnection (essai en direct)
 var _connect_time := 0.0
 var _host_retries := 0
 
@@ -95,9 +97,9 @@ func _reset() -> void:
 	for id in _connections:
 		_connections[id].close()
 	_connections.clear()
-	if _rtc != null:
-		_rtc.close()
-	_rtc = null
+	if _peer != null:
+		_peer.close()
+	_peer = null
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
 	status = Status.OFF
 	players = []
@@ -148,19 +150,30 @@ func _process(delta: float) -> void:
 	if state == WebSocketPeer.STATE_OPEN:
 		_ws_was_open = true
 		while _ws.get_available_packet_count() > 0:
-			var data = JSON.parse_string(_ws.get_packet().get_string_from_utf8())
+			var packet := _ws.get_packet()
+			if not _ws.was_string_packet():
+				# Un paquet du jeu passé par le serveur : [qui l'envoie, données...]
+				if _peer != null and packet.size() > 1:
+					_peer.receive_relay(packet[0], packet.slice(1))
+				continue
+			var data = JSON.parse_string(packet.get_string_from_utf8())
 			if data is Dictionary:
 				_on_server_message(data)
 				if _ws == null:
 					return
 	elif state == WebSocketPeer.STATE_CLOSED:
 		_ws = null
-		# Pendant la partie, on n'a plus besoin du serveur : on est relié directement.
-		if status == Status.CONNECTING or status == Status.LOBBY:
+		# Pendant la partie, ceux qui sont reliés en direct n'ont plus besoin du serveur.
+		if status == Status.CONNECTING or status == Status.LOBBY or (not is_host and _peer != null and _peer.is_relay(1)):
 			_end("Connexion au serveur des salons perdue" if _ws_was_open else "Impossible de joindre le serveur des salons")
+		elif _peer != null:
+			_peer.relay_lost()
 		return
 	if status == Status.CONNECTING:
 		_connect_time += delta
+		if not is_host and _peer != null and _peer.is_direct(1) and _connect_time > RELAY_AFTER:
+			print("En ligne : la connexion directe ne passe pas, on passe par le serveur")
+			_ask_relay(1)
 		if _connect_time > CONNECT_TIMEOUT:
 			_end("Impossible de se relier à l'hôte (sa box ou la tienne bloque peut-être la connexion)")
 
@@ -173,7 +186,10 @@ func _on_server_message(data: Dictionary) -> void:
 			if is_host:
 				_on_player_arrived(int(data.get("id", 0)))
 		"depart":
-			pass  # la connexion directe le signale aussi (peer_disconnected)
+			# En direct, la connexion directe le signale elle-même (peer_disconnected).
+			var id := int(data.get("id", 0))
+			if _peer != null and _peer.is_relay(id):
+				_peer.drop(id)
 		"signal":
 			_on_signal(int(data.get("de", 0)), data.get("data", {}))
 		"erreur":
@@ -195,23 +211,32 @@ func _send_to_server(data: Dictionary) -> void:
 		_ws.send_text(JSON.stringify(data))
 
 
+## Un paquet du jeu à faire passer par le serveur (0 = à tous les autres) : [à qui, données...]
+func _send_relay(target: int, data: PackedByteArray) -> void:
+	if _ws != null and _ws.get_ready_state() == WebSocketPeer.STATE_OPEN:
+		var packet := PackedByteArray([target])
+		packet.append_array(data)
+		_ws.send(packet)
+
+
 func _on_welcome(id: int) -> void:
 	my_id = id
-	_rtc = WebRTCMultiplayerPeer.new()
+	_peer = HybridPeer.new()
+	_peer.send_relay = _send_relay
 	if is_host:
 		_host_retries = 0
-		_rtc.create_server()
-		multiplayer.multiplayer_peer = _rtc
+		_peer.create_server()
+		multiplayer.multiplayer_peer = _peer
 		status = Status.LOBBY
 		message = ""
 		players = [{"id": 1, "character": 0, "ready": false}]
 		print("En ligne : salon %s créé" % code)
 	else:
-		_rtc.create_client(id)
-		multiplayer.multiplayer_peer = _rtc
+		_peer.create_client(id)
+		multiplayer.multiplayer_peer = _peer
 		message = "Connexion à l'hôte…"
 		if not _add_connection(1):
-			return
+			_ask_relay(1)
 	changed.emit()
 
 
@@ -222,21 +247,50 @@ func _on_player_arrived(id: int) -> void:
 		return
 	if _add_connection(id):
 		_connections[id].create_offer()
+	else:
+		_ask_relay(id)
+
+
+## La connexion directe avec ce joueur ne marche pas : on prévient l'autre et on passe par le serveur.
+func _ask_relay(id: int) -> void:
+	_send_to_server({"type": "signal", "a": id, "data": {"relais": true}})
+	_use_relay(id)
+
+
+func _use_relay(id: int) -> void:
+	if _peer == null:
+		return
+	_peer.use_relay(id)
+	if _connections.has(id):
+		_connections[id].close()
+		_connections.erase(id)
 
 
 func _add_connection(id: int) -> bool:
 	var connection := WebRTCPeerConnection.new()
-	if connection.initialize({"iceServers": OnlineConfig.ICE_SERVERS}) != OK:
-		_end("Le jeu en ligne ne marche que dans la version navigateur du jeu")
+	# Si le navigateur refuse les serveurs STUN, on essaie sans (ça suffit souvent sur le même réseau).
+	if connection.initialize({"iceServers": OnlineConfig.ICE_SERVERS}) != OK and connection.initialize({}) != OK:
+		print("En ligne : pas de connexion directe possible (%s), on passe par le serveur" % _webrtc_problem())
 		return false
 	connection.session_description_created.connect(func(type: String, sdp: String) -> void:
 		connection.set_local_description(type, sdp)
 		_send_to_server({"type": "signal", "a": id, "data": {"type": type, "sdp": sdp}}))
 	connection.ice_candidate_created.connect(func(media: String, index: int, candidate: String) -> void:
 		_send_to_server({"type": "signal", "a": id, "data": {"media": media, "index": index, "candidate": candidate}}))
-	_rtc.add_peer(connection, id)
+	_peer.add_direct(id, connection)
 	_connections[id] = connection
 	return true
+
+
+## Pourquoi le navigateur refuse la connexion directe (WebRTC), pour la console.
+func _webrtc_problem() -> String:
+	if not OS.has_feature("web"):
+		return "hors navigateur"
+	return str(JavaScriptBridge.eval("""(function () {
+		if (typeof RTCPeerConnection === 'undefined') return 'WebRTC désactivé';
+		try { new RTCPeerConnection().close(); return 'erreur inconnue'; }
+		catch (e) { return String((e && e.message) || e); }
+	})()"""))
 
 
 func _on_signal(from: int, data) -> void:
@@ -244,6 +298,12 @@ func _on_signal(from: int, data) -> void:
 		return
 	if data.has("refus"):
 		_end(str(data.refus))
+		return
+	if data.has("relais"):
+		if is_host and status != Status.LOBBY:
+			return
+		print("En ligne : le joueur %d passe par le serveur" % from)
+		_use_relay(from)
 		return
 	var connection: WebRTCPeerConnection = _connections.get(from)
 	if connection == null:
@@ -296,6 +356,13 @@ func choose(character: int, ready: bool) -> void:
 	if is_host:
 		_apply_choice(1, character, ready)
 	else:
+		# On l'affiche tout de suite, sans attendre que l'hôte renvoie le salon : sinon un appui
+		# rapide (droite puis A) repartirait de l'ancien perso.
+		var me := my_index()
+		if me != -1:
+			players[me].character = character
+			players[me].ready = ready
+			changed.emit()
 		_choice_to_host.rpc_id(1, character, ready)
 
 
@@ -427,7 +494,7 @@ func send_effect(data: Dictionary) -> void:
 
 ## Relié aux autres joueurs (sinon, rien à envoyer).
 func _connected() -> bool:
-	return _rtc != null and multiplayer.multiplayer_peer == _rtc
+	return _peer != null and multiplayer.multiplayer_peer == _peer
 
 
 @rpc("authority", "call_remote", "reliable")
