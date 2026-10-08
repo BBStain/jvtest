@@ -359,7 +359,7 @@ func _points_away(a: Fighter, b: Fighter) -> bool:
 ## Lourde contre lourde : micro-explosion qui éjecte fort les deux joueurs.
 ## Lourde contrée par une légère : micro-duel, la caméra zoome et le temps ralentit ; celui qui
 ## a lancé la lourde ne frappe plus pendant 1 s, celui qui a contré peut refrapper tout de suite.
-## Pendant un ralenti, chaque contre le fait repartir pour toute sa durée.
+## Pendant un ralenti, chaque contre le fait repartir pour toute sa durée (voir _renew_slowmo).
 func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
 	var push := _push_dir(a, b)
 	var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
@@ -369,18 +369,19 @@ func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
 		a.clash(push * Fighter.HEAVY_CLASH_PUSH * b.stats.mass(), Fighter.CLASH_LOCKOUT, Fighter.HEAVY_CLASH_LIFT)
 		b.clash(-push * Fighter.HEAVY_CLASH_PUSH * a.stats.mass(), Fighter.CLASH_LOCKOUT, Fighter.HEAVY_CLASH_LIFT)
 		_spawn_explosion(where, MicroExplosion.DEFAULT_COLOR)
-		_time_engine.renew()
+		_renew_slowmo(a, b)
 	elif heavy_countered:
 		for fighter in [a, b]:
 			var other: Fighter = b if fighter == a else a
 			var cooldown := Fighter.HEAVY_COUNTERED_COOLDOWN if fighter.is_heavy_attack() else 0.0
 			var direction := push if fighter == a else -push
 			fighter.clash(direction * Fighter.HEAVY_COUNTER_PUSH * other.stats.mass(), cooldown)
-		_start_duel(a, b)
+		if _duel.is_empty() or _in_duel(a, b):
+			_start_duel(a, b)  # pendant un duel, un contre entre deux autres joueurs n'en lance pas un 2e
 	else:
 		a.clash(push * Fighter.CLASH_PUSH * b.stats.mass())
 		b.clash(-push * Fighter.CLASH_PUSH * a.stats.mass())
-		_time_engine.renew()
+		_renew_slowmo(a, b)
 
 
 ## Blocage parfait : le défenseur a appuyé sur B pile au moment du coup. C'est un contre :
@@ -391,7 +392,18 @@ func _parry(attacker: Fighter, defender: Fighter) -> void:
 	_spawn_clash_mark((attacker.global_position + defender.global_position) / 2.0, false, PARRY_COLOR)
 	attacker.clash(push * Fighter.CLASH_PUSH * defender.stats.mass(), Fighter.PARRY_COOLDOWN)
 	defender.clash(-push * Fighter.CLASH_PUSH * attacker.stats.mass(), 0.0)
-	_time_engine.renew()
+	_renew_slowmo(attacker, defender)
+
+
+## Un contre relance le ralenti en cours pour toute sa durée. Pendant un micro-duel, seuls les
+## contres entre les deux duellistes le relancent (à 3 ou 4, les autres ne le prolongent pas).
+func _renew_slowmo(a: Fighter, b: Fighter) -> void:
+	if _duel.is_empty() or _in_duel(a, b):
+		_time_engine.renew()
+
+
+func _in_duel(a: Fighter, b: Fighter) -> bool:
+	return a in _duel and b in _duel
 
 
 ## Direction (horizontale) qui éloigne a de b.
@@ -511,7 +523,7 @@ func _hit_shield(attacker: Fighter, victim: Fighter, heavy: bool) -> void:
 	if _duel.is_empty():
 		_time_engine.play(SHIELD_BREAK_TIME_SCALE, SHIELD_BREAK_SLOWMO)
 	else:
-		_time_engine.renew()  # pendant un micro-duel, le duel continue (et repart pour toute sa durée)
+		_renew_slowmo(attacker, victim)  # entre duellistes, le duel continue (et repart pour toute sa durée)
 
 
 ## Un segment épais (de a à b, d'épaisseur radius de chaque côté) touche-t-il le rectangle ?

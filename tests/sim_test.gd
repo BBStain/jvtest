@@ -1109,6 +1109,11 @@ func _ready() -> void:
 	var view := Rect2(cam.position - game.get_viewport_rect().size / cam.zoom / 2.0, game.get_viewport_rect().size / cam.zoom)
 	check(view.has_point(game.fighters[2].position) and view.has_point(game.fighters[0].position),
 		"Duel à 3 joueurs : le 3e joueur reste à l'écran (zoom %.2f)" % cam.zoom.x)
+	game._time_engine._time_left = 2.0
+	game._clash(game.fighters[0], game.fighters[2], game.fighters[0].position)
+	check(is_equal_approx(game._time_engine._time_left, 2.0), "Duel à 3 joueurs : un contre avec le 3e joueur ne relance pas le ralenti")
+	game._clash(game.fighters[0], game.fighters[1], game.fighters[0].position)
+	check(is_equal_approx(game._time_engine._time_left, Game.DUEL_DURATION), "Duel à 3 joueurs : un contre entre duellistes relance le ralenti")
 	var group_zoom := cam.zoom.x
 	game._duel.clear()
 	game._update_camera(1.0, true)
