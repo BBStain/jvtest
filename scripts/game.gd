@@ -379,7 +379,7 @@ func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
 		if _duel.is_empty() or _in_duel(a, b):
 			_start_duel(a, b)
 		else:
-			_renew_slowmo(a, b)  # pendant un duel, pas de 2e duel : le premier continue (ou pas)
+			_renew_slowmo(a, b)  # pendant un duel, pas de 2e duel : il change d'adversaire (ou pas)
 	else:
 		a.clash(push * Fighter.CLASH_PUSH * b.stats.mass())
 		b.clash(-push * Fighter.CLASH_PUSH * a.stats.mass())
@@ -398,11 +398,16 @@ func _parry(attacker: Fighter, defender: Fighter) -> void:
 
 
 ## Un contre relance le ralenti en cours pour toute sa durée. Pendant un micro-duel, il faut
-## qu'un des deux duellistes soit dans le contre (entre eux, ou contre un autre joueur) :
-## un contre entre deux autres joueurs ne prolonge pas le duel.
+## qu'un des deux duellistes soit dans le contre : un contre entre deux autres joueurs ne
+## prolonge pas le duel. Si un duelliste contre un autre joueur, ce joueur prend la place de
+## l'ancien adversaire, qui redevient un joueur normal.
 func _renew_slowmo(a: Fighter, b: Fighter) -> void:
-	if _duel.is_empty() or a in _duel or b in _duel:
-		_time_engine.renew()
+	if not _duel.is_empty():
+		if not a in _duel and not b in _duel:
+			return
+		if not _in_duel(a, b):
+			_duel = [a, b]
+	_time_engine.renew()
 
 
 func _in_duel(a: Fighter, b: Fighter) -> bool:
