@@ -36,6 +36,9 @@ jobs:
             mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/
           fi
 
+      - name: Numéro de version (affiché dans le menu)
+        run: sed -i "s/^const TEXT := .*/const TEXT := \"${GITHUB_RUN_NUMBER}\"/" scripts/build_version.gd
+
       - name: Importer le projet
         run: godot --headless --import
 
