@@ -1,0 +1,40 @@
+# Teste le petit serveur des salons en ligne (dossier server/) à chaque modification.
+# La mise en ligne est faite par Cloudflare lui-même : le Worker « jvtest-salons » est relié
+# à ce dépôt (Workers & Pages > Builds, dossier racine « server ») et se met à jour quand main change.
+name: Serveur en ligne
+
+on:
+  push:
+    branches: [main]
+    paths: ["server/**", ".github/workflows/server.yml"]
+  pull_request:
+    paths: ["server/**", ".github/workflows/server.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Tests du serveur
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    env:
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - name: Installer
+        run: npm ci
+      - name: Tester (serveur lancé en local)
+        run: npm test

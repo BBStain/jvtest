@@ -1,0 +1,15 @@
+# Le petit serveur des salons en ligne (Cloudflare Workers, offre gratuite).
+# Il sert seulement à se retrouver avec un code de salon : la partie elle-même passe
+# directement d'un navigateur à l'autre (WebRTC). Mis en ligne par Cloudflare, relié au dépôt GitHub
+# (Workers & Pages > Builds, dossier racine « server »). Le nom ci-dessous doit rester celui du Worker.
+name = "jvtest-salons"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "SALONS"
+class_name = "Salon"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Salon"]

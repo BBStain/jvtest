@@ -1,3 +1,7 @@
 # Dossiers générés automatiquement par Godot
 .godot/
 /build/
+
+# Serveur des salons en ligne (Cloudflare)
+server/node_modules/
+server/.wrangler/
