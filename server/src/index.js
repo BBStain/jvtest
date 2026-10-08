@@ -17,6 +17,10 @@
 //                       {"type": "erreur", "raison": "code_pris" | "introuvable" | "plein" | ...}
 //                       {"type": "ferme"}  (l'hôte est parti : le salon n'existe plus)
 //   joueur -> serveur : {"type": "signal", "a": 1, "data": {...}}
+//
+// Relais : si deux navigateurs n'arrivent pas à se relier en direct (antivirus, box...), les
+// paquets du jeu passent par ici, en binaire : le joueur envoie [à qui (0 = tous), données...]
+// et le destinataire reçoit [de qui, données...].
 
 import { DurableObject } from "cloudflare:workers";
 
@@ -93,6 +97,10 @@ export class Salon extends DurableObject {
   async webSocketMessage(ws, message) {
     const moi = ws.deserializeAttachment();
     if (!moi) return;
+    if (message instanceof ArrayBuffer) {
+      this.relayer(moi.id, message);
+      return;
+    }
     if (typeof message !== "string" || message.length > MAX_MESSAGE) {
       ws.send(JSON.stringify({ type: "erreur", raison: "message_invalide" }));
       return;
@@ -108,6 +116,19 @@ export class Salon extends DurableObject {
       const cible = this.joueurs().find((j) => j.id === msg.a);
       if (cible) {
         cible.ws.send(JSON.stringify({ type: "signal", de: moi.id, data: msg.data }));
+      }
+    }
+  }
+
+  // Fait suivre un paquet du jeu : [à qui (0 = tous les autres), données...] -> [de qui, données...]
+  relayer(de, message) {
+    if (message.byteLength < 2 || message.byteLength > MAX_MESSAGE) return;
+    const paquet = new Uint8Array(message.slice(0));
+    const cible = paquet[0];
+    paquet[0] = de;
+    for (const j of this.joueurs()) {
+      if (j.id !== de && (cible === 0 || j.id === cible)) {
+        j.ws.send(paquet);
       }
     }
   }

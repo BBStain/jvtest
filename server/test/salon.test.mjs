@@ -23,8 +23,9 @@ function connecter(chemin, origin) {
   const ws = new WebSocket(base + chemin, origin ? { headers: { Origin: origin } } : undefined);
   const recus = [];
   const attente = [];
+  ws.binaryType = "arraybuffer";
   ws.addEventListener("message", (e) => {
-    const msg = JSON.parse(e.data);
+    const msg = typeof e.data === "string" ? JSON.parse(e.data) : Array.from(new Uint8Array(e.data));
     const w = attente.shift();
     if (w) w(msg);
     else recus.push(msg);
@@ -37,6 +38,7 @@ function connecter(chemin, origin) {
     ws,
     ouvert,
     envoyer: (m) => ws.send(JSON.stringify(m)),
+    envoyerOctets: (octets) => ws.send(new Uint8Array(octets)),
     suivant: () =>
       recus.length
         ? Promise.resolve(recus.shift())
@@ -90,6 +92,33 @@ test("l'hôte crée un salon, les copains le rejoignent et se parlent", async ()
   hote.fermer();
   assert.deepEqual(await j3.suivant(), { type: "ferme" });
   assert.deepEqual(await j2bis.suivant(), { type: "ferme" });
+});
+
+test("le relais fait passer les paquets du jeu quand la connexion directe ne marche pas", async () => {
+  const hote = connecter("/salon/RLAI?hote=1");
+  await hote.suivant();
+  const j2 = connecter("/salon/RLAI");
+  await j2.suivant();
+  await hote.suivant();
+  const j3 = connecter("/salon/RLAI");
+  await j3.suivant();
+  await hote.suivant();
+  await j2.suivant();
+
+  // J2 envoie à l'hôte : seul l'hôte le reçoit, avec le numéro de J2 devant
+  j2.envoyerOctets([1, 10, 20, 30]);
+  assert.deepEqual(await hote.suivant(), [2, 10, 20, 30]);
+  // L'hôte envoie à tout le monde (0) : J2 et J3 le reçoivent, pas lui
+  hote.envoyerOctets([0, 7, 8]);
+  assert.deepEqual(await j2.suivant(), [1, 7, 8]);
+  assert.deepEqual(await j3.suivant(), [1, 7, 8]);
+  // L'hôte envoie à J3 seulement
+  hote.envoyerOctets([3, 9]);
+  assert.deepEqual(await j3.suivant(), [1, 9]);
+  j2.envoyerOctets([1, 5]);
+  assert.deepEqual(await hote.suivant(), [2, 5]);  // J2 n'a pas reçu le paquet pour J3 : rien d'autre en file
+  assert.equal((await Promise.race([j2.suivant().catch(() => "rien"), new Promise((ok) => setTimeout(() => ok("rien"), 300))])), "rien");
+  hote.fermer();
 });
 
 test("code déjà pris, salon introuvable, salon plein", async () => {
