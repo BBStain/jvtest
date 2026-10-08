@@ -64,4 +64,4 @@ extends Resource
 @export var stamina_regen: float = 25.0  ## endurance regagnée par seconde sans courir
 
 @export_group("Poids")
-@export var weight: float = 1.0  ## plus lourd = repoussé moins loin par les coups (2 = 2 fois moins loin)
+@export var weight: float = 1.0  ## plus lourd = repoussé moins loin par les coups, les chocs et le bouclier (2 = 2 fois moins loin)

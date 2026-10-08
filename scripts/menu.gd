@@ -51,11 +51,14 @@ func _ready() -> void:
 	add_child(BuildVersion.make_label())
 	Input.joy_connection_changed.connect(_on_joy_connection_changed)
 
-	# En revenant d'une partie, on garde les joueurs et on va directement au menu principal.
-	for devices in GameSetup.player_devices:
-		var device: Dictionary = devices[0]
-		if device.type == "keyboard" or device.id in Input.get_connected_joypads():
-			_add_player(device)
+	# En revenant d'une partie, on garde les joueurs (et leur perso) et on va directement au menu principal.
+	for i in GameSetup.player_devices.size():
+		var device: Dictionary = GameSetup.player_devices[i][0]
+		if device in players or not (device.type == "keyboard" or device.id in Input.get_connected_joypads()):
+			continue
+		_add_player(device)
+		if i < GameSetup.player_characters.size():
+			_character_choice[-1] = maxi(GameSetup.CHARACTERS.find(GameSetup.player_characters[i]), 0)
 	screen = Screen.MAIN if not players.is_empty() else Screen.TITLE
 	_show()
 
@@ -330,6 +333,11 @@ func _character_slot(index: int) -> PanelContainer:
 	box.add_child(_character_preview(stats, color))
 	var arrows := "%s" if _locked[index] else "<   %s   >"
 	box.add_child(UiKit.label(arrows % stats.display_name, 22))
+	if stats.description != "":
+		var description := UiKit.label(stats.description, 14, UiKit.TEXT_DIM)
+		description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		description.custom_minimum_size.x = 200
+		box.add_child(description)
 	if _locked[index]:
 		box.add_child(UiKit.label("PRÊT !", 24, UiKit.HIGHLIGHT))
 	else:
@@ -344,13 +352,15 @@ func _confirm_key(device: Dictionary) -> String:
 	return "Espace" if device.layout == 0 else "L"
 
 
-## Le perso dessiné en grand (une barre de sa taille, à sa couleur).
+## Le perso dessiné en grand (une barre de sa taille, à sa couleur). Un très grand perso est
+## réduit pour tenir dans la case.
 func _character_preview(stats: CharacterStats, color: Color) -> Control:
 	var preview := Control.new()
 	preview.custom_minimum_size = Vector2(120, 110)
 	preview.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	preview.draw.connect(func() -> void:
-		var body := stats.body_size * 1.5
+		var zoom := minf(1.5, minf(preview.size.x / stats.body_size.x, preview.size.y / stats.body_size.y))
+		var body := stats.body_size * zoom
 		var origin := Vector2(preview.size.x / 2.0 - body.x / 2.0, preview.size.y - body.y)
 		preview.draw_rect(Rect2(origin, body), color)
 		preview.draw_rect(Rect2(origin + Vector2(body.x / 2.0 + 2.0, 12.0), Vector2(7, 7)), UiKit.BG_COLOR)

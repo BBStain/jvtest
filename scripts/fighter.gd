@@ -515,9 +515,9 @@ func clash(push_dir: Vector2, heavy_countered := false, explosion := false) -> v
 	_cancel_attack()
 	_attack_cooldown_timer = HEAVY_COUNTER_COOLDOWN if heavy_countered else CLASH_LOCKOUT
 	if explosion:
-		velocity = push_dir * HEAVY_CLASH_PUSH + Vector2(0.0, -HEAVY_CLASH_LIFT)
+		velocity = _pushed(push_dir * HEAVY_CLASH_PUSH) + Vector2(0.0, -HEAVY_CLASH_LIFT)
 	else:
-		velocity = push_dir * (HEAVY_COUNTER_PUSH if heavy_countered else CLASH_PUSH) + Vector2(0.0, -150.0)
+		velocity = _pushed(push_dir * (HEAVY_COUNTER_PUSH if heavy_countered else CLASH_PUSH)) + Vector2(0.0, -150.0)
 	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
 
@@ -526,7 +526,7 @@ func clash(push_dir: Vector2, heavy_countered := false, explosion := false) -> v
 func hit_shield(push_dir: Vector2) -> void:
 	_cancel_attack()
 	_attack_cooldown_timer = 0.0
-	velocity = push_dir * SHIELD_HIT_PUSH + Vector2(0.0, -120.0)
+	velocity = _pushed(push_dir * SHIELD_HIT_PUSH) + Vector2(0.0, -120.0)
 	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
 
@@ -536,7 +536,7 @@ func absorb_hit(push_dir: Vector2, heavy: bool) -> bool:
 	shield = maxi(shield - (HEAVY_SHIELD_DAMAGE if heavy else 1), 0)
 	_shield_regen_timer = 0.0
 	_shield_flash_timer = 0.12
-	velocity.x = push_dir.x * SHIELD_BLOCKER_PUSH
+	velocity.x = _pushed(push_dir * SHIELD_BLOCKER_PUSH).x
 	if shield > 0:
 		return false
 	# Bouclier cassé pour le reste de la partie.
@@ -549,7 +549,7 @@ func absorb_hit(push_dir: Vector2, heavy: bool) -> bool:
 ## attaquer pendant SHIELD_BREAK_COOLDOWN (mais peut bouger).
 func shield_burst(push_dir: Vector2, own_shield_broke: bool) -> void:
 	_cancel_attack()
-	velocity = push_dir * SHIELD_BREAK_PUSH + Vector2(0.0, -SHIELD_BREAK_LIFT)
+	velocity = _pushed(push_dir * SHIELD_BREAK_PUSH) + Vector2(0.0, -SHIELD_BREAK_LIFT)
 	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
 	if own_shield_broke:
@@ -565,10 +565,16 @@ func take_hit(hit_dir: Vector2, knockback := -1.0) -> void:
 		knockback = stats.hit_knockback
 	_cancel_attack()
 	_dash_timer = 0.0
-	velocity = hit_dir * knockback / maxf(stats.weight, 0.1) + Vector2(0.0, -200.0)
+	velocity = _pushed(hit_dir * knockback) + Vector2(0.0, -200.0)
 	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
 	_lose_life()
+
+
+## Toutes les poussées reçues (coups, chocs, bouclier) passent par ici : plus le perso est lourd,
+## moins il est repoussé (poids 2 = 2 fois moins loin).
+func _pushed(force: Vector2) -> Vector2:
+	return force / maxf(stats.weight, 0.1)
 
 
 ## Sorti de la map : on perd une vie et on réapparaît au milieu.
@@ -671,18 +677,22 @@ func _draw() -> void:
 			draw_circle(tip, halo, Color(color.lightened(0.5), 0.15 + 0.25 * _heavy_charge))
 			if full_blink:
 				draw_arc(tip, halo, 0.0, TAU, 24, Color(1, 1, 1, 0.9), 2.0)
-		draw_line(tip * 0.2, tip, blade_color, 9.0 * sqrt(weapon_scale))
-		draw_circle(tip, 9.0 * sqrt(weapon_scale), color.lightened(0.6))
+		var blade := stats.heavy_tip_radius * 0.375 * sqrt(weapon_scale)  # 9 px pour la Barre
+		draw_line(tip * 0.2, tip, blade_color, blade)
+		draw_circle(tip, blade, color.lightened(0.6))
 
 	# L'attaque légère : une barre blanche orientée vers l'adversaire
+	# (sa longueur et son épaisseur suivent la zone qui touche, pour chaque perso)
 	elif is_attacking():
 		draw_set_transform(Vector2.ZERO, _attack_dir.angle())
 		var length := stats.attack_reach
+		var bar := stats.attack_radius * 0.5625   # 9 px pour la Barre
+		var tip := stats.attack_radius * 0.875    # 14 px pour la Barre
 		if _attack_time < stats.attack_startup:
 			draw_rect(Rect2(10.0, -2.0, length * 0.5, 4.0), Color(1, 1, 1, 0.5))
 		else:
-			draw_rect(Rect2(10.0, -9.0, length - 10.0, 18.0), Color(1, 1, 1, 0.95))
-			draw_rect(Rect2(length - 14.0, -14.0, 14.0, 28.0), color.lightened(0.6))
+			draw_rect(Rect2(10.0, -bar, length - 10.0, bar * 2.0), Color(1, 1, 1, 0.95))
+			draw_rect(Rect2(length - tip, -tip, tip, tip * 2.0), color.lightened(0.6))
 		draw_set_transform(Vector2.ZERO, 0.0)
 
 	# La jauge d'endurance, sur le côté opposé à l'adversaire

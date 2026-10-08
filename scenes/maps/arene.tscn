@@ -719,16 +719,16 @@ period = 9.0
 [node name="SpawnPoints" type="Node2D" parent="."]
 
 [node name="Joueur1" type="Marker2D" parent="SpawnPoints"]
-position = Vector2(330, 520)
+position = Vector2(330, 550)
 
 [node name="Joueur2" type="Marker2D" parent="SpawnPoints"]
-position = Vector2(950, 520)
+position = Vector2(950, 550)
 
 [node name="Joueur3" type="Marker2D" parent="SpawnPoints"]
-position = Vector2(520, 380)
+position = Vector2(520, 410)
 
 [node name="Joueur4" type="Marker2D" parent="SpawnPoints"]
-position = Vector2(760, 380)
+position = Vector2(760, 410)
 
 [node name="RespawnPoint" type="Marker2D" parent="."]
-position = Vector2(640, 120)
+position = Vector2(640, 150)

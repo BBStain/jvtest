@@ -60,7 +60,7 @@ func _ready() -> void:
 		fighter.lives = GameSetup.lives
 		fighter.color = PLAYER_COLORS[i]
 		fighter.input_source = LocalInputSource.new(i)
-		fighter.position = map.spawn_position(i)
+		fighter.position = _feet_to_center(map.spawn_position(i), fighter.stats)
 		fighter.facing = 1.0 if fighter.position.x < map.respawn_position().x else -1.0
 		add_child(fighter)
 		fighter.life_lost.connect(_on_life_lost)
@@ -336,10 +336,16 @@ func _segment_hits_rect(a: Vector2, b: Vector2, radius: float, rect: Rect2) -> b
 	return false
 
 
+## Les points d'apparition d'une map marquent les PIEDS du perso : un grand perso
+## apparaît donc posé au même endroit qu'un petit, jamais enfoncé dans le sol.
+func _feet_to_center(feet: Vector2, stats: CharacterStats) -> Vector2:
+	return feet - Vector2(0.0, stats.body_size.y / 2.0)
+
+
 func _check_blast_zone() -> void:
 	for fighter in fighters:
 		if not fighter.eliminated and not map.blast_zone.has_point(fighter.global_position):
-			fighter.fall_out(map.respawn_position())
+			fighter.fall_out(_feet_to_center(map.respawn_position(), fighter.stats))
 
 
 func _check_end_of_match() -> void:

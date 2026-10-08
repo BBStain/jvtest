@@ -5,8 +5,10 @@ extends Node2D
 ## Pour créer une nouvelle map : duplique scenes/maps/arene.tscn (clic droit > Dupliquer),
 ## change le décor, puis ajoute-la dans MAPS de scripts/game_setup.gd.
 ## Une map doit garder ces deux nœuds :
-##   SpawnPoints   -> 4 Marker2D : où apparaissent les joueurs 1 à 4 au début
-##   RespawnPoint  -> un Marker2D : où l'on réapparaît après une chute
+##   SpawnPoints   -> 4 Marker2D : où apparaissent les joueurs 1 à 4 au début (le marqueur = les pieds)
+##   RespawnPoint  -> un Marker2D : où l'on réapparaît après une chute (le marqueur = les pieds)
+## Les tests automatiques vérifient chaque map de MAPS (points présents, dans la zone de jeu,
+## joueurs qui atterrissent bien) : s'il manque quelque chose, la mise en ligne s'arrête.
 
 @export var map_name := "Map"
 ## Au-delà de ce rectangle, le joueur est sorti de la map et perd une vie.
