@@ -4,6 +4,8 @@ Prototype de jeu de combat 2D en plateformes, inspiré de Brawlhalla, fait avec 
 
 **Jouer dans le navigateur (téléphone ou ordinateur) : https://bbstain.github.io/jvtest/**
 
+Après une mise à jour, le navigateur peut garder l'ancienne version jusqu'à 10 minutes. Pour avoir la nouvelle tout de suite : **Ctrl + F5** sur ordinateur, ou ferme l'onglet et rouvre-le sur téléphone. Le numéro de la version est écrit en petit en bas à droite du menu.
+
 ## Avant la partie : le menu
 
 1. **Appuie sur une touche** : le premier qui appuie (manette ou clavier) devient le **joueur 1** et ouvre le menu.

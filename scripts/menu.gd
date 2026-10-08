@@ -48,6 +48,7 @@ func _ready() -> void:
 	_content.alignment = BoxContainer.ALIGNMENT_CENTER
 	_content.add_theme_constant_override("separation", 22)
 	center.add_child(_content)
+	add_child(BuildVersion.make_label())
 	Input.joy_connection_changed.connect(_on_joy_connection_changed)
 
 	# En revenant d'une partie, on garde les joueurs et on va directement au menu principal.

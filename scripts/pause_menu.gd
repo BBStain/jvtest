@@ -34,6 +34,7 @@ func _ready() -> void:
 	_content.alignment = BoxContainer.ALIGNMENT_CENTER
 	_content.add_theme_constant_override("separation", 20)
 	center.add_child(_content)
+	add_child(BuildVersion.make_label())
 	_show()
 
 
