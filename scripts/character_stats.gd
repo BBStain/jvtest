@@ -45,9 +45,9 @@ const BASE_SIZE := Vector2(20, 60)  ## la taille de la Barre : poids 1
 @export var air_dashes: int = 1  ## dashs possibles en l'air avant de retoucher le sol
 
 @export_group("Attaque légère")
-@export var attack_startup: float = 0.02  ## délai avant que le coup touche
-@export var attack_active: float = 0.08  ## durée pendant laquelle le coup peut toucher
-@export var attack_cooldown: float = 0.13  ## temps de recharge entre deux attaques (à peine plus que le coup)
+@export var attack_startup: float = 0.1  ## on arme le coup avant qu'il parte : le temps de le voir venir et de le contrer
+@export var attack_active: float = 0.12  ## durée pendant laquelle le coup peut toucher (la barre se déploie au début)
+@export var attack_cooldown: float = 0.4  ## temps de recharge entre deux attaques, compté depuis le départ du coup
 @export var attack_reach: float = 84.0  ## longueur du coup : du centre du perso jusqu'au bout de la barre
 @export var attack_radius: float = 16.0  ## demi-épaisseur de la zone qui touche (toute la barre touche)
 @export var hit_knockback: float = 700.0  ## un coup léger repousse d'environ 100 px
@@ -55,7 +55,7 @@ const BASE_SIZE := Vector2(20, 60)  ## la taille de la Barre : poids 1
 @export_group("Attaque lourde")
 @export var heavy_startup: float = 0.14  ## charge minimale : on lève l'arme avant de frapper
 @export var heavy_active: float = 0.15  ## durée du balayage
-@export var heavy_cooldown: float = 0.5
+@export var heavy_cooldown: float = 0.8  ## temps de recharge après la frappe
 @export var heavy_arc_radius: float = 56.0  ## distance entre le centre du perso et le bout de l'arme
 @export var heavy_tip_radius: float = 24.0  ## taille de la zone qui touche au bout de l'arme
 @export var heavy_knockback: float = 940.0

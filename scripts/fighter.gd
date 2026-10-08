@@ -28,8 +28,10 @@ const WALL_JUMP_ACCEL := 2200.0
 const DASH_END_KEEP := 0.55             ## part de la vitesse gardée à la fin du dash
 
 # --- Attaque légère (X) : un coup droit vers l'adversaire ---
-const ATTACK_BUFFER := 0.12             ## X appuyé un peu trop tôt compte quand même : on peut marteler
-const CLASH_LOCKOUT := 0.08             ## petit temps mort après un choc d'attaques
+const ATTACK_BUFFER := 0.12             ## X appuyé un peu trop tôt compte quand même
+const CLASH_LOCKOUT := 0.08             ## petit temps mort après un contre (la recharge repart presque de zéro)
+const LIGHT_DEPLOY_TIME := 0.06         ## le coup léger se déploie : la barre sort du perso et s'allonge pendant ce temps...
+const LIGHT_DEPLOY_START := 0.3         ## ... en partant de 30 % de sa longueur
 
 # --- Attaque lourde (Y) : un arc de cercle du dessus de la tête jusqu'aux pieds, devant soi ---
 # On la charge en gardant Y appuyé : plus on charge, plus l'arme grandit et frappe loin.
@@ -59,6 +61,28 @@ const SHIELD_BLOCKER_PUSH := 120.0      ## celui qui bloque recule un tout petit
 const PARRY_WINDOW := 0.15              ## blocage parfait : B appuyé au plus tant de secondes avant le coup...
 const PARRY_COOLDOWN := 1.0             ## ... c'est un contre : celui qui frappait ne frappe plus pendant 1 s
 
+# --- Jauge de contre : chaque contre la remplit, elle redescend quand on ne contre plus ---
+# Phase 1 : normale. Phase 2 : recharge des attaques plus courte, bouclier adverse plus abîmé.
+# Phase 3 : recharge très courte, bouclier adverse très abîmé. Phase 4 : berserk, tout est boosté.
+const COUNTER_PHASE_POINTS := [4, 10, 18]  ## points pour passer en phase 2, 3, puis 4 (berserk)
+const COUNTER_GAUGE_MAX := 21.0         ## la jauge ne monte pas plus haut (un peu de réserve en berserk)
+const HEAVY_COUNTER_POINTS := 3         ## contrer une attaque lourde compte pour 3 contres
+const COUNTER_IDLE_TIME := 4.0          ## après 4 s sans contrer, la jauge redescend...
+const COUNTER_DECAY := 1.0              ## ... d'un point par seconde
+const PHASE_COOLDOWN := [1.0, 0.7, 0.45, 0.35]  ## recharge des attaques selon la phase (0,5 = 2 fois plus courte)
+const PHASE_SHIELD_DAMAGE := [1, 2, 3, 3]       ## nos coups abîment le bouclier adverse 1, 2 ou 3 fois plus
+const BERSERK_MOVE := 1.25              ## berserk : on court et on dashe 1,25 fois plus vite...
+const BERSERK_JUMP := 1.12              ## ... on saute plus haut...
+const BERSERK_ATTACK_SPEED := 1.4       ## ... les attaques partent et se chargent 1,4 fois plus vite...
+const BERSERK_RANGE := 1.3              ## ... et vont 1,3 fois plus loin
+const COUNTER_FLASH_TIME := 0.45        ## éclat autour du perso quand il passe une phase
+const PHASE_COLORS := [
+	Color(0.9, 0.92, 1.0),   # phase 1 : blanc
+	Color(1.0, 0.85, 0.3),   # phase 2 : jaune
+	Color(1.0, 0.55, 0.2),   # phase 3 : orange
+	Color(1.0, 0.22, 0.15),  # phase 4 : rouge (berserk)
+]
+
 # --- Course (LT / Shift, à maintenir) et endurance ---
 const STAMINA_BLOCK_SPRINT_MULT := 2.33  ## en bloquant tout en courant, l'endurance part 2,33 fois plus vite
 const STAMINA_REGEN_DELAY := 0.6        ## temps avant que l'endurance remonte
@@ -66,7 +90,7 @@ const STAMINA_RESTART := 25.0           ## jauge vide : il faut remonter jusque-
 const STAMINA_SHOW_TIME := 1.0          ## la jauge reste affichée ce temps après être pleine
 
 # --- Coup reçu ---
-const INVINCIBLE_TIME := 0.55           ## doit rester plus long que la recharge de l'attaque légère
+const INVINCIBLE_TIME := 1.2            ## doit rester plus long que la recharge de l'attaque légère
 const CLASH_PUSH := 450.0
 const KNOCKBACK_TIME := 0.2             ## durée pendant laquelle on contrôle moins bien après un coup / un choc
 const KNOCKBACK_ACCEL := 2000.0
@@ -81,6 +105,7 @@ const NET_VARS := [
 	"stamina", "_exhausted", "_sprinting", "_stamina_show_timer",
 	"shield", "shield_broken", "_blocking", "_shield_broken_timer", "_shield_flash_timer",
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
+	"counter_points", "_counter_flash_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -134,6 +159,10 @@ var _block_hold_time := 0.0             ## depuis combien de temps B est appuyé
 var _shield_regen_timer := 0.0
 var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
 var _shield_flash_timer := 0.0          ## petit éclat quand le bouclier encaisse un coup
+
+var counter_points := 0.0               ## la jauge de contre (voir COUNTER_PHASE_POINTS)
+var _counter_idle_timer := 0.0          ## temps avant que la jauge commence à redescendre
+var _counter_flash_timer := 0.0
 
 var _invincible_timer := 0.0
 var _knockback_timer := 0.0
@@ -243,7 +272,11 @@ func _tick_timers(delta: float) -> void:
 	_lives_show_timer -= delta
 	_shield_broken_timer -= delta
 	_shield_flash_timer -= delta
+	_counter_flash_timer -= delta
 	_blink_clock += delta
+	_counter_idle_timer -= delta
+	if _counter_idle_timer <= 0.0:
+		counter_points = maxf(counter_points - COUNTER_DECAY * delta, 0.0)
 
 
 ## On court tant que LT / Shift est maintenu et qu'il reste de l'endurance.
@@ -288,12 +321,12 @@ func _update_block(input: InputState, delta: float) -> void:
 
 func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 	# Gauche / droite
-	var accel := stats.ground_accel if on_floor else stats.air_accel
+	var accel := (stats.ground_accel if on_floor else stats.air_accel) * _move_mult()
 	if _knockback_timer > 0.0:
 		accel = KNOCKBACK_ACCEL
 	elif _wall_jump_timer > 0.0:
 		accel = WALL_JUMP_ACCEL
-	var speed := stats.run_speed
+	var speed := stats.run_speed * _move_mult()
 	if _sprinting:
 		speed *= stats.sprint_speed_mult
 	if _blocking:
@@ -318,7 +351,7 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 	# Saut, double saut et saut mural
 	if input.jump_pressed:
 		_jump_buffer_timer = JUMP_BUFFER
-	var jump_mult := BLOCK_JUMP_MULT if _blocking else 1.0
+	var jump_mult := (BLOCK_JUMP_MULT if _blocking else 1.0) * (BERSERK_JUMP if is_berserk() else 1.0)
 	if _jump_buffer_timer > 0.0:
 		if on_floor or _coyote_timer > 0.0:
 			velocity.y = -stats.jump_speed * jump_mult
@@ -358,7 +391,7 @@ func _try_start_dash(input: InputState, on_floor: bool) -> void:
 
 
 func _tick_dash(delta: float) -> void:
-	velocity = _dash_dir * stats.dash_speed
+	velocity = _dash_dir * stats.dash_speed * _move_mult()
 	_dash_timer -= delta
 	if _dash_timer <= 0.0:
 		velocity *= DASH_END_KEEP
@@ -377,7 +410,12 @@ func _try_start_attack(heavy: bool) -> void:
 	_heavy_charging = heavy
 	_charge_time = 0.0
 	_heavy_charge = 0.0
-	_attack_cooldown_timer = stats.heavy_cooldown if heavy else stats.attack_cooldown
+	_attack_cooldown_timer = _cooldown(heavy)
+
+
+## Recharge d'une attaque (comptée depuis son départ) : plus courte quand la jauge de contre est haute.
+func _cooldown(heavy: bool) -> float:
+	return (stats.heavy_cooldown if heavy else stats.attack_cooldown) * PHASE_COOLDOWN[counter_phase() - 1]
 
 
 ## Se tourne vers l'adversaire visé.
@@ -401,16 +439,16 @@ func _tick_attack(input: InputState, delta: float) -> void:
 		return
 	if _heavy_charging:
 		# On charge tant que Y est gardé ; on frappe en le lâchant, ou quand la charge est pleine.
-		_charge_time += delta
+		_charge_time += delta * _attack_speed()
 		_heavy_charge = clampf((_charge_time - stats.heavy_startup) / maxf(stats.heavy_charge_time - stats.heavy_startup, 0.001), 0.0, 1.0)
 		if (_charge_time >= stats.heavy_startup and not input.heavy_held) or _charge_time >= stats.heavy_charge_time:
 			_heavy_charging = false
 			_aim_at_target()  # l'adversaire a pu bouger pendant la charge
 			_attack_time = stats.heavy_startup
-			_attack_cooldown_timer = stats.heavy_cooldown
+			_attack_cooldown_timer = _cooldown(true)
 			velocity = Vector2.ZERO  # la frappe commence : on s'arrête net
 		return
-	_attack_time += delta
+	_attack_time += delta * _attack_speed()
 	if _attack_time >= _attack_startup() + _attack_active():
 		_attack_time = -1.0
 
@@ -431,7 +469,7 @@ func _heavy_angle() -> float:
 
 ## Position du bout de l'arme (par rapport au centre du perso) pour un angle donné.
 func _heavy_tip(angle: float) -> Vector2:
-	return Vector2(facing * cos(angle), sin(angle)) * stats.heavy_arc_radius * heavy_scale()
+	return Vector2(facing * cos(angle), sin(angle)) * stats.heavy_arc_radius * heavy_scale() * _range_mult()
 
 
 ## Taille de l'arme lourde : 1 sans charge, HEAVY_CHARGE_GROWTH à pleine charge.
@@ -488,6 +526,18 @@ func is_parrying() -> bool:
 	return _blocking and _block_hold_time <= PARRY_WINDOW
 
 
+## Une attaque légère lancée qui n'a encore touché personne (en préparation ou en train de frapper).
+## Se faire toucher à ce moment-là par celui qu'elle vise, c'est le contrer (voir game.gd).
+func is_light_attack_under_way() -> bool:
+	return not _attack_heavy and _attack_time >= 0.0 and not _attack_has_hit \
+		and _attack_time < stats.attack_startup + stats.attack_active
+
+
+## Temps restant avant de pouvoir attaquer à nouveau.
+func attack_cooldown_left() -> float:
+	return maxf(_attack_cooldown_timer, 0.0)
+
+
 func can_attack() -> bool:
 	return not eliminated and not is_dashing() and not is_invincible() and not _blocking \
 		and not is_attacking() and _attack_cooldown_timer <= 0.0
@@ -511,14 +561,20 @@ func is_heavy_attack() -> bool:
 func attack_start() -> Vector2:
 	if _attack_heavy:
 		return attack_center()
-	return global_position + _attack_dir * minf(stats.attack_radius, stats.attack_reach - stats.attack_radius)
+	return global_position + _attack_dir * clampf(_light_reach() - stats.attack_radius, 0.0, stats.attack_radius)
 
 
 ## Le bout de la zone qui touche.
 func attack_center() -> Vector2:
 	if _attack_heavy:
 		return global_position + _heavy_tip(_heavy_angle())
-	return global_position + _attack_dir * (stats.attack_reach - stats.attack_radius)
+	return global_position + _attack_dir * maxf(_light_reach() - stats.attack_radius, 0.0)
+
+
+## Longueur actuelle du coup léger : la barre sort du perso et s'allonge pendant LIGHT_DEPLOY_TIME.
+func _light_reach() -> float:
+	var deploy := clampf((_attack_time - stats.attack_startup) / LIGHT_DEPLOY_TIME, 0.0, 1.0)
+	return stats.attack_reach * _range_mult() * lerpf(LIGHT_DEPLOY_START, 1.0, deploy)
 
 
 func attack_radius() -> float:
@@ -568,9 +624,14 @@ func hit_shield(push_dir: Vector2) -> void:
 	_knockback_timer = KNOCKBACK_TIME
 
 
-## Notre bouclier encaisse un coup (il craque un peu plus). Renvoie true s'il vient de casser.
-func absorb_hit(push_dir: Vector2, heavy: bool) -> bool:
-	shield = maxi(shield - (HEAVY_SHIELD_DAMAGE if heavy else 1), 0)
+## Points de bouclier que nos coups font perdre : plus quand notre jauge de contre est haute.
+func shield_damage(heavy: bool) -> int:
+	return (HEAVY_SHIELD_DAMAGE if heavy else 1) * PHASE_SHIELD_DAMAGE[counter_phase() - 1]
+
+
+## Notre bouclier encaisse un coup (il craque de "damage" points). Renvoie true s'il vient de casser.
+func absorb_hit(push_dir: Vector2, damage: int) -> bool:
+	shield = maxi(shield - damage, 0)
 	_shield_regen_timer = 0.0
 	_shield_flash_timer = 0.12
 	velocity.x = _pushed(push_dir * SHIELD_BLOCKER_PUSH).x
@@ -606,6 +667,40 @@ func take_hit(hit_dir: Vector2, knockback := -1.0) -> void:
 	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
 	_lose_life()
+
+
+## On vient de contrer quelqu'un : la jauge de contre monte (contrer une attaque lourde compte triple).
+func add_counter(countered_heavy: bool) -> void:
+	var phase := counter_phase()
+	counter_points = minf(counter_points + (HEAVY_COUNTER_POINTS if countered_heavy else 1), COUNTER_GAUGE_MAX)
+	_counter_idle_timer = COUNTER_IDLE_TIME
+	if counter_phase() > phase:
+		_counter_flash_timer = COUNTER_FLASH_TIME
+
+
+## Phase de la jauge de contre : de 1 (normale) à 4 (berserk).
+func counter_phase() -> int:
+	var phase := 1
+	for points in COUNTER_PHASE_POINTS:
+		if counter_points >= points:
+			phase += 1
+	return phase
+
+
+func is_berserk() -> bool:
+	return counter_phase() == 4
+
+
+func _move_mult() -> float:
+	return BERSERK_MOVE if is_berserk() else 1.0
+
+
+func _attack_speed() -> float:
+	return BERSERK_ATTACK_SPEED if is_berserk() else 1.0
+
+
+func _range_mult() -> float:
+	return BERSERK_RANGE if is_berserk() else 1.0
 
 
 ## Toutes les poussées reçues (coups, chocs, bouclier) passent par ici : plus le perso est lourd,
@@ -686,6 +781,14 @@ func _draw() -> void:
 			ghost.position -= _dash_dir * 18.0 * (i + 1)
 			draw_rect(ghost, Color(color, 0.25 - i * 0.07))
 
+	# Berserk : des images rouges traînent derrière le perso quand il bouge
+	var phase := counter_phase()
+	if phase == 4 and not is_dashing() and velocity.length() > 150.0:
+		for i in 3:
+			var ghost := body
+			ghost.position -= velocity * 0.022 * (i + 1)
+			draw_rect(ghost, Color(PHASE_COLORS[3], 0.22 - i * 0.06))
+
 	# Clignote quand on est invincible
 	var body_color := color
 	if is_invincible() and int(_blink_clock / 0.06) % 2 == 0:
@@ -693,6 +796,16 @@ func _draw() -> void:
 	if is_dashing():
 		body_color = body_color.lightened(0.4)
 	draw_rect(body, body_color)
+
+	# Jauge de contre en phase 2 et plus : un contour de la couleur de la phase (rouge qui pulse en berserk)
+	if phase >= 2:
+		var phase_color: Color = PHASE_COLORS[phase - 1]
+		var pulse := 0.5 + 0.5 * sin(_blink_clock * 14.0) if phase == 4 else 0.0
+		draw_rect(body.grow(3.0 + 2.0 * pulse), Color(phase_color, 0.55 + 0.35 * pulse), false, 1.5 + phase * 0.5)
+	if _counter_flash_timer > 0.0:
+		var t := 1.0 - _counter_flash_timer / COUNTER_FLASH_TIME
+		var ring := lerpf(stats.body_size.y * 0.5, stats.body_size.y * 1.3, t)
+		draw_arc(Vector2.ZERO, ring, 0.0, TAU, 32, Color(PHASE_COLORS[phase - 1], 1.0 - t), 4.0)
 
 	# En surbrillance quand on bloque : plus le bouclier a pris de coups, plus il est fissuré et terne
 	if _blocking:
@@ -745,19 +858,31 @@ func _draw() -> void:
 	# (sa longueur et son épaisseur suivent la zone qui touche, pour chaque perso)
 	elif is_attacking():
 		draw_set_transform(Vector2.ZERO, _attack_dir.angle())
-		var length := stats.attack_reach
+		var length := stats.attack_reach * _range_mult()
 		var bar := stats.attack_radius * 0.5625   # 9 px pour la Barre
 		var tip := stats.attack_radius * 0.875    # 14 px pour la Barre
 		if _attack_time < stats.attack_startup:
-			draw_rect(Rect2(10.0, -2.0, length * 0.5, 4.0), Color(1, 1, 1, 0.5))
+			# On arme le coup : le poing recule derrière le perso, et une fine ligne montre où il va partir
+			var windup := clampf(_attack_time / stats.attack_startup, 0.0, 1.0)
+			draw_rect(Rect2(10.0, -1.5, length - 10.0, 3.0), Color(1, 1, 1, 0.12 + 0.2 * windup))
+			var back := lerpf(2.0, 14.0, windup)
+			draw_rect(Rect2(-back - tip, -tip * 0.8, tip, tip * 1.6), Color(color.lightened(0.6), 0.6 + 0.4 * windup))
 		else:
-			draw_rect(Rect2(10.0, -bar, length - 10.0, bar * 2.0), Color(1, 1, 1, 0.95))
-			draw_rect(Rect2(length - tip, -tip, tip, tip * 2.0), color.lightened(0.6))
+			# Le coup part : la barre jaillit du perso et s'allonge jusqu'au bout
+			var reach := _light_reach()
+			draw_rect(Rect2(10.0, -bar, maxf(reach - 10.0, 0.0), bar * 2.0), Color(1, 1, 1, 0.95))
+			draw_rect(Rect2(reach - tip, -tip, tip, tip * 2.0), color.lightened(0.6))
+			if reach < length:
+				draw_rect(Rect2(reach, -1.5, length - reach, 3.0), Color(1, 1, 1, 0.25))
 		draw_set_transform(Vector2.ZERO, 0.0)
 
 	# La jauge d'endurance, sur le côté opposé à l'adversaire
 	if _stamina_show_timer > 0.0:
 		_draw_stamina_gauge()
+
+	# La jauge de contre, sous les pieds, dès qu'on a contré
+	if counter_points > 0.0:
+		_draw_counter_gauge()
 
 	# Les vies au-dessus de la tête (plus haut si la croix du bouclier cassé est affichée)
 	if _lives_show_timer > 0.0:
@@ -801,6 +926,24 @@ func _make_cracks() -> void:
 			point += dir * rng.randf_range(5.0, 10.0)
 			crack.append(point)
 		_cracks.append(crack)
+
+
+## Petite barre horizontale sous les pieds, avec un trait à chaque passage de phase.
+## Sa couleur est celle de la phase : blanc, jaune, orange, puis rouge en berserk.
+func _draw_counter_gauge() -> void:
+	var width := maxf(stats.body_size.x + 26.0, 44.0)
+	var frame := Rect2(-width / 2.0, stats.body_size.y / 2.0 + 6.0, width, 7.0)
+	var full: float = COUNTER_PHASE_POINTS[-1]
+	var phase := counter_phase()
+	var fill_color: Color = PHASE_COLORS[phase - 1]
+	if phase == 4:
+		fill_color = fill_color.lightened(0.35 * (0.5 + 0.5 * sin(_blink_clock * 14.0)))
+	draw_rect(frame, Color(0, 0, 0, 0.55))
+	draw_rect(Rect2(frame.position, Vector2(width * minf(counter_points / full, 1.0), frame.size.y)), fill_color)
+	for i in COUNTER_PHASE_POINTS.size() - 1:
+		var x: float = frame.position.x + width * COUNTER_PHASE_POINTS[i] / full
+		draw_line(Vector2(x, frame.position.y), Vector2(x, frame.end.y), Color(0, 0, 0, 0.85), 1.5)
+	draw_rect(frame, Color(1, 1, 1, 0.45), false, 1.0)
 
 
 ## Barre verticale à côté du perso, du côté où n'est pas l'adversaire (pour ne pas gêner le combat).

@@ -14,6 +14,10 @@ class Scripted extends InputSource:
 
 var game: Node
 var base := CharacterStats.new()  ## les stats par défaut (la Barre)
+## Une attaque légère qui touche tout de suite, de toute sa longueur (préparation finie, barre déployée)
+var light_hit_time := base.attack_startup + Fighter.LIGHT_DEPLOY_TIME
+## Frames entre l'appui sur X et le moment où le coup léger touche au plus loin
+var light_frames := int(ceil(light_hit_time * 60.0)) + 1
 var shot_dir := ""
 var failures := 0
 
@@ -80,7 +84,7 @@ func _ready() -> void:
 	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
 	await step(25)
 	p1.position.x = 640; p2.position.x = 652
-	await step(10)
+	await step(5 + light_frames)
 	check(p2.lives == 2, "Attaque légère collé à l'adversaire : touché (vies = %d)" % p2.lives)
 
 	# 3c) Portée : le bout de la barre touche, juste au-delà ça rate
@@ -92,7 +96,7 @@ func _ready() -> void:
 		await step(25)
 		p1.position.x = 600; p2.position.x = 600 + gap
 		p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
-		await step(10)
+		await step(5 + light_frames)
 		var reached: bool = gap < base.attack_reach + base.body_size.x / 2.0
 		check((p2.lives == 2) == reached, "Portée de l'attaque légère : à %.0f px %s (vies = %d)" % [gap, "touche" if reached else "rate", p2.lives])
 
@@ -102,10 +106,12 @@ func _ready() -> void:
 	p1.position.x = 590; p2.position.x = 690
 	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
 	p2.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
-	await step(42)
+	await step(30 + light_frames + 8)
 	check(p1.lives == 3 and p2.lives == 3, "Choc : vies %d / %d" % [p1.lives, p2.lives])
 	check(p1.position.x < 570 and p2.position.x > 710, "Choc : les deux repoussés (x = %.0f / %.0f)" % [p1.position.x, p2.position.x])
 	check(p1.can_attack(), "Choc : J1 peut ré-attaquer vite")
+	check(p1.counter_points == 1 and p2.counter_points == 1,
+		"Choc : chacun a contré l'autre, les deux jauges de contre montent (%.0f / %.0f)" % [p1.counter_points, p2.counter_points])
 	var marks := game.get_children().filter(func(n): return n is ClashMark)
 	check(marks.size() == 1, "Choc : une marque apparaît sur le terrain (%d)" % marks.size())
 	await shot("09_marque_contre")
@@ -134,13 +140,15 @@ func _ready() -> void:
 	var clash_seen := false
 	for i in 60:
 		await step(1)
-		if not p1.is_attacking() and p1._attack_cooldown_timer > base.heavy_cooldown + 0.2:
+		if not game.get_children().filter(func(n): return n is ClashMark).is_empty():
 			clash_seen = true
 			break
 	check(clash_seen and absf(p1._attack_cooldown_timer - Fighter.HEAVY_COUNTERED_COOLDOWN) < 0.05,
 		"Contre : J1 qui a lancé la lourde ne frappe plus pendant 1 s (%.2f s)" % p1._attack_cooldown_timer)
 	check(p2.can_attack(), "Contre : J2 qui a contré peut refrapper tout de suite (%.2f s)" % p2._attack_cooldown_timer)
 	check(p1.lives == 3 and p2.lives == 3, "Contre : personne ne perd de vie (%d / %d)" % [p1.lives, p2.lives])
+	check(p2.counter_points == Fighter.HEAVY_COUNTER_POINTS and p1.counter_points == 0,
+		"Contre d'une lourde : compte pour 3 contres dans la jauge (J2 %.0f, J1 %.0f)" % [p2.counter_points, p1.counter_points])
 	check(Engine.time_scale < 0.6, "Micro-duel : le temps ralentit (vitesse %.2f)" % Engine.time_scale)
 	var gap_before := p2.position.x - p1.position.x
 	for i in 90:
@@ -182,8 +190,8 @@ func _ready() -> void:
 	p2.input_source = Scripted.new(func(s, f): s.block_held = true)
 	await step(29)
 	check(p2.is_blocking(), "Blocage : J2 bloque en tenant B")
+	await step(1 + light_frames)
 	await shot("09_blocage")
-	await step(5)
 	check(p2.lives == 3, "Blocage : J2 ne perd pas de vie (vies = %d)" % p2.lives)
 	check(p2.shield == base.shield_max - 1, "Blocage : le bouclier craque d'un cran (reste %d / %d)" % [p2.shield, base.shield_max])
 	check(p1.can_attack(), "Blocage : J1 peut refrapper tout de suite")
@@ -199,13 +207,14 @@ func _ready() -> void:
 	p1 = game.fighters[0]; p2 = game.fighters[1]
 	p1.position.x = 600; p2.position.x = 650
 	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
-	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= 29 and f < 40)
-	await step(34)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= 29 and f < 45)
+	await step(31 + light_frames)
 	check(p2.lives == 3 and p2.shield == base.shield_max,
 		"Blocage parfait : pas de vie perdue, bouclier intact (vies %d, bouclier %d)" % [p2.lives, p2.shield])
 	check(not p1.can_attack() and p1._attack_cooldown_timer > Fighter.PARRY_COOLDOWN - 0.1,
 		"Blocage parfait : J1 ne peut plus frapper pendant 1 s (%.2f s)" % p1._attack_cooldown_timer)
 	check(p2._attack_cooldown_timer <= 0.0, "Blocage parfait : J2 peut riposter tout de suite")
+	check(p2.counter_points == 1 and p1.counter_points == 0, "Blocage parfait : la jauge de contre de J2 monte")
 	marks = game.get_children().filter(func(n): return n is ClashMark and n.color == Game.PARRY_COLOR)
 	check(marks.size() == 1, "Blocage parfait : une marque bleue apparaît")
 	await step(10)
@@ -216,7 +225,7 @@ func _ready() -> void:
 	p1.position.x = 600; p2.position.x = 650
 	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
 	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= 10)
-	await step(34)
+	await step(31 + light_frames)
 	check(p2.shield == base.shield_max - 1 and p1.can_attack(),
 		"Blocage trop tôt : simple blocage (bouclier %d, J1 peut refrapper)" % p2.shield)
 
@@ -248,7 +257,8 @@ func _ready() -> void:
 	while not p2.shield_broken and shield_hits < 40:
 		p1.position = Vector2(p2.position.x - 50, p2.position.y); p1.velocity = Vector2.ZERO
 		p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
-		await step(8)
+		await step(2 + light_frames)
+		p1._attack_cooldown_timer = 0.0  # on ne teste pas la recharge ici
 		shield_hits += 1
 		if shield_hits == 12:
 			await shot("09_blocage_fissure")
@@ -269,7 +279,7 @@ func _ready() -> void:
 	p1.position.x = p2.position.x - 50; p1.velocity = Vector2.ZERO
 	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 2)
 	var shield_gap := p2.position.x - p1.position.x
-	await step(6)
+	await step(2 + light_frames)
 	check(p2.shield_broken and not p2.is_blocking(), "Bouclier cassé : J2 ne bloque plus")
 	await shot("09_bouclier_casse")
 	check(Engine.time_scale < 0.5, "Bouclier cassé : ralenti (vitesse x%.2f)" % Engine.time_scale)
@@ -316,7 +326,7 @@ func _ready() -> void:
 	p1.position.x = 600; p2.position.x = 690
 	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
 	p2.input_source = Scripted.new(func(s, f): pass)
-	await step(36)
+	await step(31 + light_frames)
 	check(p2.lives == 2, "Attaque rapide : touche à 90 px (vies = %d)" % p2.lives)
 
 	# 4h) Attaque lourde non chargée : trop courte à 130 px
@@ -526,7 +536,7 @@ func _ready() -> void:
 		fi._attack_heavy = false
 		fi._attack_has_hit = false
 		fi._attack_dir = pair[1]
-		fi._attack_time = base.attack_startup
+		fi._attack_time = light_hit_time
 		fi._attack_cooldown_timer = base.attack_cooldown
 	await step(1)
 	check(p1.lives == 3 and p2.lives == 3, "Coups simultanés : annulés, personne ne perd de vie (J1 %d, J2 %d)" % [p1.lives, p2.lives])
@@ -544,7 +554,7 @@ func _ready() -> void:
 	p1._attack_heavy = false
 	p1._attack_has_hit = false
 	p1._attack_dir = Vector2.RIGHT
-	p1._attack_time = base.attack_startup
+	p1._attack_time = light_hit_time
 	await step(60)
 	check(p2.lives == 2 and absf(p2.position.x - 680 - 100) < 8, "Coup léger : J2 repoussé de %.0f px (visé : 100)" % (p2.position.x - 680))
 
@@ -562,7 +572,7 @@ func _ready() -> void:
 		fi._attack_heavy = false
 		fi._attack_has_hit = false
 		fi._attack_dir = Vector2.RIGHT
-		fi._attack_time = base.attack_startup
+		fi._attack_time = light_hit_time
 	await step(1)
 	check(f3[0].lives == 3 and f3[1].lives == 2 and f3[2].lives == 2,
 		"3 joueurs : coups en chaîne tous comptés (J1 %d, J2 %d, J3 %d)" % [f3[0].lives, f3[1].lives, f3[2].lives])
@@ -590,7 +600,7 @@ func _ready() -> void:
 	p1._attack_heavy = false
 	p1._attack_has_hit = false
 	p1._attack_dir = Vector2.RIGHT
-	p1._attack_time = base.attack_startup
+	p1._attack_time = light_hit_time
 	await step(60)
 	check(p2.lives == 2 and p2.position.x - 680 < 70, "Persos : J2, 2 fois plus lourd, recule moins (%.0f px)" % (p2.position.x - 680))
 	check(game.map is GameMap and game.map.map_name == "Arène", "Map : chargée depuis scenes/maps/ (%s)" % game.map.map_name)
@@ -634,7 +644,7 @@ func _ready() -> void:
 	p1.fall_out(Vector2(640, 120))
 	check(p1._knockback_timer <= 0.0 and p1.lives == 2, "Réapparition : plus de recul, vies = %d" % p1.lives)
 
-	# 9f) Attaque rapide spammable : en martelant X (1 appui toutes les 4 frames), au moins 7 coups par seconde
+	# 9f) Recharge de l'attaque légère : en martelant X (1 appui toutes les 4 frames), un coup toutes les 0,4 s
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
 	p2.input_source = Scripted.new(func(s, f): pass)
@@ -647,7 +657,9 @@ func _ready() -> void:
 		if p1.is_attacking() and not was_attacking:
 			swings += 1
 		was_attacking = p1.is_attacking()
-	check(swings >= 7, "Spam de l'attaque rapide : %d coups en 1 s" % swings)
+	var expected_swings := ceili(1.0 / base.attack_cooldown)
+	check(swings >= expected_swings - 1 and swings <= expected_swings,
+		"Recharge : en martelant X, %d coups en 1 s (attendu : %d)" % [swings, expected_swings])
 
 	# 10) Menu : écran titre, joueurs qui rejoignent, choix du perso et de la map
 	game.queue_free(); game = null
@@ -945,7 +957,7 @@ func _ready() -> void:
 	p1._attack_heavy = false
 	p1._attack_has_hit = false
 	p1._attack_dir = Vector2.RIGHT
-	p1._attack_time = base.attack_startup
+	p1._attack_time = light_hit_time
 	await step(1)
 	check(p2.lives == 3 and p2.shield == base.shield_max - 1, "Blocage parfait : là, c'est un blocage normal (bouclier %d)" % p2.shield)
 
@@ -969,11 +981,12 @@ func _ready() -> void:
 	p1 = game.fighters[0]; p2 = game.fighters[1]
 	p1.position.x = 250; p2.position.x = 900
 	p2.input_source = Scripted.new(func(s, f): pass)
+	var y_frame := 1 + int(base.attack_cooldown * 60.0) - 4  # Y appuyé 4 frames avant la fin de la recharge
 	p1.input_source = Scripted.new(func(s, f):
 		s.attack_pressed = f == 1
-		s.heavy_pressed = f == 4
-		s.heavy_held = f >= 4)
-	await step(20)
+		s.heavy_pressed = f == y_frame
+		s.heavy_held = f >= y_frame)
+	await step(y_frame + 12)
 	check(p1.is_charging_heavy(), "Attaque lourde : Y appuyé pendant la recharge n'est pas perdu")
 
 	# 13d) À 3 joueurs : J2 et J3 se frappent l'un l'autre avec J1 entre eux -> choc entre J2 et J3,
@@ -991,7 +1004,7 @@ func _ready() -> void:
 		fi._attack_heavy = false
 		fi._attack_has_hit = false
 		fi._attack_dir = Vector2.RIGHT if k == 1 else Vector2.LEFT
-		fi._attack_time = base.attack_startup
+		fi._attack_time = light_hit_time
 	game._resolve_hits()
 	check(f3[0].lives == 3 and f3[1].lives == 3 and f3[2].lives == 3 and not f3[1].is_attacking() and not f3[2].is_attacking(),
 		"3 joueurs : J2 et J3 se frappent = choc, J1 entre eux n'est pas touché (vies %d %d %d)" % [f3[0].lives, f3[1].lives, f3[2].lives])
@@ -1033,7 +1046,7 @@ func _ready() -> void:
 		fi._attack_heavy = false
 		fi._attack_has_hit = false
 		fi._attack_dir = dir
-		fi._attack_time = base.attack_startup
+		fi._attack_time = light_hit_time
 		fi._attack_cooldown_timer = 0.0
 	for fi in f4:
 		fi.input_source = Scripted.new(func(s, f): pass)
@@ -1192,6 +1205,176 @@ func _ready() -> void:
 		and second.aimed_attack_pressed and second.aim.is_equal_approx(Vector2.RIGHT),
 		"Manette : une pichenette du stick droit = un coup visé (haut %s, tenu %s, droite %s)" % [first.aim, held.aimed_attack_pressed, second.aim])
 
+	# 16) Combat plus posé : le coup léger s'arme avant de partir, on a le temps de le contrer,
+	# la recharge est plus longue, et contrer remplit une jauge (phases 1 à 3, puis berserk)
+	# 16a) Le coup léger s'arme : il ne touche pas tout de suite, puis la barre se déploie
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 650
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(30 + int(base.attack_startup * 60.0) - 1)
+	check(p1.is_attacking() and not p1.is_attack_active() and p2.lives == 3, "Coup léger : il s'arme d'abord, pas de coup tout de suite")
+	await shot("16_coup_arme")
+	await step(3)
+	await shot("16_coup_deploye")
+	await step(light_frames)
+	check(p2.lives == 2, "Coup léger : il part ensuite et touche (vies %d)" % p2.lives)
+	# 16b) L'invincibilité après un coup dure plus longtemps
+	await step(int((Fighter.INVINCIBLE_TIME - 0.25) * 60.0) - light_frames)
+	check(p2.is_invincible(), "Invincibilité : encore invincible un peu avant %.1f s" % Fighter.INVINCIBLE_TIME)
+	await step(30)
+	check(not p2.is_invincible() and p2.can_attack(), "Invincibilité : terminée après %.1f s" % Fighter.INVINCIBLE_TIME)
+
+	# 16c) Contrer en armant son coup : J1 frappe, J2 appuie sur X juste après (son coup s'arme quand
+	# celui de J1 arrive) -> contre de J2. Personne ne perd de vie, J2 peut riposter tout de suite,
+	# J1 attend la fin de sa recharge, et seule la jauge de J2 monte.
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 680
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 35)
+	var counter_seen := false
+	for i in 30 + light_frames:
+		await step(1)
+		if not game.get_children().filter(func(n): return n is ClashMark).is_empty():
+			counter_seen = true
+			break
+	check(counter_seen and p1.lives == 3 and p2.lives == 3, "Contre en armant son coup : personne ne perd de vie (%d / %d)" % [p1.lives, p2.lives])
+	check(p2.counter_points == 1 and p1.counter_points == 0,
+		"Contre en armant son coup : seule la jauge de J2 monte (%.0f / %.0f)" % [p2.counter_points, p1.counter_points])
+	check(p2.attack_cooldown_left() <= Fighter.CLASH_LOCKOUT and p1.attack_cooldown_left() > 0.15,
+		"Contre : J2 peut riposter tout de suite, J1 attend sa recharge (%.2f / %.2f s)" % [p2.attack_cooldown_left(), p1.attack_cooldown_left()])
+	# Mais un coup qui arrive dans le dos pendant qu'on arme le sien n'est pas contré
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	for fi in [p1, p2]:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.position = Vector2(600, 540); p2.position = Vector2(660, 540)
+	p1._attack_heavy = false; p1._attack_has_hit = false; p1._attack_dir = Vector2.RIGHT; p1._attack_time = light_hit_time
+	p2._attack_heavy = false; p2._attack_has_hit = false; p2._attack_dir = Vector2.RIGHT; p2._attack_time = 0.02
+	game._resolve_hits()
+	check(p2.lives == 2, "Contre : un coup dans le dos pendant qu'on arme le sien touche quand même")
+
+	# 16d) Jauge de contre : 4 contres pour la phase 2 (une lourde contrée compte pour 3), puis 3 et berserk
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	for fi in [p1, p2]:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	for k in 3:
+		p1.add_counter(false)
+	check(p1.counter_phase() == 1, "Jauge : 3 contres, toujours en phase 1")
+	p1.add_counter(false)
+	check(p1.counter_phase() == 2, "Jauge : 4 contres, phase 2")
+	p2.add_counter(true)
+	p2.add_counter(false)
+	check(p2.counter_phase() == 2, "Jauge : une lourde contrée + un contre, phase 2")
+	p1.counter_points = Fighter.COUNTER_PHASE_POINTS[1]
+	check(p1.counter_phase() == 3, "Jauge : phase 3 à %d points" % Fighter.COUNTER_PHASE_POINTS[1])
+	p1.counter_points = Fighter.COUNTER_PHASE_POINTS[2] - 1
+	p1.add_counter(false)
+	check(p1.counter_phase() == 4 and p1.is_berserk(), "Jauge : berserk à %d points" % Fighter.COUNTER_PHASE_POINTS[2])
+	for k in 10:
+		p1.add_counter(true)
+	check(p1.counter_points == Fighter.COUNTER_GAUGE_MAX, "Jauge : elle ne dépasse pas %.0f points" % Fighter.COUNTER_GAUGE_MAX)
+	# Recharge plus courte selon la phase
+	var cooldowns := []
+	for points in [0.0, Fighter.COUNTER_PHASE_POINTS[0], Fighter.COUNTER_PHASE_POINTS[1], Fighter.COUNTER_PHASE_POINTS[2]]:
+		p1.counter_points = points
+		cooldowns.append(p1._cooldown(false))
+	check(cooldowns[0] == base.attack_cooldown and cooldowns[0] > cooldowns[1] and cooldowns[1] > cooldowns[2] and cooldowns[2] > cooldowns[3],
+		"Jauge : la recharge raccourcit à chaque phase (%s)" % [cooldowns])
+	# Plus de dégâts au bouclier en phase 2 et 3
+	var damages := []
+	for points in [0.0, Fighter.COUNTER_PHASE_POINTS[0], Fighter.COUNTER_PHASE_POINTS[1]]:
+		p1.counter_points = points
+		damages.append(p1.shield_damage(false))
+	p1.counter_points = Fighter.COUNTER_PHASE_POINTS[1]
+	check(damages == [1, 2, 3] and p1.shield_damage(true) == 6, "Jauge : coups au bouclier x1, x2, x3 (lourde en phase 3 : %d)" % p1.shield_damage(true))
+	p1.counter_points = Fighter.COUNTER_PHASE_POINTS[0]
+	p1._counter_idle_timer = 10.0
+	p1.position = Vector2(600, 540); p2.position = Vector2(650, 540)
+	p1.velocity = Vector2.ZERO
+	p2.input_source = Scripted.new(func(s, f): s.block_held = true)
+	await step(20)
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
+	await step(2 + light_frames)
+	check(p2.shield == base.shield_max - 2, "Jauge en phase 2 : un coup léger fait craquer 2 points de bouclier (%d)" % p2.shield)
+
+	# 16e) Berserk : on court plus vite, on saute plus haut, les coups partent plus vite et vont plus loin
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.position.x = 1300
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = 1.0 if f >= 20 and f < 50 else 0.0)
+	await step(20)
+	p1.counter_points = Fighter.COUNTER_GAUGE_MAX
+	p1._counter_idle_timer = 100.0
+	await step(25)
+	check(absf(p1.velocity.x - base.run_speed * Fighter.BERSERK_MOVE) < 5.0, "Berserk : court plus vite (%.0f)" % p1.velocity.x)
+	await shot("16_berserk")
+	await step(30)
+	p1.position = Vector2(600, 540)
+	p1._attack_heavy = false; p1._attack_has_hit = false; p1._attack_dir = Vector2.RIGHT; p1._attack_time = light_hit_time
+	var berserk_reach := p1.attack_center().x - p1.position.x + base.attack_radius
+	check(absf(berserk_reach - base.attack_reach * Fighter.BERSERK_RANGE) < 1.0, "Berserk : le coup léger va plus loin (%.0f px)" % berserk_reach)
+	p1._attack_time = -1.0
+	p1._attack_cooldown_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
+	var frames_to_active := 0
+	for i in 20:
+		await step(1)
+		if p1.is_attack_active():
+			frames_to_active = i
+			break
+	check(frames_to_active > 0 and frames_to_active < int(base.attack_startup * 60.0),
+		"Berserk : le coup part plus vite (%d frames)" % frames_to_active)
+
+	# 16f) La jauge redescend quand on ne contre plus
+	await new_game()
+	p1 = game.fighters[0]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(10)
+	for k in 5:
+		p1.add_counter(false)
+	await step(int((Fighter.COUNTER_IDLE_TIME - 0.5) * 60.0))
+	check(p1.counter_points == 5, "Jauge : elle ne bouge pas juste après un contre (%.1f)" % p1.counter_points)
+	await step(int(2.5 * 60.0))
+	check(p1.counter_phase() == 1 and p1.counter_points > 0.0, "Jauge : sans contrer, elle redescend (%.1f, phase %d)" % [p1.counter_points, p1.counter_phase()])
+
+	# 16g) 1 contre 1 : un coup qui touche -> zoom rapide et léger ralenti ; pas à 3 joueurs
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	for fi in [p1, p2]:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	var normal_zoom: float = game._camera.zoom.x
+	p1.position = Vector2(600, 540); p2.position = Vector2(660, 540)
+	p1._attack_heavy = false; p1._attack_has_hit = false; p1._attack_dir = Vector2.RIGHT; p1._attack_time = light_hit_time
+	await step(1)
+	check(p2.lives == 2 and game._hit_focus.size() == 2 and Engine.time_scale < 1.0,
+		"Coup en 1 contre 1 : zoom sur les deux joueurs et léger ralenti (vitesse %.2f)" % Engine.time_scale)
+	for i in 20:
+		await get_tree().process_frame
+	check(game._camera.zoom.x > normal_zoom + 0.2, "Coup en 1 contre 1 : la caméra zoome (%.2f -> %.2f)" % [normal_zoom, game._camera.zoom.x])
+	await shot("16_coup_zoom")
+	await step(60)
+	check(game._hit_focus.is_empty() and is_equal_approx(Engine.time_scale, 1.0), "Coup en 1 contre 1 : tout revient à la normale")
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}]]
+	await new_game()
+	GameSetup.player_devices = []
+	f3 = game.fighters
+	for fi in f3:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	f3[0].position = Vector2(600, 540); f3[1].position = Vector2(660, 540); f3[2].position = Vector2(1200, 540)
+	f3[0]._attack_heavy = false; f3[0]._attack_has_hit = false; f3[0]._attack_dir = Vector2.RIGHT; f3[0]._attack_time = light_hit_time
+	await step(1)
+	check(f3[1].lives == 2 and game._hit_focus.is_empty() and is_equal_approx(Engine.time_scale, 1.0),
+		"Coup à 3 joueurs : pas de zoom ni de ralenti")
+
 	# 15) Jeu en ligne (sans réseau ici : on joue l'hôte puis un copain, et on passe les messages à la main)
 	# 15a) Les touches d'un copain arrivent par le réseau : un appui n'est jamais perdu
 	var net := NetworkInputSource.new()
@@ -1221,6 +1404,7 @@ func _ready() -> void:
 	check(p2.position.y < y_before - 30, "En ligne (hôte) : J2 saute avec la touche reçue du réseau (monté de %.0f px)" % (y_before - p2.position.y))
 	p1._attack_heavy = true; p1._heavy_charging = true; p1._attack_time = 0.0; p1._charge_time = 0.3; p1._heavy_charge = 0.4
 	p2.shield = 7; p2.lives = 2; p2._lives_show_timer = 1.0
+	p1.counter_points = 6
 	var host_state: Array = game.online_state()
 	game.on_online_player_left(1)
 	await step(1)
@@ -1239,9 +1423,15 @@ func _ready() -> void:
 	check(is_equal_approx(g1.position.y, spawn_y), "En ligne (copain) : sans message de l'hôte, rien ne bouge (pas de gravité calculée)")
 	game.receive_online_state(host_state)
 	await step(1)
-	check(g1.net_state() == host_state[4] and g2.net_state() == host_state[5],
+	check(g1.net_state() == host_state[Game.ONLINE_HEADER] and g2.net_state() == host_state[Game.ONLINE_HEADER + 1],
 		"En ligne (copain) : les joueurs sont affichés exactement comme chez l'hôte")
-	check(g1.is_charging_heavy() and g2.shield == 7 and g2.lives == 2, "En ligne (copain) : charge de la lourde, bouclier et vies reçus")
+	check(g1.is_charging_heavy() and g2.shield == 7 and g2.lives == 2 and g1.counter_points == 6,
+		"En ligne (copain) : charge de la lourde, bouclier, vies et jauge de contre reçus")
+	var hit_state := host_state.duplicate()
+	hit_state[4] = [0, 1]
+	game.receive_online_state(hit_state)
+	await step(1)
+	check(game._hit_focus.size() == 2, "En ligne (copain) : le zoom sur un coup qui touche est reçu de l'hôte")
 	game.spawn_online_effect({"k": "marque", "p": Vector2(600, 500), "c": Color.WHITE})
 	game.spawn_online_effect({"k": "explosion", "p": Vector2(600, 500), "c": Color.ORANGE})
 	var effects := 0

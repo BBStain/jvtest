@@ -34,6 +34,16 @@ const SHIELD_BREAK_TIME_SCALE := 0.3        ## bouclier cassé : ralenti (3 fois
 const SHIELD_BREAK_SLOWMO := 1.2            ## ... pendant 1,2 vraie seconde
 const PARRY_COLOR := Color(0.55, 0.85, 1.0)  ## la marque d'un blocage parfait
 
+# --- Coup qui touche en 1 contre 1 : petit zoom et léger ralenti pour bien sentir l'impact ---
+const HIT_TIME_SCALE := 0.6                ## le jeu va un peu moins vite...
+const HIT_SLOWMO := 0.5                    ## ... pendant une demi-seconde, et revient en douceur à la normale
+const HIT_ZOOM_TIME := 0.7                 ## la caméra serre les deux joueurs pendant ce temps (vraies secondes)
+const HIT_CAMERA_MARGIN := Vector2(380, 260)
+const HIT_ZOOM_MAX := 1.8
+const HIT_CAMERA_SMOOTHING := 12.0         ## la caméra fonce sur l'impact
+
+const ONLINE_HEADER := 5                   ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
+
 var fighters: Array[Fighter] = []
 var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
 var pause_menu: PauseMenu                  ## le menu pause, quand il est ouvert
@@ -42,6 +52,8 @@ var _match_over := false
 var _match_over_time := 0.0
 var _time_engine := TimeEngine.new()
 var _duel: Array[Fighter] = []             ## les deux joueurs du micro-duel en cours
+var _hit_focus: Array[Fighter] = []        ## 1 contre 1 : les deux joueurs du coup qui vient de toucher
+var _hit_focus_left := 0.0
 var online := false                        ## partie en ligne
 var _online_state: Array = []              ## (copain) le dernier état du jeu reçu de l'hôte
 
@@ -87,9 +99,14 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if not _time_engine.is_active() and not _is_online_guest():
-		_duel.clear()
-	_update_camera(delta / Engine.time_scale, false)  # la caméra garde sa vitesse pendant un ralenti
+	var real_delta := delta / Engine.time_scale  # la caméra garde sa vitesse pendant un ralenti
+	if not _is_online_guest():
+		if not _time_engine.is_active():
+			_duel.clear()
+		_hit_focus_left -= real_delta
+		if _hit_focus_left <= 0.0:
+			_hit_focus.clear()
+	_update_camera(real_delta, false)
 
 
 func _physics_process(delta: float) -> void:
@@ -163,22 +180,29 @@ func _guest_tick() -> void:
 	_duel.clear()
 	for index in state[1]:
 		_duel.append(fighters[index])
+	_hit_focus.clear()
+	for index in state[4]:
+		_hit_focus.append(fighters[index])
 	if state[2] != "" and not _match_over:
 		_show_end(state[2], fighters[state[3]].color if state[3] >= 0 else Color.WHITE)
-	for i in mini(fighters.size(), state.size() - 4):
-		fighters[i].apply_net_state(state[4 + i])
+	for i in mini(fighters.size(), state.size() - ONLINE_HEADER):
+		fighters[i].apply_net_state(state[ONLINE_HEADER + i])
 
 
-## (hôte) L'état du jeu envoyé aux copains : vitesse du temps, duel, fin de partie, puis chaque joueur.
+## (hôte) L'état du jeu envoyé aux copains : vitesse du temps, duel, fin de partie, zoom sur un coup,
+## puis chaque joueur.
 func online_state() -> Array:
 	var duel := []
 	for fighter in _duel:
 		duel.append(fighters.find(fighter))
+	var hit_focus := []
+	for fighter in _hit_focus:
+		hit_focus.append(fighters.find(fighter))
 	var winner := -1
 	for i in fighters.size():
 		if _match_over and not fighters[i].eliminated:
 			winner = i
-	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner]
+	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, hit_focus]
 	for fighter in fighters:
 		state.append(fighter.net_state())
 	return state
@@ -186,7 +210,7 @@ func online_state() -> Array:
 
 ## (copain) L'hôte a envoyé l'état du jeu : on l'affichera à la prochaine frame.
 func receive_online_state(state: Array) -> void:
-	if state.size() >= 4:
+	if state.size() >= ONLINE_HEADER:
 		_online_state = state
 
 
@@ -271,11 +295,14 @@ func swap_devices(a: int, b: int) -> void:
 ## Cadre tous les joueurs encore en jeu : centre au milieu d'eux, zoom selon leur écart.
 ## Pendant un micro-duel, la caméra zoome sur les deux duellistes. À 3 ou 4 joueurs, elle garde
 ## tout le monde à l'écran (personne ne doit sortir du cadre) et se resserre juste un peu.
+## En 1 contre 1, un coup qui touche fait zoomer la caméra vite sur les deux joueurs un court instant.
 func _update_camera(delta: float, instant: bool) -> void:
 	var box := Rect2()
 	var first := true
-	var duel_zoom := not _duel.is_empty() and _alive_count() <= 2
-	var framed := _duel if duel_zoom else fighters
+	var one_on_one := _alive_count() <= 2
+	var hit_zoom := not _hit_focus.is_empty() and one_on_one
+	var duel_zoom := not hit_zoom and not _duel.is_empty() and one_on_one
+	var framed := _hit_focus if hit_zoom else _duel if duel_zoom else fighters
 	for fighter in framed:
 		if fighter.eliminated:
 			continue
@@ -288,19 +315,25 @@ func _update_camera(delta: float, instant: bool) -> void:
 		return
 	var view_size := get_viewport_rect().size
 	var margin := CAMERA_MARGIN
-	if duel_zoom:
+	var zoom_max := CAMERA_ZOOM_MAX
+	var smoothing := CAMERA_SMOOTHING
+	if hit_zoom:
+		margin = HIT_CAMERA_MARGIN
+		zoom_max = HIT_ZOOM_MAX
+		smoothing = HIT_CAMERA_SMOOTHING
+	elif duel_zoom:
 		margin = DUEL_CAMERA_MARGIN
+		zoom_max = DUEL_ZOOM_MAX
 	elif not _duel.is_empty():
 		margin = DUEL_GROUP_CAMERA_MARGIN
 	var needed := box.size + margin
-	var zoom_max := DUEL_ZOOM_MAX if duel_zoom else CAMERA_ZOOM_MAX
 	var target_zoom := clampf(minf(view_size.x / needed.x, view_size.y / needed.y), CAMERA_ZOOM_MIN, zoom_max)
 	var target_position := box.get_center()
 	if instant:
 		_camera.position = target_position
 		_camera.zoom = Vector2.ONE * target_zoom
 		return
-	var weight := 1.0 - exp(-CAMERA_SMOOTHING * delta)
+	var weight := 1.0 - exp(-smoothing * delta)
 	_camera.position = _camera.position.lerp(target_position, weight)
 	_camera.zoom = _camera.zoom.lerp(Vector2.ONE * target_zoom, weight)
 
@@ -355,16 +388,25 @@ func _points_away(a: Fighter, b: Fighter) -> bool:
 
 ## Les attaques de a et b s'annulent : les deux sont repoussés et une marque apparaît à "where".
 ## Chacun est repoussé d'autant plus fort que l'autre est lourd (voir CharacterStats.mass()).
-## Légère contre légère : petit temps mort pour les deux.
+## "counterer" : celui qui a contré, quand un seul l'a fait (il a été touché pendant qu'il armait son
+## coup vers l'attaquant). Sinon, les deux attaques se sont percutées et chacun a contré l'autre.
+## Contrer remplit la jauge de contre et remet la recharge des attaques à zéro.
+## Légère contre légère : petit temps mort pour celui qui contre ; celui qui est contré attend la
+## fin de sa recharge (de quoi riposter).
 ## Lourde contre lourde : micro-explosion qui éjecte fort les deux joueurs.
 ## Lourde contrée par une légère : micro-duel, la caméra zoome et le temps ralentit ; celui qui
 ## a lancé la lourde ne frappe plus pendant 1 s, celui qui a contré peut refrapper tout de suite.
 ## Pendant un ralenti, chaque contre le fait repartir pour toute sa durée (voir _renew_slowmo).
-func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
+func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -> void:
 	var push := _push_dir(a, b)
 	var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
 	var explosion := a.is_heavy_attack() and b.is_heavy_attack()
 	_spawn_clash_mark(where, heavy_countered or explosion)
+	# La jauge de contre : contrer une lourde compte triple, et celui dont la lourde est contrée n'a rien.
+	for fighter in [a, b]:
+		var other: Fighter = b if fighter == a else a
+		if (counterer == null or fighter == counterer) and not (heavy_countered and fighter.is_heavy_attack()):
+			fighter.add_counter(other.is_heavy_attack())
 	if explosion:
 		a.clash(push * Fighter.HEAVY_CLASH_PUSH * b.stats.mass(), Fighter.CLASH_LOCKOUT, Fighter.HEAVY_CLASH_LIFT)
 		b.clash(-push * Fighter.HEAVY_CLASH_PUSH * a.stats.mass(), Fighter.CLASH_LOCKOUT, Fighter.HEAVY_CLASH_LIFT)
@@ -381,8 +423,13 @@ func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
 		else:
 			_renew_slowmo(a, b)  # pendant un duel, pas de 2e duel : il change d'adversaire (ou pas)
 	else:
-		a.clash(push * Fighter.CLASH_PUSH * b.stats.mass())
-		b.clash(-push * Fighter.CLASH_PUSH * a.stats.mass())
+		for fighter in [a, b]:
+			var other: Fighter = b if fighter == a else a
+			var direction := push if fighter == a else -push
+			var cooldown := Fighter.CLASH_LOCKOUT
+			if counterer != null and fighter != counterer:
+				cooldown = maxf(fighter.attack_cooldown_left(), Fighter.CLASH_LOCKOUT)  # contré : sa recharge continue
+			fighter.clash(direction * Fighter.CLASH_PUSH * other.stats.mass(), cooldown)
 		_renew_slowmo(a, b)
 
 
@@ -392,6 +439,7 @@ func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
 func _parry(attacker: Fighter, defender: Fighter) -> void:
 	var push := _push_dir(attacker, defender)
 	_spawn_clash_mark((attacker.global_position + defender.global_position) / 2.0, false, PARRY_COLOR)
+	defender.add_counter(attacker.is_heavy_attack())
 	attacker.clash(push * Fighter.CLASH_PUSH * defender.stats.mass(), Fighter.PARRY_COOLDOWN)
 	defender.clash(-push * Fighter.CLASH_PUSH * attacker.stats.mass(), 0.0)
 	_renew_slowmo(attacker, defender)
@@ -510,8 +558,28 @@ func _resolve_hits() -> void:
 		if victim.is_blocking():
 			_hit_shield(attacker, victim, hit.heavy)
 			continue
+		if _counters(victim, attacker):
+			_clash(attacker, victim, (attacker.global_position + victim.global_position) / 2.0, victim)
+			continue
 		victim.take_hit(hit.dir, hit.knockback)
 		attacker.mark_attack_hit()
+		_hit_close_up(attacker, victim)
+
+
+## Le coup de l'attaquant arrive pendant que la victime arme (ou donne) une attaque légère vers lui :
+## c'est un contre. On a donc le temps de voir le coup partir et d'y répondre.
+func _counters(victim: Fighter, attacker: Fighter) -> bool:
+	return victim.is_light_attack_under_way() and not _points_away(victim, attacker)
+
+
+## En 1 contre 1, un coup qui touche : la caméra zoome vite sur les deux joueurs et le temps
+## ralentit un tout petit peu, pour bien sentir que le coup a porté.
+func _hit_close_up(attacker: Fighter, victim: Fighter) -> void:
+	if victim.eliminated or _alive_count() != 2:
+		return
+	_hit_focus = [attacker, victim]
+	_hit_focus_left = HIT_ZOOM_TIME
+	_time_engine.play(HIT_TIME_SCALE, HIT_SLOWMO)
 
 
 ## Le coup tombe sur un bouclier : personne ne perd de vie, l'attaquant est repoussé mais peut
@@ -522,7 +590,7 @@ func _hit_shield(attacker: Fighter, victim: Fighter, heavy: bool) -> void:
 	push.y = 0.0
 	push = push.normalized() if push.length() > 1.0 else Vector2(attacker.facing, 0.0)
 	attacker.hit_shield(-push)
-	if not victim.absorb_hit(push, heavy):
+	if not victim.absorb_hit(push, attacker.shield_damage(heavy)):
 		return
 	_spawn_clash_mark(victim.global_position, true)
 	victim.shield_burst(push, true)
