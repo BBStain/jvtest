@@ -12,7 +12,7 @@ Après une mise à jour, le navigateur peut garder l'ancienne version jusqu'à 1
 2. **Le menu** a 3 boutons : **JOUER**, **COMMANDES** (le tableau des touches) et **OPTIONS** (le nombre de vies, de 1 à 5).
    Tant qu'on est dans le menu, chaque nouvelle manette ou côté du clavier qui appuie sur une touche devient le joueur suivant (J2, J3, J4).
    Deux joueurs peuvent partager un clavier : côté gauche (Z Q S D) et côté droit (flèches).
-3. **JOUER** ouvre le choix du personnage : une case par joueur, avec sa manette ou son clavier. Gauche / droite pour faire défiler les persos, valider pour être prêt.
+3. **JOUER** ouvre le choix du personnage : une case par joueur, avec sa manette ou son clavier. Gauche / droite pour faire défiler les persos, valider pour être prêt. Un joueur qui veut **se retirer** de la partie appuie sur **Y** (manette), **R** (clavier gauche) ou **I** (clavier droit) : les joueurs suivants remontent d'une place.
    Revenir en arrière annule « prêt », ou fait quitter le joueur (le joueur 1 revient au menu). Il faut au moins 2 joueurs.
 4. Quand tout le monde est prêt : le choix de la map. Valider lance la partie.
 

@@ -685,7 +685,32 @@ func _ready() -> void:
 	menu.handle(pad, "confirm")
 	check(menu.screen == menu.Screen.CHARACTERS, "Menu : JOUER ouvre le choix du perso")
 	menu.handle(kb_left, "back")
-	check(menu.players == [pad, kb_right], "Perso : B sans avoir validé = J3 quitte")
+	check(menu.players == [pad, kb_right, kb_left] and menu.screen == menu.Screen.CHARACTERS,
+		"Perso : B de J3 (pas encore prêt) ne le fait pas quitter")
+	# Rien ne bouge à l'écran quand on change de perso ou qu'on valide
+	var layout := func() -> Array:
+		await get_tree().process_frame
+		await get_tree().process_frame
+		var title: Control = menu._content.get_child(0)
+		var sizes := [title.global_position]
+		for slot in menu._content.get_child(1).get_children():
+			sizes.append(slot.global_position)
+			sizes.append(slot.size)
+		return sizes
+	var layout_before: Array = await layout.call()
+	var stable := true
+	for k in GameSetup.CHARACTERS.size() * 2:
+		menu.handle(kb_right, "right")
+		var now: Array = await layout.call()
+		if now != layout_before:
+			stable = false
+	menu.handle(kb_right, "confirm")
+	if await layout.call() != layout_before:
+		stable = false
+	menu.handle(kb_right, "back")
+	check(stable, "Perso : changer de perso ou valider ne fait rien bouger à l'écran")
+	menu.handle(kb_left, "quit")
+	check(menu.players == [pad, kb_right], "Perso : J3 se retire avec sa touche « se retirer »")
 	menu.handle(pad, "right")
 	menu.handle(pad, "confirm")
 	check(menu.screen == menu.Screen.CHARACTERS and menu._locked == [true, false], "Perso : J1 prêt, on attend J2")
@@ -712,6 +737,11 @@ func _ready() -> void:
 	check(menu.screen == menu.Screen.CHARACTERS and menu.players.size() == 2, "Menu : un 2e joueur rejoint pendant le choix du perso")
 	menu._on_joy_connection_changed(0, false)
 	check(menu.players.size() == 1, "Menu : une manette débranchée quitte la partie")
+	menu.handle(pad, "confirm")
+	menu.handle(kb_left, "quit")
+	check(menu.players == [pad] and menu.screen == menu.Screen.CHARACTERS, "Perso : J1 se retire, la manette devient J1")
+	menu.handle(pad, "quit")
+	check(menu.players.is_empty() and menu.screen == menu.Screen.TITLE, "Perso : le dernier joueur se retire, retour à l'écran titre")
 	menu.queue_free()
 
 	# 10c) Une partie avec 5 vies les affiche bien

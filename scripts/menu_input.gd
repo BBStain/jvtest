@@ -3,11 +3,12 @@ extends RefCounted
 ## Lit les manettes et le clavier dans les menus et dit QUI a appuyé et SUR QUOI.
 ## read(event) renvoie {} si l'appui ne compte pas, sinon :
 ##   {"device": l'appareil (comme dans InputBindings), "action": ..., "stick": true si ça vient du stick}
-## action = "up", "down", "left", "right", "confirm", "back", "start", ou "" pour une autre touche.
+## action = "up", "down", "left", "right", "confirm", "back", "start", "quit" (se retirer de la
+## partie, dans le choix du perso), ou "" pour une autre touche.
 ##
-##   manette : stick ou croix pour choisir, A pour valider, B pour revenir, Start
-##   clavier gauche : Z Q S D, Espace / F / Entrée pour valider, Échap / C pour revenir
-##   clavier droit : flèches, L / K pour valider, U / Retour arrière pour revenir
+##   manette : stick ou croix pour choisir, A pour valider, B pour revenir, Start, Y pour se retirer
+##   clavier gauche : Z Q S D, Espace / F / Entrée pour valider, Échap / C pour revenir, R pour se retirer
+##   clavier droit : flèches, L / K pour valider, U / Retour arrière pour revenir, I pour se retirer
 
 const STICK_PRESS := 0.6     ## stick poussé au-delà : compte comme un appui
 const STICK_RELEASE := 0.3   ## stick revenu en deçà : prêt pour l'appui suivant
@@ -17,17 +18,19 @@ const KEYS_LEFT_SIDE := {
 	KEY_W: "up", KEY_S: "down", KEY_A: "left", KEY_D: "right",
 	KEY_SPACE: "confirm", KEY_F: "confirm", KEY_ENTER: "confirm", KEY_KP_ENTER: "confirm",
 	KEY_ESCAPE: "back", KEY_C: "back",
+	KEY_R: "quit",
 }
 const KEYS_RIGHT_SIDE := {
 	KEY_UP: "up", KEY_DOWN: "down", KEY_LEFT: "left", KEY_RIGHT: "right",
 	KEY_L: "confirm", KEY_K: "confirm", KEY_KP_0: "confirm", KEY_KP_1: "confirm",
 	KEY_U: "back", KEY_BACKSPACE: "back", KEY_KP_4: "back",
-	KEY_I: "", KEY_J: "", KEY_KP_2: "", KEY_KP_3: "",  # autres touches du joueur de droite
+	KEY_I: "quit", KEY_KP_3: "quit",
+	KEY_J: "", KEY_KP_2: "",  # autres touches du joueur de droite
 }
 const JOY_BUTTON_ACTIONS := {
 	JOY_BUTTON_DPAD_UP: "up", JOY_BUTTON_DPAD_DOWN: "down",
 	JOY_BUTTON_DPAD_LEFT: "left", JOY_BUTTON_DPAD_RIGHT: "right",
-	JOY_BUTTON_A: "confirm", JOY_BUTTON_B: "back", JOY_BUTTON_START: "start",
+	JOY_BUTTON_A: "confirm", JOY_BUTTON_B: "back", JOY_BUTTON_START: "start", JOY_BUTTON_Y: "quit",
 }
 
 var _stick_held := {}  ## "manette:axe" -> le stick est déjà poussé
