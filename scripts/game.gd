@@ -29,6 +29,7 @@ const DUEL_TIME_SCALE := 0.5               ## le jeu va 2 fois moins vite
 const DUEL_DURATION := 5.0                 ## pendant 5 vraies secondes
 const DUEL_CAMERA_MARGIN := Vector2(320, 220)  ## la caméra serre les deux duellistes
 const DUEL_ZOOM_MAX := 2.0
+const DUEL_GROUP_CAMERA_MARGIN := Vector2(480, 320)  ## à 3 ou 4 : tout le monde reste à l'écran, un peu plus serré
 const SHIELD_BREAK_TIME_SCALE := 0.3        ## bouclier cassé : ralenti (3 fois moins vite)...
 const SHIELD_BREAK_SLOWMO := 1.2            ## ... pendant 1,2 vraie seconde
 const PARRY_COLOR := Color(0.55, 0.85, 1.0)  ## la marque d'un blocage parfait
@@ -268,11 +269,13 @@ func swap_devices(a: int, b: int) -> void:
 
 
 ## Cadre tous les joueurs encore en jeu : centre au milieu d'eux, zoom selon leur écart.
-## Pendant un micro-duel, la caméra zoome sur les deux duellistes.
+## Pendant un micro-duel, la caméra zoome sur les deux duellistes. À 3 ou 4 joueurs, elle garde
+## tout le monde à l'écran (personne ne doit sortir du cadre) et se resserre juste un peu.
 func _update_camera(delta: float, instant: bool) -> void:
 	var box := Rect2()
 	var first := true
-	var framed := _duel if not _duel.is_empty() else fighters
+	var duel_zoom := not _duel.is_empty() and _alive_count() <= 2
+	var framed := _duel if duel_zoom else fighters
 	for fighter in framed:
 		if fighter.eliminated:
 			continue
@@ -284,8 +287,13 @@ func _update_camera(delta: float, instant: bool) -> void:
 	if first:
 		return
 	var view_size := get_viewport_rect().size
-	var needed := box.size + (DUEL_CAMERA_MARGIN if not _duel.is_empty() else CAMERA_MARGIN)
-	var zoom_max := DUEL_ZOOM_MAX if not _duel.is_empty() else CAMERA_ZOOM_MAX
+	var margin := CAMERA_MARGIN
+	if duel_zoom:
+		margin = DUEL_CAMERA_MARGIN
+	elif not _duel.is_empty():
+		margin = DUEL_GROUP_CAMERA_MARGIN
+	var needed := box.size + margin
+	var zoom_max := DUEL_ZOOM_MAX if duel_zoom else CAMERA_ZOOM_MAX
 	var target_zoom := clampf(minf(view_size.x / needed.x, view_size.y / needed.y), CAMERA_ZOOM_MIN, zoom_max)
 	var target_position := box.get_center()
 	if instant:
@@ -295,6 +303,15 @@ func _update_camera(delta: float, instant: bool) -> void:
 	var weight := 1.0 - exp(-CAMERA_SMOOTHING * delta)
 	_camera.position = _camera.position.lerp(target_position, weight)
 	_camera.zoom = _camera.zoom.lerp(Vector2.ONE * target_zoom, weight)
+
+
+## Nombre de joueurs encore en jeu (pas éliminés).
+func _alive_count() -> int:
+	var count := 0
+	for fighter in fighters:
+		if not fighter.eliminated:
+			count += 1
+	return count
 
 
 func _closest_opponent(fighter: Fighter) -> Fighter:

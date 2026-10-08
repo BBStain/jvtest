@@ -1093,6 +1093,32 @@ func _ready() -> void:
 		game._time_engine.stop(true)
 	check(duels.is_empty(), "3 joueurs : une lourde dans le dos d'un joueur qui frappe devant lui le touche, pas de duel %s" % [duels])
 
+	# 13h) Micro-duel à 3 joueurs : la caméra garde tout le monde à l'écran ; à 2, elle zoome sur le duel
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}],
+		[{"type": "joypad", "id": 5}]]
+	await new_game()
+	GameSetup.player_devices = []
+	for fighter in game.fighters:
+		fighter.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	game.fighters[0].position = Vector2(500, 540); game.fighters[1].position = Vector2(560, 540)
+	game.fighters[2].position = Vector2(1700, 300)
+	game._start_duel(game.fighters[0], game.fighters[1])
+	game._update_camera(1.0, true)
+	var cam: Camera2D = game._camera
+	var view := Rect2(cam.position - game.get_viewport_rect().size / cam.zoom / 2.0, game.get_viewport_rect().size / cam.zoom)
+	check(view.has_point(game.fighters[2].position) and view.has_point(game.fighters[0].position),
+		"Duel à 3 joueurs : le 3e joueur reste à l'écran (zoom %.2f)" % cam.zoom.x)
+	var group_zoom := cam.zoom.x
+	game._duel.clear()
+	game._update_camera(1.0, true)
+	check(group_zoom > cam.zoom.x, "Duel à 3 joueurs : la caméra se resserre un peu (%.2f > %.2f)" % [group_zoom, cam.zoom.x])
+	game.fighters[2].eliminated = true
+	game._start_duel(game.fighters[0], game.fighters[1])
+	game._update_camera(1.0, true)
+	check(cam.zoom.x > 1.2, "Duel quand il ne reste que 2 joueurs : zoom sur les duellistes (%.2f)" % cam.zoom.x)
+	game._time_engine.stop(true)
+
 	# 14) Attaque visée : une pichenette sur le stick droit lance un coup léger dans cette direction
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
