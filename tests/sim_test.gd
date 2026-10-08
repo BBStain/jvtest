@@ -73,6 +73,29 @@ func _ready() -> void:
 	await step(80)
 	check(p2.lives == 3, "Attaque de loin rate, J2 vies = %d" % p2.lives)
 
+	# 3b) Toute la barre de l'attaque légère touche : même collé à l'adversaire, le coup porte
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	await step(25)
+	p1.position.x = 640; p2.position.x = 652
+	await step(10)
+	check(p2.lives == 2, "Attaque légère collé à l'adversaire : touché (vies = %d)" % p2.lives)
+
+	# 3c) Portée : le bout de la barre touche, juste au-delà ça rate
+	for gap in [base.attack_reach + base.body_size.x / 2.0 - 4.0, base.attack_reach + base.body_size.x / 2.0 + 6.0]:
+		await new_game()
+		p1 = game.fighters[0]; p2 = game.fighters[1]
+		p2.input_source = Scripted.new(func(s, f): pass)
+		p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+		await step(25)
+		p1.position.x = 600; p2.position.x = 600 + gap
+		p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+		await step(10)
+		var reached: bool = gap < base.attack_reach + base.body_size.x / 2.0
+		check((p2.lives == 2) == reached, "Portée de l'attaque légère : à %.0f px %s (vies = %d)" % [gap, "touche" if reached else "rate", p2.lives])
+
 	# 4) Choc d'attaques : personne ne perd de vie
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
@@ -239,14 +262,14 @@ func _ready() -> void:
 	var jump_height := start_y - top_y
 	check(jump_height > 30 and jump_height < 100, "Blocage : saut moins haut (%.0f px)" % jump_height)
 
-	# 4g) Attaque rapide plus longue : touche à 100 px
+	# 4g) Attaque rapide : touche à 90 px
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
-	p1.position.x = 600; p2.position.x = 700
+	p1.position.x = 600; p2.position.x = 690
 	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
 	p2.input_source = Scripted.new(func(s, f): pass)
 	await step(36)
-	check(p2.lives == 2, "Attaque rapide longue : touche à 100 px (vies = %d)" % p2.lives)
+	check(p2.lives == 2, "Attaque rapide : touche à 90 px (vies = %d)" % p2.lives)
 
 	# 4h) Attaque lourde non chargée : trop courte à 130 px
 	await new_game()

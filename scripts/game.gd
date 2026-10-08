@@ -145,9 +145,15 @@ func _resolve_clashes() -> void:
 			var b := fighters[j]
 			if not (a.is_attack_active() and b.is_attack_active()):
 				continue
-			if a.attack_center().distance_to(b.attack_center()) > a.attack_radius() + b.attack_radius():
+			# Deux attaques légères dans le même sens (l'un frappe le dos de l'autre) : pas de choc.
+			if not a.is_heavy_attack() and not b.is_heavy_attack() \
+					and a.attack_direction().dot(b.attack_direction()) > 0.0:
 				continue
-			_clash(a, b, (a.attack_center() + b.attack_center()) / 2.0)
+			var closest := Geometry2D.get_closest_points_between_segments(
+				a.attack_start(), a.attack_center(), b.attack_start(), b.attack_center())
+			if closest[0].distance_to(closest[1]) > a.attack_radius() + b.attack_radius():
+				continue
+			_clash(a, b, (closest[0] + closest[1]) / 2.0)
 
 
 ## Les attaques de a et b s'annulent : les deux sont repoussés et une marque apparaît à "where".
@@ -202,7 +208,7 @@ func _resolve_hits() -> void:
 		for victim in fighters:
 			if victim == attacker or not victim.can_be_hit():
 				continue
-			if _circle_hits_rect(attacker.attack_center(), attacker.attack_radius(), victim.body_rect()):
+			if _segment_hits_rect(attacker.attack_start(), attacker.attack_center(), attacker.attack_radius(), victim.body_rect()):
 				var hit_dir := (victim.global_position - attacker.global_position).normalized()
 				if not attacker.is_heavy_attack():
 					hit_dir = attacker.attack_direction()
@@ -253,9 +259,21 @@ func _hit_shield(attacker: Fighter, victim: Fighter, heavy: bool) -> void:
 	_time_engine.play(SHIELD_BREAK_TIME_SCALE, SHIELD_BREAK_SLOWMO)
 
 
-func _circle_hits_rect(center: Vector2, radius: float, rect: Rect2) -> bool:
-	var closest := center.clamp(rect.position, rect.end)
-	return center.distance_to(closest) <= radius
+## Un segment épais (de a à b, d'épaisseur radius de chaque côté) touche-t-il le rectangle ?
+func _segment_hits_rect(a: Vector2, b: Vector2, radius: float, rect: Rect2) -> bool:
+	if rect.has_point(a) or rect.has_point(b):
+		return true
+	var corners := [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]
+	for i in 4:
+		if Geometry2D.segment_intersects_segment(a, b, corners[i], corners[(i + 1) % 4]) != null:
+			return true
+	for corner in corners:
+		if Geometry2D.get_closest_point_to_segment(corner, a, b).distance_to(corner) <= radius:
+			return true
+	for end in [a, b]:
+		if end.distance_to(end.clamp(rect.position, rect.end)) <= radius:
+			return true
+	return false
 
 
 func _check_blast_zone() -> void:
