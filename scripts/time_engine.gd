@@ -12,6 +12,7 @@ var _scale := 1.0        ## vitesse visée (1 = normale, 0.5 = 2 fois moins vite
 var _time_left := 0.0    ## vraies secondes restantes avant le retour à la normale
 var _duration := 0.0     ## durée demandée au dernier play() (pour renew())
 var _stopping := false   ## stop() demandé : le ralenti se termine, renew() ne le relance plus
+var _renewable := true   ## false = un effet bref (ex. l'impact d'un coup) que renew() ne relance pas
 
 
 func _ready() -> void:
@@ -24,18 +25,21 @@ func _exit_tree() -> void:
 
 
 ## Change la vitesse du jeu pendant "duration" vraies secondes.
-func play(time_scale: float, duration: float) -> void:
+## renewable = false : renew() ne le relancera pas (effet bref qui doit vraiment s'arrêter).
+func play(time_scale: float, duration: float, renewable := true) -> void:
 	_scale = maxf(time_scale, 0.05)
 	_duration = duration
 	_time_left = duration
 	_stopping = false
+	_renewable = renewable
 	Engine.time_scale = _scale
 
 
 ## Si un ralenti (ou une accélération) est en cours, il repart de zéro pour toute sa durée.
-## Ne fait rien sinon, ni s'il est en train de s'arrêter (par exemple un duel déjà tranché).
+## Ne fait rien sinon, ni s'il est en train de s'arrêter (par exemple un duel déjà tranché),
+## ni pour un effet bref (voir play()).
 func renew() -> void:
-	if is_active() and not _stopping:
+	if is_active() and not _stopping and _renewable:
 		play(_scale, _duration)
 
 
