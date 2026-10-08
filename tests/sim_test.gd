@@ -160,12 +160,30 @@ func _ready() -> void:
 	await shot("09_blocage")
 	await step(5)
 	check(p2.lives == 3, "Blocage : J2 ne perd pas de vie (vies = %d)" % p2.lives)
-	check(p2.shield == 2, "Blocage : le bouclier perd 1 point (reste %d)" % p2.shield)
+	check(p2.shield == base.shield_max - 1, "Blocage : le bouclier craque d'un cran (reste %d / %d)" % [p2.shield, base.shield_max])
 	check(p1.can_attack(), "Blocage : J1 peut refrapper tout de suite")
 	await step(10)
 	check(p1.position.x < 590, "Blocage : J1 est repoussé (x = %.0f)" % p1.position.x)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(int(Fighter.SHIELD_REGEN_TIME * 60) + 5)
+	check(p2.shield == base.shield_max, "Bouclier : il se répare quand on ne bloque pas (%d)" % p2.shield)
 
-	# 4e) Attaque lourde sur le bouclier : -2 points, et casser le bouclier empêche d'attaquer
+	# 4d2) Il faut 20 attaques légères pour casser le bouclier
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 650
+	p2.input_source = Scripted.new(func(s, f): s.block_held = true)
+	var shield_hits := 0
+	while not p2.shield_broken and shield_hits < 40:
+		p1.position = Vector2(p2.position.x - 50, p2.position.y); p1.velocity = Vector2.ZERO
+		p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
+		await step(8)
+		shield_hits += 1
+		if shield_hits == 12:
+			await shot("09_blocage_fissure")
+	check(shield_hits == 20, "Bouclier : cassé au bout de %d attaques légères" % shield_hits)
+
+	# 4e) Attaque lourde sur le bouclier : compte pour 2 coups, et casser le bouclier : ralenti, éjection, 2 s sans frapper
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
 	p1.position.x = 600; p2.position.x = 650
@@ -175,20 +193,28 @@ func _ready() -> void:
 		s.stick.x = 1.0 if f >= 80 else 0.0
 		s.attack_pressed = f == 85)
 	await step(55)
-	check(p2.shield == 1 and p2.lives == 3, "Lourde sur bouclier : -2 points (reste %d, vies %d)" % [p2.shield, p2.lives])
+	check(p2.shield == base.shield_max - 2 and p2.lives == 3, "Lourde sur bouclier : compte pour 2 coups (reste %d, vies %d)" % [p2.shield, p2.lives])
 	p2.shield = 1
 	p1.position.x = p2.position.x - 50; p1.velocity = Vector2.ZERO
 	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 2)
+	var shield_gap := p2.position.x - p1.position.x
 	await step(6)
-	check(p2.shield == 0 and not p2.is_blocking(), "Bouclier cassé : J2 ne bloque plus (bouclier %d)" % p2.shield)
-	check(p2._attack_cooldown_timer > 1.0, "Bouclier cassé : J2 ne peut pas attaquer (%.2f s)" % p2._attack_cooldown_timer)
-	var x_before := p2.position.x
-	await step(26)
-	check(not p2.is_attacking(), "Bouclier cassé : J2 appuie sur X mais n'attaque pas")
+	check(p2.shield_broken and not p2.is_blocking(), "Bouclier cassé : J2 ne bloque plus")
+	await shot("09_bouclier_casse")
+	check(Engine.time_scale < 0.5, "Bouclier cassé : ralenti (vitesse x%.2f)" % Engine.time_scale)
+	check(p2._attack_cooldown_timer > 1.5, "Bouclier cassé : J2 ne peut pas attaquer (%.2f s)" % p2._attack_cooldown_timer)
+	check(p1.can_attack(), "Bouclier cassé : J1 peut attaquer")
 	await step(20)
+	check(p2.position.x - p1.position.x > shield_gap + 150, "Bouclier cassé : les deux sont éjectés (écart %.0f -> %.0f)" % [shield_gap, p2.position.x - p1.position.x])
+	var x_before := p2.position.x
+	await step(6)
+	check(not p2.is_attacking(), "Bouclier cassé : J2 appuie sur X mais n'attaque pas")
+	await step(40)
 	check(p2.position.x > x_before + 50, "Bouclier cassé : J2 peut toujours bouger")
-	await step(int(Fighter.SHIELD_REGEN_TIME * 60) + 5)
-	check(p2.shield == 1, "Bouclier : un point revient après 2 s sans bloquer (%d)" % p2.shield)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = true)
+	await step(int(Fighter.SHIELD_REGEN_TIME * 60) * 3)
+	check(p2.shield_broken and p2.shield == 0 and not p2.is_blocking(), "Bouclier cassé : il ne revient pas (plus de blocage)")
+	check(is_equal_approx(Engine.time_scale, 1.0), "Bouclier cassé : le temps revient à la normale")
 
 	# 4f) En bloquant : déplacement lent, petit saut, pas de dash, pas d'attaque
 	await new_game()
@@ -345,6 +371,12 @@ func _ready() -> void:
 		s.down_pressed = f == 0)
 	await step(40)
 	check(p1.is_on_floor() and absf(p1.position.y - (432 - 30)) < 3, "Descendu sur la plateforme du milieu (y=%.1f)" % p1.position.y)
+
+	# 7a) Descendre avec le stick en diagonale (pas tout en bas)
+	p1.input_source = Scripted.new(func(s, f):
+		s.stick = Vector2(0.9, 0.4) if f < 3 else Vector2.ZERO)
+	await step(40)
+	check(p1.position.y > 432 + 20, "Descendu de la plateforme avec le stick en diagonale (y=%.1f)" % p1.position.y)
 
 	# 7b) Mur : on glisse lentement, sauts et dash rechargés, le saut mural éjecte du mur
 	await new_game()

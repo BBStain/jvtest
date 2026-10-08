@@ -39,10 +39,10 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - Contrer une attaque lourde (pendant sa frappe) avec une attaque légère annule les deux : les deux joueurs sont repoussés loin et ne peuvent plus attaquer pendant 1,4 seconde. C'est un **micro-duel** : la caméra zoome sur eux et le temps ralentit (2 fois moins vite) pendant 5 secondes, ou jusqu'à ce que l'un des deux perde une vie.
 - Deux attaques lourdes qui se percutent font une **micro-explosion** qui éjecte fort les deux joueurs, sans perte de vie.
 - Pendant un dash, on ne peut pas être touché, mais on ne peut pas attaquer.
-- **Blocage** (tenir B) : le personnage s'entoure d'un contour lumineux et a un bouclier de **3 points**. Un coup sur le bouclier ne fait pas perdre de vie : il enlève 1 point (2 pour une attaque lourde), et l'attaquant est repoussé mais peut refrapper tout de suite.
+- **Blocage** (tenir B) : le personnage s'entoure d'un contour lumineux. Un coup sur le bouclier ne fait pas perdre de vie, et l'attaquant est repoussé mais peut refrapper tout de suite. Mais chaque coup fait **craquer** un peu plus la surbrillance : il faut **20 coups** pour la casser (une attaque lourde compte pour 2).
 - Pendant le blocage, on avance beaucoup plus lentement, on saute moins haut, et on ne peut ni dasher ni attaquer.
-- Si le bouclier casse, on arrête de bloquer et on ne peut plus attaquer pendant 1,5 seconde, mais on peut toujours bouger, sauter et dasher.
-- Le bouclier regagne 1 point toutes les 2 secondes quand on ne bloque pas.
+- Le bouclier se répare lentement quand on ne bloque pas (une fissure en moins toutes les 2 secondes).
+- Si le bouclier casse : **ralenti**, les deux joueurs sont éjectés, et celui qui l'a perdu ne peut plus attaquer pendant 2 secondes (il peut toujours bouger, sauter et dasher). Son bouclier reste **cassé jusqu'à la fin de la partie** : il ne peut plus bloquer.
 - **Course** (tenir LT ou Shift) : on va 1,5 fois plus vite, donc on saute aussi plus loin. Toutes les actions marchent en courant.
 - Courir vide une **jauge d'endurance**, qui apparaît à côté du perso, du côté opposé à l'adversaire. Bloquer en courant la vide plus de 2 fois plus vite. Quand on arrête de courir, elle remonte. Si elle est vide, on ne peut plus courir tant qu'elle n'est pas remontée un peu.
 - La partie s'arrête quand il ne reste qu'un joueur en vie.
@@ -58,7 +58,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 | Dash (dans la direction du stick) | LB | G | J |
 | Courir (maintenir) | Gâchette gauche LT | Shift gauche | Shift droit |
 | Bloquer (maintenir) | B | C | U |
-| Descendre d'une plateforme | Bas | S | Flèche bas |
+| Descendre d'une plateforme | Bas (même en diagonale) | S | Flèche bas |
 | Rejouer à la fin | Start ou A | Entrée | Entrée |
 | Revenir au menu à la fin | B | Échap | Échap |
 
