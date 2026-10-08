@@ -1,10 +1,13 @@
 extends Control
 ## Le menu du jeu, du premier écran jusqu'au lancement de la partie :
 ##   1. Écran titre : « Appuie sur une touche ». Le premier qui appuie devient le joueur 1.
-##   2. Menu principal : JOUER, COMMANDES, OPTIONS. Tant qu'on est dans le menu, chaque
+##   2. Menu principal : JOUER, EN LIGNE, COMMANDES, OPTIONS. Tant qu'on est dans le menu, chaque
 ##      nouvelle manette ou côté de clavier qui appuie sur une touche devient le joueur suivant.
 ##   3. Choix du personnage : chaque joueur fait défiler les persos (gauche / droite) et valide.
 ##   4. Choix de la map, puis la partie se lance.
+## EN LIGNE : créer un salon (on reçoit un code de 4 lettres à donner aux copains) ou en
+## rejoindre un avec son code. Dans le salon, chacun choisit son perso et se dit prêt, puis
+## l'hôte choisit la map et lance la partie (voir Online). Seul le joueur 1 joue en ligne.
 ##
 ## Commandes du menu, pour chaque joueur :
 ##   manette : stick ou croix pour choisir, A (ou Start) pour valider, B pour revenir
@@ -14,12 +17,13 @@ extends Control
 ## gauche) ou I (clavier droit).
 ## (voir MenuInput pour la lecture des touches et UiKit pour les morceaux d'affichage communs)
 
-enum Screen { TITLE, MAIN, CONTROLS, OPTIONS, CHARACTERS, MAPS }
+enum Screen { TITLE, MAIN, CONTROLS, OPTIONS, CHARACTERS, MAPS, ONLINE, ONLINE_CODE, ONLINE_LOBBY, ONLINE_MAP }
 
 const MIN_PLAYERS := 2
 const MAX_PLAYERS := 4
 const GAME_SCENE := "res://scenes/main.tscn"
-const MAIN_BUTTONS := ["JOUER", "COMMANDES", "OPTIONS"]
+const MAIN_BUTTONS := ["JOUER", "EN LIGNE", "COMMANDES", "OPTIONS"]
+const ONLINE_BUTTONS := ["CRÉER UN SALON", "REJOINDRE UN SALON"]
 const MIN_LIVES := 1
 const MAX_LIVES := 5
 const SLOT_SIZE := Vector2(230, 480)    ## taille fixe des cases du choix de perso (rien ne bouge)
@@ -36,6 +40,8 @@ var _input_reader := MenuInput.new()
 var _blink_label: Label
 var _blink_time := 0.0
 var _content: VBoxContainer
+var _code_letters: Array[String] = []    ## le code tapé pour rejoindre un salon
+var _code_cursor := 0
 
 
 func _ready() -> void:
@@ -54,9 +60,13 @@ func _ready() -> void:
 	center.add_child(_content)
 	add_child(BuildVersion.make_label())
 	Input.joy_connection_changed.connect(_on_joy_connection_changed)
+	Online.changed.connect(_on_online_changed)
+	Online.closed.connect(_on_online_closed)
 
 	# En revenant d'une partie, on garde les joueurs (et leur perso) et on va directement au menu principal.
 	for i in GameSetup.player_devices.size():
+		if GameSetup.player_devices[i].is_empty():
+			continue  # un copain en ligne (il jouait sur un autre ordinateur)
 		var device: Dictionary = GameSetup.player_devices[i][0]
 		if device in players or not (device.type == "keyboard" or device.id in Input.get_connected_joypads()):
 			continue
@@ -64,7 +74,22 @@ func _ready() -> void:
 		if i < GameSetup.player_characters.size():
 			_character_choice[-1] = maxi(GameSetup.CHARACTERS.find(GameSetup.player_characters[i]), 0)
 	screen = Screen.MAIN if not players.is_empty() else Screen.TITLE
+	# Retour d'une partie en ligne : dans le salon, ou sur l'écran EN LIGNE si la session est finie.
+	if Online.is_online() and not Online.local_device.is_empty():
+		_restore_online_player()
+		screen = Screen.ONLINE_LOBBY
+	elif Online.message != "" and not Online.local_device.is_empty():
+		_restore_online_player()
+		screen = Screen.ONLINE
 	_show()
+
+
+func _restore_online_player() -> void:
+	if not Online.local_device in players:
+		players.clear()
+		_character_choice.clear()
+		_locked.clear()
+		_add_player(Online.local_device)
 
 
 func _process(delta: float) -> void:
@@ -76,6 +101,8 @@ func _process(delta: float) -> void:
 # --- Lecture des manettes et du clavier ---
 
 func _input(event: InputEvent) -> void:
+	if screen == Screen.ONLINE_CODE and _type_code_key(event):
+		return
 	var press := _input_reader.read(event)
 	if press.is_empty():
 		if event is InputEventMouseButton and event.pressed and screen == Screen.TITLE:
@@ -93,6 +120,10 @@ func handle(device: Dictionary, action: String) -> void:
 		_add_player(device)  # le premier qui appuie devient le joueur 1
 		_go(Screen.MAIN)
 		return
+	if _is_online_screen():
+		if not players.is_empty() and device == players[0]:  # en ligne, seul le joueur 1 joue
+			_handle_online(action)
+		return
 	var player := players.find(device)
 	if player == -1:
 		# Un nouvel appareil appuie : il devient le joueur suivant (pas pendant le choix de la map).
@@ -105,7 +136,7 @@ func handle(device: Dictionary, action: String) -> void:
 			_handle_main(action)
 		Screen.CONTROLS:
 			if action in ["back", "confirm"]:
-				_go(Screen.MAIN, 1)
+				_go(Screen.MAIN, 2)
 		Screen.OPTIONS:
 			_handle_options(action)
 		Screen.CHARACTERS:
@@ -122,6 +153,10 @@ func _on_joy_connection_changed(id: int, connected: bool) -> void:
 
 
 # --- Ce que fait chaque écran ---
+
+func _is_online_screen() -> bool:
+	return screen in [Screen.ONLINE, Screen.ONLINE_CODE, Screen.ONLINE_LOBBY, Screen.ONLINE_MAP]
+
 
 func _handle_main(action: String) -> void:
 	match action:
@@ -143,8 +178,11 @@ func _open_main_button(index: int) -> void:
 				_locked[i] = false
 			_go(Screen.CHARACTERS)
 		1:
-			_go(Screen.CONTROLS)
+			Online.message = ""
+			_go(Screen.ONLINE)
 		2:
+			_go(Screen.CONTROLS)
+		3:
 			_go(Screen.OPTIONS)
 
 
@@ -157,7 +195,7 @@ func _handle_options(action: String) -> void:
 			GameSetup.lives = mini(GameSetup.lives + 1, MAX_LIVES)
 			_show()
 		"back", "confirm":
-			_go(Screen.MAIN, 2)
+			_go(Screen.MAIN, 3)
 
 
 func _handle_characters(player: int, action: String) -> void:
@@ -286,6 +324,8 @@ func _show() -> void:
 			_content.add_child(UiKit.label("CHOISIS LA MAP", 40))
 			_content.add_child(_map_card())
 			_content.add_child(UiKit.label("gauche / droite pour choisir, A pour lancer la partie, B pour revenir", 18, UiKit.TEXT_DIM))
+		_:
+			_show_online()
 
 
 func _add_title(size: int) -> void:
@@ -479,3 +519,231 @@ func _controls_table() -> GridContainer:
 			label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 			grid.add_child(label)
 	return grid
+
+
+# --- Jeu en ligne ---
+
+func _handle_online(action: String) -> void:
+	match screen:
+		Screen.ONLINE:
+			match action:
+				"up", "down":
+					_choice = 1 - _choice
+					_show()
+				"confirm":
+					_open_online_button(_choice)
+				"back":
+					Online.message = ""
+					_go(Screen.MAIN, 1)
+		Screen.ONLINE_CODE:
+			_handle_code(action)
+		Screen.ONLINE_LOBBY:
+			_handle_lobby(action)
+		Screen.ONLINE_MAP:
+			match action:
+				"left", "right":
+					Online.choose_map(Online.map_index + (1 if action == "right" else -1))
+				"confirm":
+					Online.start_game()
+				"back":
+					_go(Screen.ONLINE_LOBBY)
+
+
+func _open_online_button(index: int) -> void:
+	_choice = index
+	Online.local_device = players[0]
+	if index == 0:
+		Online.host()
+		_go(Screen.ONLINE_LOBBY)
+	else:
+		_code_letters = []
+		_code_cursor = 0
+		_go(Screen.ONLINE_CODE)
+
+
+## Taper le code du salon : au clavier on tape les lettres ; à la manette, haut / bas change
+## la lettre, gauche / droite change de case.
+func _handle_code(action: String) -> void:
+	var letters := Online.CODE_LETTERS
+	match action:
+		"up", "down":
+			while _code_letters.size() <= _code_cursor:
+				_code_letters.append("A" if action == "up" else letters[-1])
+				action = ""
+			if action != "":
+				var i := letters.find(_code_letters[_code_cursor])
+				_code_letters[_code_cursor] = letters[posmod(i + (-1 if action == "up" else 1), letters.length())]
+			_show()
+		"left":
+			_code_cursor = maxi(_code_cursor - 1, 0)
+			_show()
+		"right":
+			_code_cursor = mini(_code_cursor + 1, mini(_code_letters.size(), 3))
+			_show()
+		"confirm":
+			if _code_letters.size() == 4:
+				Online.join("".join(_code_letters))
+				_go(Screen.ONLINE_LOBBY)
+		"back":
+			_go(Screen.ONLINE, 1)
+
+
+## Une touche du clavier pendant qu'on tape le code : une lettre, ou Retour arrière pour effacer.
+func _type_code_key(event: InputEvent) -> bool:
+	if not (event is InputEventKey and event.pressed and not event.echo):
+		return false
+	var key := event as InputEventKey
+	var letter := char(key.unicode).to_upper() if key.unicode > 0 else ""
+	if letter.length() == 1 and Online.CODE_LETTERS.contains(letter):
+		if _code_cursor < _code_letters.size():
+			_code_letters[_code_cursor] = letter
+		else:
+			_code_letters.append(letter)
+		_code_cursor = mini(_code_cursor + 1, 3)
+		_show()
+		return true
+	if key.keycode == KEY_BACKSPACE:
+		if not _code_letters.is_empty():
+			_code_letters.pop_back()
+		_code_cursor = mini(_code_letters.size(), 3)
+		_show()
+		return true
+	return false
+
+
+func _handle_lobby(action: String) -> void:
+	var me := Online.my_index()
+	if Online.status != Online.Status.LOBBY or me == -1:
+		if action == "back":
+			Online.leave()
+			_go(Screen.ONLINE, 0)
+		return
+	var mine: Dictionary = Online.players[me]
+	match action:
+		"left", "right":
+			if not mine.ready:
+				var count := GameSetup.CHARACTERS.size()
+				Online.choose(posmod(mine.character + (1 if action == "right" else -1), count), false)
+		"confirm":
+			if not mine.ready:
+				Online.choose(mine.character, true)
+			elif Online.is_host and Online.all_ready():
+				_go(Screen.ONLINE_MAP)
+		"back":
+			if mine.ready:
+				Online.choose(mine.character, false)
+			else:
+				Online.leave()
+				_go(Screen.ONLINE, 0)
+
+
+func _on_online_changed() -> void:
+	if screen == Screen.ONLINE_MAP and not Online.all_ready():
+		screen = Screen.ONLINE_LOBBY
+	if _is_online_screen():
+		_show()
+
+
+func _on_online_closed(_reason: String) -> void:
+	if _is_online_screen():
+		_go(Screen.ONLINE, 0)
+
+
+func _show_online() -> void:
+	match screen:
+		Screen.ONLINE:
+			_content.add_child(UiKit.label("EN LIGNE", 44))
+			for i in ONLINE_BUTTONS.size():
+				_content.add_child(UiKit.menu_button(ONLINE_BUTTONS[i], i == _choice, _open_online_button.bind(i)))
+			if Online.message != "":
+				_content.add_child(UiKit.label(Online.message, 20, UiKit.HIGHLIGHT))
+			_content.add_child(UiKit.label("Un seul joueur par ordinateur. Celui qui crée le salon donne le code aux copains.", 18, UiKit.TEXT_DIM))
+			_content.add_child(UiKit.label("B / Échap : retour", 18, UiKit.TEXT_DIM))
+		Screen.ONLINE_CODE:
+			_content.add_child(UiKit.label("CODE DU SALON", 44))
+			var row := HBoxContainer.new()
+			row.alignment = BoxContainer.ALIGNMENT_CENTER
+			row.add_theme_constant_override("separation", 14)
+			for i in 4:
+				var box := PanelContainer.new()
+				box.custom_minimum_size = Vector2(80, 96)
+				box.add_theme_stylebox_override("panel", UiKit.slot_style(UiKit.HIGHLIGHT if i == _code_cursor else Color(1, 1, 1, 0.4), i == _code_cursor))
+				var letter := UiKit.label(_code_letters[i] if i < _code_letters.size() else "", 56)
+				letter.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+				box.add_child(letter)
+				row.add_child(box)
+			_content.add_child(row)
+			_content.add_child(UiKit.label("Clavier : tape les lettres (Retour arrière pour effacer)", 18, UiKit.TEXT_DIM))
+			_content.add_child(UiKit.label("Manette : haut / bas change la lettre, gauche / droite change de case", 18, UiKit.TEXT_DIM))
+			_content.add_child(UiKit.label("A / Entrée : rejoindre      B / Échap : retour", 18, UiKit.TEXT_DIM))
+		Screen.ONLINE_LOBBY:
+			_content.add_child(UiKit.label("SALON  %s" % Online.code, 44))
+			if Online.status != Online.Status.LOBBY:
+				_content.add_child(UiKit.label(Online.message, 24, UiKit.HIGHLIGHT))
+				_content.add_child(UiKit.label("B / Échap : annuler", 18, UiKit.TEXT_DIM))
+				return
+			if Online.is_host:
+				_content.add_child(UiKit.label("Donne ce code à tes copains pour qu'ils rejoignent", 18, UiKit.TEXT_DIM))
+			var slots := HBoxContainer.new()
+			slots.alignment = BoxContainer.ALIGNMENT_CENTER
+			slots.add_theme_constant_override("separation", 18)
+			for i in Online.MAX_PLAYERS:
+				slots.add_child(_online_slot(i))
+			_content.add_child(slots)
+			var hint := "gauche / droite : perso      A : prêt      B : quitter le salon"
+			var me := Online.my_index()
+			if me != -1 and Online.players[me].ready:
+				hint = "B : je ne suis plus prêt"
+				if Online.all_ready():
+					hint = "A : choisir la map" if Online.is_host else "L'hôte choisit la map…"
+			if Online.players.size() < 2:
+				hint = "En attente des copains…      " + hint
+			_content.add_child(UiKit.label(hint, 18, UiKit.TEXT_DIM))
+		Screen.ONLINE_MAP:
+			_content.add_child(UiKit.label("CHOISIS LA MAP", 40))
+			_map_choice = Online.map_index
+			_content.add_child(_map_card())
+			_content.add_child(UiKit.label("gauche / droite pour choisir, A pour lancer la partie, B pour revenir", 18, UiKit.TEXT_DIM))
+
+
+## Une case du salon en ligne : le joueur, son perso et s'il est prêt.
+func _online_slot(index: int) -> PanelContainer:
+	var color: Color = Game.PLAYER_COLORS[index]
+	var joined := index < Online.players.size()
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = SLOT_SIZE
+	panel.add_theme_stylebox_override("panel", UiKit.slot_style(color, joined))
+	var box := VBoxContainer.new()
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 10)
+	panel.add_child(box)
+	if not joined:
+		box.add_child(UiKit.label("Joueur %d" % (index + 1), 26, Color(1, 1, 1, 0.3)))
+		box.add_child(UiKit.label("En attente…", 18, Color(1, 1, 1, 0.35)))
+		return panel
+	var player: Dictionary = Online.players[index]
+	var mine: bool = player.id == Online.my_id
+	var title := "Joueur %d" % (index + 1)
+	if mine:
+		title += " (toi)"
+	elif player.id == 1:
+		title += " (hôte)"
+	box.add_child(_fixed_row(UiKit.label(title, 24, color), 34))
+	var stats := load(GameSetup.CHARACTERS[player.character]) as CharacterStats
+	box.add_child(_character_preview(stats, color))
+	var arrows := "<   %s   >" if mine and not player.ready else "%s"
+	box.add_child(_fixed_row(UiKit.label(arrows % stats.display_name, 22), 32))
+	var description_box := Control.new()
+	description_box.custom_minimum_size = Vector2(200, 60)
+	description_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var description := UiKit.label(stats.description, 14, UiKit.TEXT_DIM)
+	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	description.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	description.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	description_box.add_child(description)
+	box.add_child(description_box)
+	if player.ready:
+		box.add_child(_fixed_row(UiKit.label("PRÊT !", 24, UiKit.HIGHLIGHT), 34))
+	else:
+		box.add_child(_fixed_row(UiKit.label("choisit son perso…", 16, UiKit.TEXT_DIM), 34))
+	return panel

@@ -4,6 +4,10 @@ extends Node2D
 ## gère les coups, les chocs d'attaques, les chutes hors de la map, la caméra et la fin de partie.
 ## Les joueurs, leurs appareils, leurs personnages et la map viennent de GameSetup.
 ## La map est une scène à part (scenes/maps/), chargée au début de la partie.
+##
+## En ligne (voir Online) : chez l'hôte, la partie tourne comme en local, mais les touches des
+## copains arrivent par le réseau, et l'état du jeu leur est renvoyé à chaque frame. Chez un
+## copain, rien n'est calculé : on envoie ses touches à l'hôte et on affiche ce qu'il renvoie.
 
 const PLAYER_COLORS := [
 	Color(0.95, 0.35, 0.35),  # Joueur 1 : rouge
@@ -37,6 +41,8 @@ var _match_over := false
 var _match_over_time := 0.0
 var _time_engine := TimeEngine.new()
 var _duel: Array[Fighter] = []             ## les deux joueurs du micro-duel en cours
+var online := false                        ## partie en ligne
+var _online_state: Array = []              ## (copain) le dernier état du jeu reçu de l'hôte
 
 var map: GameMap
 @onready var _end_screen: Control = $UI/EndScreen
@@ -45,6 +51,11 @@ var map: GameMap
 
 
 func _ready() -> void:
+	online = Online.status == Online.Status.PLAYING
+	if online:
+		Online.game = self
+		$UI/EndScreen/Restart.text = "Start, A ou Entrée : rejouer      B ou Échap : retour au salon" if Online.is_host \
+			else "L'hôte peut relancer une partie"
 	add_child(_time_engine)
 	map = (load(GameSetup.map_path) as PackedScene).instantiate()
 	add_child(map)
@@ -61,6 +72,10 @@ func _ready() -> void:
 		fighter.lives = GameSetup.lives
 		fighter.color = PLAYER_COLORS[i]
 		fighter.input_source = LocalInputSource.new(i)
+		if online and Online.players[i].id != Online.my_id:
+			# Un copain qui joue depuis un autre ordinateur : chez l'hôte ses touches arrivent par le
+			# réseau ; chez les autres copains, il est seulement affiché.
+			fighter.input_source = NetworkInputSource.new() if Online.is_host else InputSource.new()
 		fighter.position = _feet_to_center(map.spawn_position(i), fighter.stats)
 		fighter.facing = 1.0 if fighter.position.x < map.respawn_position().x else -1.0
 		add_child(fighter)
@@ -71,25 +86,38 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if not _time_engine.is_active():
+	if not _time_engine.is_active() and not _is_online_guest():
 		_duel.clear()
 	_update_camera(delta / Engine.time_scale, false)  # la caméra garde sa vitesse pendant un ralenti
 
 
 func _physics_process(delta: float) -> void:
+	if _is_online_guest():
+		_guest_tick()
+		return
 	if _match_over:
 		_match_over_time += delta
 		if _match_over_time > RESTART_DELAY:
 			if Input.is_action_just_pressed("restart"):
-				get_tree().reload_current_scene()
+				if online:
+					Online.restart()
+				else:
+					get_tree().reload_current_scene()
 			elif Input.is_action_just_pressed("back_to_menu"):
-				get_tree().change_scene_to_file(MENU_SCENE)
+				if online:
+					Online.back_to_lobby()
+				else:
+					get_tree().change_scene_to_file(MENU_SCENE)
+		if online:
+			Online.send_state(online_state())
 		return
 
 	for fighter in fighters:
 		fighter.target = _closest_opponent(fighter)
 	for fighter in fighters:
 		var input := fighter.input_source.poll()
+		if pause_menu != null and fighter.input_source is LocalInputSource:
+			input = InputState.new()  # en ligne, le jeu continue pendant le menu : le perso ne bouge pas
 		if _resume_grace > 0:
 			# La touche qui a fermé la pause ne fait pas sauter / frapper. Les touches gardées
 			# (charge de la lourde, blocage, saut) restent, pour ne rien lâcher par erreur.
@@ -105,6 +133,84 @@ func _physics_process(delta: float) -> void:
 	_resolve_hits()
 	_check_blast_zone()
 	_check_end_of_match()
+	if online:
+		Online.send_state(online_state())
+
+
+# --- Jeu en ligne ---
+
+## Je suis un copain (pas l'hôte) dans une partie en ligne.
+func _is_online_guest() -> bool:
+	return online and not Online.is_host
+
+
+## (copain) Une frame : j'envoie mes touches à l'hôte et j'affiche le dernier état reçu.
+func _guest_tick() -> void:
+	var me := Online.my_index()
+	if me != -1:
+		var input := fighters[me].input_source.poll()
+		if pause_menu != null or _match_over:
+			input = InputState.new()  # menu ouvert : le perso ne bouge pas
+		Online.send_input(input.to_dict())
+	for fighter in fighters:
+		fighter.target = _closest_opponent(fighter)
+	if _online_state.is_empty():
+		return
+	var state := _online_state
+	_online_state = []
+	Engine.time_scale = state[0]
+	_duel.clear()
+	for index in state[1]:
+		_duel.append(fighters[index])
+	if state[2] != "" and not _match_over:
+		_show_end(state[2], fighters[state[3]].color if state[3] >= 0 else Color.WHITE)
+	for i in mini(fighters.size(), state.size() - 4):
+		fighters[i].apply_net_state(state[4 + i])
+
+
+## (hôte) L'état du jeu envoyé aux copains : vitesse du temps, duel, fin de partie, puis chaque joueur.
+func online_state() -> Array:
+	var duel := []
+	for fighter in _duel:
+		duel.append(fighters.find(fighter))
+	var winner := -1
+	for i in fighters.size():
+		if _match_over and not fighters[i].eliminated:
+			winner = i
+	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner]
+	for fighter in fighters:
+		state.append(fighter.net_state())
+	return state
+
+
+## (copain) L'hôte a envoyé l'état du jeu : on l'affichera à la prochaine frame.
+func receive_online_state(state: Array) -> void:
+	if state.size() >= 4:
+		_online_state = state
+
+
+## (hôte) Les touches d'un copain sont arrivées.
+func receive_online_input(index: int, data: Dictionary) -> void:
+	if index >= 0 and index < fighters.size() and fighters[index].input_source is NetworkInputSource:
+		(fighters[index].input_source as NetworkInputSource).push(data)
+
+
+## (hôte) Un copain a quitté la partie : il est éliminé.
+func on_online_player_left(index: int) -> void:
+	if index < 0 or index >= fighters.size() or fighters[index].eliminated:
+		return
+	if fighters[index].input_source is NetworkInputSource:
+		(fighters[index].input_source as NetworkInputSource).clear()
+	fighters[index].forfeit()
+
+
+## (copain) Un effet visuel envoyé par l'hôte.
+func spawn_online_effect(data: Dictionary) -> void:
+	match data.get("k", ""):
+		"marque":
+			_spawn_clash_mark(data.p, false, data.c)
+		"explosion":
+			_spawn_explosion(data.p, data.c)
 
 
 ## Start (manette), Échap ou P (clavier) : ouvre le menu pause.
@@ -129,7 +235,8 @@ func open_pause() -> void:
 	pause_menu = PauseMenu.new()
 	pause_menu.game = self
 	$UI.add_child(pause_menu)
-	get_tree().paused = true
+	if not online:
+		get_tree().paused = true  # en ligne, on ne peut pas arrêter le jeu des copains
 
 
 func close_pause() -> void:
@@ -244,9 +351,7 @@ func _clash(a: Fighter, b: Fighter, where: Vector2) -> void:
 	if explosion:
 		a.clash(push * Fighter.HEAVY_CLASH_PUSH * b.stats.mass(), Fighter.CLASH_LOCKOUT, Fighter.HEAVY_CLASH_LIFT)
 		b.clash(-push * Fighter.HEAVY_CLASH_PUSH * a.stats.mass(), Fighter.CLASH_LOCKOUT, Fighter.HEAVY_CLASH_LIFT)
-		var boom := MicroExplosion.new()
-		boom.position = where
-		add_child(boom)
+		_spawn_explosion(where, MicroExplosion.DEFAULT_COLOR)
 		_time_engine.renew()
 	elif heavy_countered:
 		for fighter in [a, b]:
@@ -302,6 +407,17 @@ func _spawn_clash_mark(where: Vector2, heavy_countered: bool, color := Color.TRA
 		color = Color(1.0, 0.6, 0.2) if heavy_countered else Color(1, 1, 1)
 	mark.color = color
 	add_child(mark)
+	if online and Online.is_host:
+		Online.send_effect({"k": "marque", "p": where, "c": color})
+
+
+func _spawn_explosion(where: Vector2, color: Color) -> void:
+	var boom := MicroExplosion.new()
+	boom.color = color
+	boom.position = where
+	add_child(boom)
+	if online and Online.is_host:
+		Online.send_effect({"k": "explosion", "p": where, "c": color})
 
 
 ## On repère d'abord tous les coups de la frame, puis on les applique : si deux joueurs se
@@ -374,10 +490,7 @@ func _hit_shield(attacker: Fighter, victim: Fighter, heavy: bool) -> void:
 	_spawn_clash_mark(victim.global_position, true)
 	victim.shield_burst(push, true)
 	attacker.shield_burst(-push, false)
-	var burst := MicroExplosion.new()
-	burst.color = Color(0.75, 0.9, 1.0)
-	burst.position = victim.global_position
-	add_child(burst)
+	_spawn_explosion(victim.global_position, Color(0.75, 0.9, 1.0))
 	if _duel.is_empty():
 		_time_engine.play(SHIELD_BREAK_TIME_SCALE, SHIELD_BREAK_SLOWMO)
 	else:
@@ -425,9 +538,13 @@ func _check_end_of_match() -> void:
 	_duel.clear()
 	_time_engine.stop(true)
 	if alive.size() == 1:
-		var winner := alive[0]
-		_winner_label.text = "Joueur %d gagne !" % (winner.player_index + 1)
-		_winner_label.add_theme_color_override("font_color", winner.color)
+		_show_end("Joueur %d gagne !" % (alive[0].player_index + 1), alive[0].color)
 	else:
-		_winner_label.text = "Égalité !"
+		_show_end("Égalité !", Color.WHITE)
+
+
+func _show_end(text: String, color: Color) -> void:
+	_match_over = true
+	_winner_label.text = text
+	_winner_label.add_theme_color_override("font_color", color)
 	_end_screen.visible = true

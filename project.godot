@@ -9,6 +9,10 @@ config/name="Brawler du Swag"
 run/main_scene="res://scenes/menu.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
 
+[autoload]
+
+Online="*res://scripts/online/online.gd"
+
 [display]
 
 window/size/viewport_width=1280
