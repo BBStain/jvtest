@@ -42,7 +42,7 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 - Après avoir perdu une vie, on clignote : on est invincible pendant **1,2 seconde** et on ne peut pas attaquer.
 - **En 1 contre 1, un coup qui retire une vie** fait zoomer la caméra sur les deux joueurs et ralentit très légèrement le jeu un court instant, pour bien sentir l'impact (pas à 3 ou 4 joueurs).
 - L'attaque légère (X) part vers l'adversaire le plus proche. À la manette, une pichenette sur le **stick droit** lance aussi une attaque légère, mais dans la direction du stick (un coup par pichenette) : pratique à 3 ou 4 pour choisir qui on frappe. C'est comme un coup de poing rapide ou un coup d'épée horizontal : toute la barre touche, même collé à l'adversaire, mais rien derrière soi (à 3 ou 4, celui qui est dans ton dos n'est pas touché, et une attaque dans ton dos n'est pas un contre). S'il est trop loin, elle frappe dans le vide.
-- **Le coup léger s'arme avant de partir** (0,1 seconde) : le poing recule derrière le perso et une fine ligne montre où il va partir. Puis la barre jaillit et s'allonge jusqu'au bout. Entre deux coups, il faut attendre **0,4 seconde** (comptée depuis le départ du coup) : on ne peut plus marteler.
+- **Le coup léger s'arme avant de partir** (0,1 seconde) : le poing recule derrière le perso et une fine ligne montre où il va partir. Puis la barre jaillit et s'allonge jusqu'au bout. Entre deux coups, il faut attendre **0,4 seconde** (comptée depuis le départ du coup) : on ne peut plus marteler. (Ces temps sont ceux de la Barre : Jumb, plus lourd, est un peu plus lent, Jib un peu plus rapide.)
 - **Contrer en frappant** : si le coup de l'adversaire t'arrive dessus pendant que ton propre coup léger s'arme ou part vers lui, c'est un **contre** : personne ne perd de vie, les deux sont repoussés, tu peux refrapper tout de suite, et lui doit attendre la fin de sa recharge. Un coup qui arrive dans le dos n'est pas contré.
 - Si deux joueurs se touchent exactement en même temps, c'est aussi un choc : les deux attaques s'annulent et personne ne perd de vie.
 - Si deux attaques se touchent, elles s'annulent et les deux joueurs sont repoussés (chacun a contré l'autre, les deux peuvent refrapper tout de suite). Une marque apparaît à l'endroit du choc et s'efface en quelques secondes (orange si une attaque lourde a été contrée).
@@ -75,7 +75,8 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 | Poids (calculé selon la taille) | 1 | 1,4 : recule moins, repousse plus | 0,78 : recule plus, repousse moins |
 | Vitesse | normale | plus lent | plus rapide |
 | Saut | normal | un tout petit peu moins haut | plus haut |
-| Attaques | normales | plus longues, projettent plus loin | plus courtes, projettent moins loin |
+| Attaques | normales | bien plus longues, projettent plus loin | bien plus courtes, projettent moins loin |
+| Vitesse d'attaque (selon le poids) | normale : s'arme en 0,1 s, recharge 0,4 s (lourde 0,8 s) | 1,2 fois plus lente : 0,12 s, 0,48 s (0,96 s) | 0,89 fois : 0,09 s, 0,36 s (0,71 s) |
 | Dash | normal | même longueur, plus lent | même longueur, plus rapide |
 | Endurance (course) | normale | se vide plus vite | se vide plus lentement |
 | Attaque lourde | charge pleine en 1 s | charge pleine en 1 s | charge pleine en 0,7 s |
@@ -153,7 +154,9 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
   (le dessin suit la zone qui touche), son bouclier, son endurance, et son **poids** (un perso 2 fois plus lourd est
   repoussé 2 fois moins loin par les coups, les chocs et le bouclier, et repousse plus loin les plus légers quand ils se contrent).
   Le poids se **calcule tout seul selon la taille** : laisse `weight` à 0 et change `body_size`, le perso devient plus lourd
-  s'il prend plus de place (mets un autre chiffre dans `weight` pour forcer un poids). Le reste (vitesse, sauts…) se règle
+  s'il prend plus de place (mets un autre chiffre dans `weight` pour forcer un poids). Le poids règle aussi la **vitesse d'attaque** :
+  plus lourd, le coup léger s'arme plus longtemps et les recharges durent plus (`attack_tempo` à 0 = calculé selon le poids,
+  sinon 1,2 = 20 % plus lent). Le reste (vitesse, sauts…) se règle
   à la main : c'est ce qui donne à chaque perso son caractère.
 - **Les règles communes à tous** (bouclier, contre, invincibilité…) : en haut de `scripts/fighter.gd`, chaque règle est une ligne `const` avec une explication.
 - **La map** : ouvre `scenes/maps/arene.tscn`. Dans l'arbre à gauche, clique sur `Sol`, `PlateformeMilieu`, `PlateformeHaut`, `MurGauche`, `MurDroit`

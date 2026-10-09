@@ -8,11 +8,13 @@ extends Resource
 ## Les valeurs ci-dessous sont celles par défaut (celles de la Barre).
 ##
 ## Le poids est calculé tout seul à partir de la taille (sauf si on le règle à la main) :
-## un perso qui prend plus de place est plus lourd. Plus on est lourd, moins on recule, et plus
-## on repousse loin un adversaire plus léger quand on se contre. Le reste (vitesse, sauts...)
-## se règle à la main, pour garder chaque perso bien à lui.
+## un perso qui prend plus de place est plus lourd. Plus on est lourd, moins on recule, plus
+## on repousse loin un adversaire plus léger quand on se contre, et plus on attaque lentement
+## (le coup léger s'arme plus longtemps, les recharges sont plus longues). Le reste (vitesse,
+## sauts...) se règle à la main, pour garder chaque perso bien à lui.
 
 const BASE_SIZE := Vector2(20, 60)  ## la taille de la Barre : poids 1
+const WEIGHT_TEMPO := 0.5  ## 1,4 fois plus lourd que la Barre = attaques 1,2 fois plus lentes (0,8 fois = 0,9 fois)
 
 @export var display_name := "Barre"
 @export var description := ""
@@ -73,6 +75,7 @@ const BASE_SIZE := Vector2(20, 60)  ## la taille de la Barre : poids 1
 
 @export_group("Poids")
 @export var weight: float = 0.0  ## 0 = calculé selon la taille ; sinon le poids voulu (2 = 2 fois moins repoussé)
+@export var attack_tempo: float = 0.0  ## 0 = calculé selon le poids ; sinon la lenteur voulue des attaques (1,2 = 20 % plus lent)
 
 
 ## Le poids du perso : celui réglé à la main, ou sinon calculé selon sa taille
@@ -81,3 +84,21 @@ func mass() -> float:
 	if weight > 0.0:
 		return weight
 	return sqrt((body_size.x * body_size.y) / (BASE_SIZE.x * BASE_SIZE.y))
+
+
+## La lenteur des attaques : 1 pour la Barre, plus pour un perso lourd, moins pour un léger.
+## Elle multiplie l'armement du coup léger et la recharge des deux attaques.
+func tempo() -> float:
+	if attack_tempo > 0.0:
+		return attack_tempo
+	return 1.0 + WEIGHT_TEMPO * (mass() - 1.0)
+
+
+## Temps pour armer le coup léger, selon le poids.
+func light_startup() -> float:
+	return attack_startup * tempo()
+
+
+## Recharge d'une attaque (légère ou lourde), selon le poids.
+func cooldown(heavy: bool) -> float:
+	return (heavy_cooldown if heavy else attack_cooldown) * tempo()

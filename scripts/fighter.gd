@@ -401,7 +401,7 @@ func _try_start_attack(heavy: bool) -> void:
 
 ## Recharge d'une attaque (comptée depuis son départ) : plus courte quand la jauge de contre est haute.
 func _cooldown(heavy: bool) -> float:
-	return (stats.heavy_cooldown if heavy else stats.attack_cooldown) * PHASE_COOLDOWN[counter_phase() - 1]
+	return stats.cooldown(heavy) * PHASE_COOLDOWN[counter_phase() - 1]
 
 
 ## Se tourne vers l'adversaire visé.
@@ -440,7 +440,7 @@ func _tick_attack(input: InputState, delta: float) -> void:
 
 
 func _attack_startup() -> float:
-	return stats.heavy_startup if _attack_heavy else stats.attack_startup
+	return stats.heavy_startup if _attack_heavy else stats.light_startup()
 
 
 func _attack_active() -> float:
@@ -516,7 +516,7 @@ func is_parrying() -> bool:
 ## Se faire toucher à ce moment-là par celui qu'elle vise, c'est le contrer (voir game.gd).
 func is_light_attack_under_way() -> bool:
 	return not _attack_heavy and _attack_time >= 0.0 and not _attack_has_hit \
-		and _attack_time < stats.attack_startup + stats.attack_active
+		and _attack_time < stats.light_startup() + stats.attack_active
 
 
 ## Temps restant avant de pouvoir attaquer à nouveau.
@@ -559,7 +559,7 @@ func attack_center() -> Vector2:
 
 ## Longueur actuelle du coup léger : la barre sort du perso et s'allonge pendant LIGHT_DEPLOY_TIME.
 func _light_reach() -> float:
-	var deploy := clampf((_attack_time - stats.attack_startup) / LIGHT_DEPLOY_TIME, 0.0, 1.0)
+	var deploy := clampf((_attack_time - stats.light_startup()) / LIGHT_DEPLOY_TIME, 0.0, 1.0)
 	return stats.attack_reach * _range_mult() * lerpf(LIGHT_DEPLOY_START, 1.0, deploy)
 
 
@@ -862,9 +862,9 @@ func _draw() -> void:
 		var length := stats.attack_reach * _range_mult()
 		var bar := stats.attack_radius * 0.5625   # 9 px pour la Barre
 		var tip := stats.attack_radius * 0.875    # 14 px pour la Barre
-		if _attack_time < stats.attack_startup:
+		if _attack_time < stats.light_startup():
 			# On arme le coup : le poing recule derrière le perso, et une fine ligne montre où il va partir
-			var windup := clampf(_attack_time / stats.attack_startup, 0.0, 1.0)
+			var windup := clampf(_attack_time / stats.light_startup(), 0.0, 1.0)
 			draw_rect(Rect2(10.0, -1.5, length - 10.0, 3.0), Color(1, 1, 1, 0.12 + 0.2 * windup))
 			var back := lerpf(2.0, 14.0, windup)
 			draw_rect(Rect2(-back - tip, -tip * 0.8, tip, tip * 1.6), Color(color.lightened(0.6), 0.6 + 0.4 * windup))
