@@ -12,7 +12,8 @@ var _scale := 1.0        ## vitesse visée (1 = normale, 0.5 = 2 fois moins vite
 var _time_left := 0.0    ## vraies secondes restantes avant le retour à la normale
 var _duration := 0.0     ## durée demandée au dernier play() (pour renew())
 var _stopping := false   ## stop() demandé : le ralenti se termine, renew() ne le relance plus
-var _renewable := true   ## false = un effet bref (ex. l'impact d'un coup) que renew() ne relance pas
+var _renewable := true   ## false = un effet que renew() ne relance pas (ex. le ralenti d'un joueur sonné)
+var _effect := 0         ## numéro de l'effet en cours : chaque play() en lance un nouveau
 
 
 func _ready() -> void:
@@ -24,15 +25,17 @@ func _exit_tree() -> void:
 	Engine.time_scale = 1.0  # on ne laisse jamais le jeu ralenti en quittant la partie
 
 
-## Change la vitesse du jeu pendant "duration" vraies secondes.
-## renewable = false : renew() ne le relancera pas (effet bref qui doit vraiment s'arrêter).
-func play(time_scale: float, duration: float, renewable := true) -> void:
+## Change la vitesse du jeu pendant "duration" vraies secondes. Renvoie le numéro de cet effet
+## (voir is_playing()). renewable = false : renew() ne le relancera pas.
+func play(time_scale: float, duration: float, renewable := true) -> int:
 	_scale = maxf(time_scale, 0.05)
 	_duration = duration
 	_time_left = duration
 	_stopping = false
 	_renewable = renewable
 	Engine.time_scale = _scale
+	_effect += 1
+	return _effect
 
 
 ## Si un ralenti (ou une accélération) est en cours, il repart de zéro pour toute sa durée.
@@ -40,7 +43,8 @@ func play(time_scale: float, duration: float, renewable := true) -> void:
 ## ni pour un effet bref (voir play()).
 func renew() -> void:
 	if is_active() and not _stopping and _renewable:
-		play(_scale, _duration)
+		_time_left = _duration
+		Engine.time_scale = _scale
 
 
 ## Revient à la vitesse normale : en douceur (sur RAMP_TIME), ou tout de suite.
@@ -55,6 +59,11 @@ func stop(instant := false) -> void:
 
 func is_active() -> bool:
 	return _time_left > 0.0
+
+
+## L'effet lancé par ce play() est-il encore en cours (pas fini, ni remplacé par un autre play()) ?
+func is_playing(effect: int) -> bool:
+	return is_active() and effect == _effect
 
 
 func _process(delta: float) -> void:
