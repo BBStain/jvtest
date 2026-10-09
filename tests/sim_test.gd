@@ -858,6 +858,15 @@ func _ready() -> void:
 	check(jib.dash_speed > barre.dash_speed and jib.heavy_charge_time < barre.heavy_charge_time
 		and jib.stamina_sprint_drain < barre.stamina_sprint_drain and jumb.stamina_sprint_drain > barre.stamina_sprint_drain,
 		"Jib : dash plus rapide, charge plus courte ; endurance : Jib la vide moins vite, Jumb plus vite")
+	check(is_equal_approx(barre.tempo(), 1.0) and absf(jumb.tempo() - 1.2) < 0.01 and absf(jib.tempo() - 0.89) < 0.01,
+		"Vitesse d'attaque selon le poids : Barre x%.2f, Jumb x%.2f, Jib x%.2f" % [barre.tempo(), jumb.tempo(), jib.tempo()])
+	check(jib.light_startup() < barre.light_startup() and barre.light_startup() < jumb.light_startup()
+		and jib.cooldown(false) < barre.cooldown(false) and barre.cooldown(false) < jumb.cooldown(false)
+		and jib.cooldown(true) < barre.cooldown(true) and barre.cooldown(true) < jumb.cooldown(true),
+		"Jib arme et recharge plus vite, Jumb plus lentement (recharge %.2f / %.2f / %.2f s)" % [jib.cooldown(false), barre.cooldown(false), jumb.cooldown(false)])
+	check(jib.attack_reach < barre.attack_reach and barre.attack_reach < jumb.attack_reach
+		and jib.heavy_arc_radius < barre.heavy_arc_radius and barre.heavy_arc_radius < jumb.heavy_arc_radius,
+		"Portée : Jib la plus courte, Jumb la plus longue")
 	GameSetup.player_characters = ["res://characters/jumb.tres", "res://characters/jib.tres"]
 	await new_game()
 	GameSetup.player_characters = []
@@ -881,6 +890,19 @@ func _ready() -> void:
 			break
 	await shot("16_jumb_jib")
 	check(full_frames > 0 and full_frames < 50, "Jib : sa lourde arrive au max plus vite (%.2f s)" % (full_frames / 60.0))
+	# Le coup léger de Jumb part plus tard et sa recharge dure plus longtemps (en phase 1 de la jauge)
+	await step(90)
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
+	var jumb_active := -1
+	for i in 30:
+		await step(1)
+		if p1.is_attack_active():
+			jumb_active = i
+			break
+	check(jumb_active >= int(jumb.light_startup() * 60.0) - 1 and jumb_active > int(barre.light_startup() * 60.0),
+		"Jumb : son coup léger s'arme plus longtemps (%.2f s)" % (jumb_active / 60.0))
+	check(absf(p1._cooldown(false) - jumb.cooldown(false)) < 0.001 and absf(p2._cooldown(true) - jib.cooldown(true)) < 0.001,
+		"La recharge en jeu suit le poids (Jumb %.2f s, lourde de Jib %.2f s)" % [p1._cooldown(false), p2._cooldown(true)])
 
 	# 11c) Chaque perso monte sur la plateforme du milieu en un seul saut (Jumb saute un peu moins haut,
 	# mais ça ne doit pas l'empêcher d'aller là où va la Barre)
@@ -906,9 +928,17 @@ func _ready() -> void:
 	for path in GameSetup.CHARACTERS:
 		var c := load(path) as CharacterStats
 		check(c != null and c.display_name != "" and c.body_size.x > 0.0 and c.body_size.y > 0.0 \
-			and c.shield_max >= 1 and c.mass() > 0.0 and c.attack_reach > c.attack_radius \
+			and c.shield_max >= 1 and c.mass() > 0.0 and c.tempo() > 0.0 and c.attack_reach > c.attack_radius \
 			and c.heavy_startup < c.heavy_charge_time and c.dash_time > 0.0,
 			"Contenu : le perso %s est complet" % path)
+		# Sa description tient dans les 3 lignes prévues dans le choix du perso (même texte et largeur que menu.gd)
+		var description := UiKit.label(c.description, 14, UiKit.TEXT_DIM)
+		description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		description.size = Vector2(200, 60)
+		add_child(description)
+		await step(1)
+		check(description.get_line_count() <= 3, "Contenu : la description de %s tient en 3 lignes (%d)" % [c.display_name, description.get_line_count()])
+		description.queue_free()
 	for path in GameSetup.MAPS:
 		var m := (load(path) as PackedScene).instantiate() as GameMap
 		var problems: Array[String] = []
