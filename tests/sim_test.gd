@@ -1280,7 +1280,7 @@ func _ready() -> void:
 	check(p2.is_stunned() and p2.lives == 3, "Coup qui sonne : J2 est sonné, sans perdre de vie")
 	check(p2.is_invincible(), "Coup qui sonne : J2 ne peut pas être retouché dans l'instant")
 	await shot("16_sonne")
-	await step(int(Fighter.STUN_GRACE * 60.0) + 2)
+	await step(int(Fighter.STUN_GRACE * 60.0 / Game.STUN_TIME_SCALE) + 2)  # en 1 contre 1, le jeu ralentit tant qu'on est sonné
 	check(p2.is_stunned() and not p2.is_invincible(), "Coup qui sonne : J2 est toujours sonné, et plus protégé")
 	p1.position = Vector2(p2.position.x - 60, p2.position.y); p1.velocity = Vector2.ZERO
 	light_now(p1, Vector2.RIGHT)
@@ -1298,7 +1298,7 @@ func _ready() -> void:
 	await step(30)
 	p1.position = Vector2(600, 540); p2.position = Vector2(660, 540)
 	light_now(p1, Vector2.RIGHT)
-	await step(int(Fighter.STUN_TIME * 60.0) + 5)
+	await step(int(Fighter.STUN_TIME * 60.0 / Game.STUN_TIME_SCALE) + 5)
 	check(not p2.is_stunned(), "Sonné : ça passe au bout de %.0f s" % Fighter.STUN_TIME)
 	p1.position = Vector2(p2.position.x - 60, p2.position.y); p1.velocity = Vector2.ZERO
 	light_now(p1, Vector2.RIGHT)
@@ -1456,7 +1456,7 @@ func _ready() -> void:
 	await step(int(2.5 * 60.0))
 	check(p1.counter_phase() == 1 and game.gauge.points > 0.0, "Jauge : sans contre, elle redescend (%.1f, phase %d)" % [game.gauge.points, p1.counter_phase()])
 
-	# 16g) 1 contre 1 : un coup qui retire une vie -> zoom rapide et léger ralenti ; pas à 3 joueurs
+	# 16g) 1 contre 1 : tant qu'un joueur est sonné -> zoom et léger ralenti ; une vie perdue -> l'écran tremble
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
 	for fi in [p1, p2]:
@@ -1466,25 +1466,79 @@ func _ready() -> void:
 	p1.position = Vector2(600, 540); p2.position = Vector2(660, 540)
 	light_now(p1, Vector2.RIGHT)
 	await step(1)
-	check(p2.is_stunned() and game._hit_focus.is_empty() and is_equal_approx(Engine.time_scale, 1.0),
-		"Coup qui sonne : pas encore de zoom (il est pour le coup qui retire une vie)")
+	check(p2.is_stunned() and game._stun_focus.size() == 2 and is_equal_approx(Engine.time_scale, Game.STUN_TIME_SCALE) and game._shake_left == 0.0,
+		"Coup qui sonne en 1 contre 1 : zoom et léger ralenti (vitesse %.2f), l'écran ne tremble pas" % Engine.time_scale)
+	for i in 20:
+		await get_tree().process_frame
+	check(game._camera.zoom.x > normal_zoom + 0.2, "Joueur sonné : la caméra zoome (%.2f -> %.2f)" % [normal_zoom, game._camera.zoom.x])
+	await shot("16_coup_zoom")
+	await step(60)
+	check(p2.is_stunned() and is_equal_approx(Engine.time_scale, Game.STUN_TIME_SCALE), "Joueur sonné : le ralenti dure tant qu'il est sonné")
+	game._time_engine._time_left = 1.0
+	game._renew_slowmo(p1, p2)
+	check(game._time_engine._time_left <= 1.0, "Joueur sonné : un contre ne relance pas ce ralenti")
+	game._time_engine._time_left = 5.0
+	var stun_frames := 0
+	while p2.is_stunned() and stun_frames < 400:
+		await step(1)
+		stun_frames += 1
+	check(game._stun_focus.is_empty() and game._time_engine._time_left <= TimeEngine.RAMP_TIME,
+		"Plus sonné (au bout du temps) : le ralenti s'arrête et la caméra se détend")
+	await step(40)
+	check(is_equal_approx(Engine.time_scale, 1.0) and p2.lives == 3, "Plus sonné : tout revient à la normale, sans vie perdue")
+	# Sauvé par un contre ou un blocage parfait : le ralenti s'arrête tout de suite
+	p1.position = Vector2(p2.position.x - 60, p2.position.y); p1.velocity = Vector2.ZERO
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	check(p2.is_stunned() and Engine.time_scale < 1.0, "Sonné une 2e fois : le ralenti repart")
+	p2.recover()
+	await step(1)
+	check(game._stun_focus.is_empty() and game._time_engine._time_left <= TimeEngine.RAMP_TIME, "Sauvé (contre ou blocage parfait) : le ralenti s'arrête")
 	p2._invincible_timer = 0.0
 	p1.position = Vector2(p2.position.x - 60, p2.position.y); p1.velocity = Vector2.ZERO
 	light_now(p1, Vector2.RIGHT)
 	await step(1)
-	check(p2.lives == 2 and game._hit_focus.size() == 2 and Engine.time_scale < 1.0,
-		"Coup en 1 contre 1 : zoom sur les deux joueurs et léger ralenti (vitesse %.2f)" % Engine.time_scale)
-	for i in 20:
-		await get_tree().process_frame
-	check(game._camera.zoom.x > normal_zoom + 0.2, "Coup en 1 contre 1 : la caméra zoome (%.2f -> %.2f)" % [normal_zoom, game._camera.zoom.x])
-	await shot("16_coup_zoom")
-	await step(60)
-	check(game._hit_focus.is_empty() and is_equal_approx(Engine.time_scale, 1.0), "Coup en 1 contre 1 : tout revient à la normale")
-	game._time_engine.play(Game.HIT_TIME_SCALE, Game.HIT_SLOWMO, false)
-	game._time_engine._time_left = 0.2
-	game._clash(p1, p2, p1.position)
-	check(game._time_engine._time_left <= 0.2, "Ralenti d'impact : un contre juste après ne le prolonge pas")
+	check(p2.is_stunned() and is_equal_approx(Engine.time_scale, Game.STUN_TIME_SCALE) and game._time_engine._time_left > TimeEngine.RAMP_TIME,
+		"Resonné pendant le retour à la normale : le ralenti repart tout de suite (vitesse %.2f)" % Engine.time_scale)
+	p2.recover()
+	await step(40)
+	# Un micro-duel pendant qu'un joueur est sonné : le duel garde son ralenti, celui du sonné ne l'écrase pas
+	p1.position = Vector2(p2.position.x - 60, p2.position.y); p1.velocity = Vector2.ZERO
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	game._start_duel(p1, p2)
+	await step(1)
+	check(p2.is_stunned() and is_equal_approx(Engine.time_scale, Game.DUEL_TIME_SCALE), "Sonné pendant un micro-duel : le ralenti du duel reste")
+	game._time_engine._time_left = 0.05  # le duel se termine alors que J2 est encore sonné
+	await step(6)
+	check(p2.is_stunned() and game._duel.is_empty() and is_equal_approx(Engine.time_scale, Game.STUN_TIME_SCALE),
+		"Duel fini, J2 encore sonné : le ralenti du sonné reprend et le duel est bien terminé (vitesse %.2f)" % Engine.time_scale)
+	game._on_life_lost(p1)
+	check(is_equal_approx(Engine.time_scale, Game.STUN_TIME_SCALE), "Duel fini : il n'arrête plus le ralenti du sonné")
+	game._start_duel(p1, p2)
+	await step(1)
+	p2.recover()
+	await step(1)
+	check(game._time_engine._time_left > 4.0, "Sonné pendant un micro-duel : la fin du coup qui sonne n'arrête pas le duel")
 	game._time_engine.stop(true)
+	game._duel.clear()
+	await step(1)
+	# Une vie perdue : l'écran tremble, puis se calme
+	p2._stun_timer = Fighter.STUN_TIME
+	p2._invincible_timer = 0.0
+	p1.position = Vector2(p2.position.x - 60, p2.position.y); p1.velocity = Vector2.ZERO
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	await get_tree().process_frame
+	check(p2.lives == 2 and game._shake_left > 0.0 and game._camera.offset.length() > 0.0 and game._stun_focus.is_empty(),
+		"Vie perdue : l'écran tremble (%.1f px), pas de zoom" % game._camera.offset.length())
+	await shot("16_vie_perdue")
+	await step(40)
+	check(game._shake_left == 0.0 and game._camera.offset == Vector2.ZERO, "Vie perdue : l'écran arrête de trembler")
+	p1.position = Vector2(640, game.map.blast_zone.end.y + 200)
+	await step(1)
+	check(p1.lives == 2 and game._shake_left > 0.0, "Chute : l'écran tremble aussi")
+	await step(40)
 	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}]]
 	await new_game()
 	GameSetup.player_devices = []
@@ -1493,11 +1547,15 @@ func _ready() -> void:
 		fi.input_source = Scripted.new(func(s, f): pass)
 	await step(30)
 	f3[0].position = Vector2(600, 540); f3[1].position = Vector2(660, 540); f3[2].position = Vector2(1200, 540)
-	f3[1]._stun_timer = Fighter.STUN_TIME
 	light_now(f3[0], Vector2.RIGHT)
 	await step(1)
-	check(f3[1].lives == 2 and game._hit_focus.is_empty() and is_equal_approx(Engine.time_scale, 1.0),
-		"Coup à 3 joueurs : pas de zoom ni de ralenti")
+	check(f3[1].is_stunned() and game._stun_focus.is_empty() and is_equal_approx(Engine.time_scale, 1.0),
+		"Joueur sonné à 3 joueurs : pas de zoom ni de ralenti")
+	f3[1]._invincible_timer = 0.0
+	f3[0].position = Vector2(f3[1].position.x - 60, f3[1].position.y); f3[0].velocity = Vector2.ZERO
+	light_now(f3[0], Vector2.RIGHT)
+	await step(1)
+	check(f3[1].lives == 2 and game._shake_left > 0.0, "Vie perdue à 3 joueurs : l'écran tremble")
 
 	# 15) Jeu en ligne (sans réseau ici : on joue l'hôte puis un copain, et on passe les messages à la main)
 	# 15a) Les touches d'un copain arrivent par le réseau : un appui n'est jamais perdu
@@ -1552,11 +1610,12 @@ func _ready() -> void:
 		"En ligne (copain) : les joueurs sont affichés exactement comme chez l'hôte")
 	check(g1.is_charging_heavy() and g2.shield == 7 and g2.lives == 2 and g2.is_stunned() and game.gauge.points == 6.0,
 		"En ligne (copain) : charge de la lourde, bouclier, vies, état sonné et jauge de contre reçus")
+	check(game._shake_left > 0.0, "En ligne (copain) : une vie perdue chez l'hôte fait trembler l'écran ici aussi")
 	var hit_state := host_state.duplicate()
 	hit_state[4] = [0, 1]
 	game.receive_online_state(hit_state)
 	await step(1)
-	check(game._hit_focus.size() == 2, "En ligne (copain) : le zoom sur un coup qui touche est reçu de l'hôte")
+	check(game._stun_focus.size() == 2, "En ligne (copain) : le zoom sur un joueur sonné est reçu de l'hôte")
 	game.spawn_online_effect({"k": "marque", "p": Vector2(600, 500), "c": Color.WHITE})
 	game.spawn_online_effect({"k": "explosion", "p": Vector2(600, 500), "c": Color.ORANGE})
 	var effects := 0

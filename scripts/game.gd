@@ -34,13 +34,15 @@ const SHIELD_BREAK_TIME_SCALE := 0.3        ## bouclier cassé : ralenti (3 fois
 const SHIELD_BREAK_SLOWMO := 1.2            ## ... pendant 1,2 vraie seconde
 const PARRY_COLOR := Color(0.55, 0.85, 1.0)  ## la marque d'un blocage parfait
 
-# --- Coup qui touche en 1 contre 1 : petit zoom et léger ralenti pour bien sentir l'impact ---
-const HIT_TIME_SCALE := 0.6                ## le jeu va un peu moins vite...
-const HIT_SLOWMO := 0.5                    ## ... pendant une demi-seconde, et revient en douceur à la normale
-const HIT_ZOOM_TIME := 0.7                 ## la caméra serre les deux joueurs pendant ce temps (vraies secondes)
-const HIT_CAMERA_MARGIN := Vector2(380, 260)
-const HIT_ZOOM_MAX := 1.8
-const HIT_CAMERA_SMOOTHING := 12.0         ## la caméra fonce sur l'impact
+# --- 1 contre 1 : tant qu'un joueur est sonné, la caméra serre les deux joueurs et le temps ralentit un peu ---
+const STUN_TIME_SCALE := 0.75              ## le jeu va un peu moins vite (2 s sonné = 2,7 vraies secondes)
+const STUN_CAMERA_MARGIN := Vector2(380, 260)
+const STUN_ZOOM_MAX := 1.8
+const STUN_CAMERA_SMOOTHING := 12.0        ## la caméra fonce sur l'impact
+
+# --- Une vie perdue (coup ou chute) : l'écran tremble ---
+const SHAKE_TIME := 0.35                   ## en vraies secondes
+const SHAKE_STRENGTH := 12.0               ## pixels à l'écran au début, puis le tremblement se calme
 
 const ONLINE_HEADER := 6                   ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
@@ -52,8 +54,11 @@ var _match_over := false
 var _match_over_time := 0.0
 var _time_engine := TimeEngine.new()
 var _duel: Array[Fighter] = []             ## les deux joueurs du micro-duel en cours
-var _hit_focus: Array[Fighter] = []        ## 1 contre 1 : les deux joueurs du coup qui vient de toucher
-var _hit_focus_left := 0.0
+var _duel_slowmo := -1                     ## le ralenti du micro-duel en cours (voir TimeEngine.play())
+var _stun_focus: Array[Fighter] = []       ## 1 contre 1 : celui qui a sonné et le joueur sonné
+var _stun_slowmo := -1                     ## le ralenti lancé pour le joueur sonné (voir TimeEngine.play())
+var _shake_left := 0.0                     ## l'écran tremble encore pendant ce temps (vraies secondes)
+var _lives_seen: Array[int] = []           ## les vies de chacun à la frame d'avant (pour voir une vie perdue)
 var gauge := CounterGauge.new()            ## la jauge de contre, une seule pour tous les joueurs
 var online := false                        ## partie en ligne
 var _online_state: Array = []              ## (copain) le dernier état du jeu reçu de l'hôte
@@ -106,18 +111,16 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	var real_delta := delta / Engine.time_scale  # la caméra garde sa vitesse pendant un ralenti
-	if not _is_online_guest():
-		if not _time_engine.is_active():
-			_duel.clear()
-		_hit_focus_left -= real_delta
-		if _hit_focus_left <= 0.0:
-			_hit_focus.clear()
+	if not _is_online_guest() and not _time_engine.is_playing(_duel_slowmo):
+		_duel.clear()  # le ralenti du duel est fini (ou un autre ralenti a pris sa place) : plus de duel
 	_update_camera(real_delta, false)
+	_update_shake(real_delta)
 
 
 func _physics_process(delta: float) -> void:
 	if _is_online_guest():
 		_guest_tick()
+		_shake_on_life_loss()
 		return
 	if _match_over:
 		_match_over_time += delta
@@ -157,6 +160,8 @@ func _physics_process(delta: float) -> void:
 	_resolve_clashes()
 	_resolve_hits()
 	_check_blast_zone()
+	_update_stun_slowmo()
+	_shake_on_life_loss()
 	_check_end_of_match()
 	if online:
 		Online.send_state(online_state())
@@ -187,9 +192,9 @@ func _guest_tick() -> void:
 	_duel.clear()
 	for index in state[1]:
 		_duel.append(fighters[index])
-	_hit_focus.clear()
+	_stun_focus.clear()
 	for index in state[4]:
-		_hit_focus.append(fighters[index])
+		_stun_focus.append(fighters[index])
 	gauge.flash_timer -= get_physics_process_delta_time()
 	gauge.set_points(state[5])
 	if state[2] != "" and not _match_over:
@@ -198,20 +203,20 @@ func _guest_tick() -> void:
 		fighters[i].apply_net_state(state[ONLINE_HEADER + i])
 
 
-## (hôte) L'état du jeu envoyé aux copains : vitesse du temps, duel, fin de partie, zoom sur un coup,
-## jauge de contre, puis chaque joueur.
+## (hôte) L'état du jeu envoyé aux copains : vitesse du temps, duel, fin de partie, zoom sur un joueur
+## sonné, jauge de contre, puis chaque joueur.
 func online_state() -> Array:
 	var duel := []
 	for fighter in _duel:
 		duel.append(fighters.find(fighter))
-	var hit_focus := []
-	for fighter in _hit_focus:
-		hit_focus.append(fighters.find(fighter))
+	var stun_focus := []
+	for fighter in _stun_focus:
+		stun_focus.append(fighters.find(fighter))
 	var winner := -1
 	for i in fighters.size():
 		if _match_over and not fighters[i].eliminated:
 			winner = i
-	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, hit_focus, gauge.points]
+	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, stun_focus, gauge.points]
 	for fighter in fighters:
 		state.append(fighter.net_state())
 	return state
@@ -304,14 +309,14 @@ func swap_devices(a: int, b: int) -> void:
 ## Cadre tous les joueurs encore en jeu : centre au milieu d'eux, zoom selon leur écart.
 ## Pendant un micro-duel, la caméra zoome sur les deux duellistes. À 3 ou 4 joueurs, elle garde
 ## tout le monde à l'écran (personne ne doit sortir du cadre) et se resserre juste un peu.
-## En 1 contre 1, un coup qui touche fait zoomer la caméra vite sur les deux joueurs un court instant.
+## En 1 contre 1, tant qu'un joueur est sonné, la caméra serre vite les deux joueurs.
 func _update_camera(delta: float, instant: bool) -> void:
 	var box := Rect2()
 	var first := true
 	var one_on_one := _alive_count() <= 2
-	var hit_zoom := not _hit_focus.is_empty() and one_on_one
-	var duel_zoom := not hit_zoom and not _duel.is_empty() and one_on_one
-	var framed := _hit_focus if hit_zoom else _duel if duel_zoom else fighters
+	var stun_zoom := not _stun_focus.is_empty() and one_on_one
+	var duel_zoom := not stun_zoom and not _duel.is_empty() and one_on_one
+	var framed := _stun_focus if stun_zoom else _duel if duel_zoom else fighters
 	for fighter in framed:
 		if fighter.eliminated:
 			continue
@@ -326,10 +331,10 @@ func _update_camera(delta: float, instant: bool) -> void:
 	var margin := CAMERA_MARGIN
 	var zoom_max := CAMERA_ZOOM_MAX
 	var smoothing := CAMERA_SMOOTHING
-	if hit_zoom:
-		margin = HIT_CAMERA_MARGIN
-		zoom_max = HIT_ZOOM_MAX
-		smoothing = HIT_CAMERA_SMOOTHING
+	if stun_zoom:
+		margin = STUN_CAMERA_MARGIN
+		zoom_max = STUN_ZOOM_MAX
+		smoothing = STUN_CAMERA_SMOOTHING
 	elif duel_zoom:
 		margin = DUEL_CAMERA_MARGIN
 		zoom_max = DUEL_ZOOM_MAX
@@ -345,6 +350,24 @@ func _update_camera(delta: float, instant: bool) -> void:
 	var weight := 1.0 - exp(-smoothing * delta)
 	_camera.position = _camera.position.lerp(target_position, weight)
 	_camera.zoom = _camera.zoom.lerp(Vector2.ONE * target_zoom, weight)
+
+
+## Une vie perdue (coup ou chute) fait trembler l'écran. On compare les vies de chacun d'une frame
+## à l'autre : ça marche aussi chez un copain en ligne, qui reçoit les vies de l'hôte.
+func _shake_on_life_loss() -> void:
+	for i in mini(fighters.size(), _lives_seen.size()):
+		if fighters[i].lives < _lives_seen[i]:
+			_shake_left = SHAKE_TIME
+	_lives_seen.clear()
+	for fighter in fighters:
+		_lives_seen.append(fighter.lives)
+
+
+## L'écran tremble un court instant, de moins en moins fort.
+func _update_shake(delta: float) -> void:
+	_shake_left = maxf(_shake_left - delta, 0.0)
+	var strength := SHAKE_STRENGTH * _shake_left / SHAKE_TIME
+	_camera.offset = Vector2(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0)) * strength / _camera.zoom.x
 
 
 ## Nombre de joueurs encore en jeu (pas éliminés).
@@ -484,7 +507,7 @@ func _push_dir(a: Fighter, b: Fighter) -> Vector2:
 ## Micro-duel : la caméra serre les deux joueurs et le jeu ralentit pendant quelques secondes.
 func _start_duel(a: Fighter, b: Fighter) -> void:
 	_duel = [a, b]
-	_time_engine.play(DUEL_TIME_SCALE, DUEL_DURATION)
+	_duel_slowmo = _time_engine.play(DUEL_TIME_SCALE, DUEL_DURATION)
 
 
 ## Un duelliste touché ou tombé : le duel est tranché, le temps revient à la normale.
@@ -573,8 +596,9 @@ func _resolve_hits() -> void:
 			_clash(attacker, victim, (attacker.global_position + victim.global_position) / 2.0, victim)
 			continue
 		attacker.mark_attack_hit()
-		if victim.take_hit(hit.dir, hit.knockback):
-			_hit_close_up(attacker, victim)
+		victim.take_hit(hit.dir, hit.knockback)
+		if victim.is_stunned() and _alive_count() == 2:
+			_stun_focus = [attacker, victim]
 
 
 ## Le coup de l'attaquant arrive pendant que la victime arme (ou donne) une attaque légère vers lui :
@@ -583,14 +607,20 @@ func _counters(victim: Fighter, attacker: Fighter) -> bool:
 	return victim.is_light_attack_under_way() and not _points_away(victim, attacker)
 
 
-## En 1 contre 1, un coup qui retire une vie : la caméra zoome vite sur les deux joueurs et le temps
-## ralentit un tout petit peu, pour bien sentir que le coup a porté.
-func _hit_close_up(attacker: Fighter, victim: Fighter) -> void:
-	if victim.eliminated or _alive_count() != 2:
+## En 1 contre 1, tant qu'un joueur est sonné : la caméra serre les deux joueurs et le temps ralentit
+## un peu, le temps de voir s'il va contrer ou se faire sortir. Ça s'arrête quand il n'est plus
+## sonné (fin du temps, contre, blocage parfait, ou vie perdue). Un ralenti plus fort (micro-duel,
+## bouclier cassé) passe avant, et celui-ci reprend après si le joueur est encore sonné.
+func _update_stun_slowmo() -> void:
+	if _stun_focus.is_empty() or not (_stun_focus[0].is_stunned() or _stun_focus[1].is_stunned()) or _alive_count() != 2:
+		_stun_focus.clear()
+		if _time_engine.is_playing(_stun_slowmo):
+			_time_engine.stop()
 		return
-	_hit_focus = [attacker, victim]
-	_hit_focus_left = HIT_ZOOM_TIME
-	_time_engine.play(HIT_TIME_SCALE, HIT_SLOWMO, false)  # un contre juste après ne le prolonge pas
+	# Pas de ralenti en cours, ou le nôtre était en train de s'arrêter (resonné juste après) : il (re)part.
+	if not _time_engine.is_active() or (_time_engine.is_playing(_stun_slowmo) and _time_engine.is_stopping()):
+		# Assez long pour toute la durée sonné ; un contre ne le relance pas, il s'arrête juste avant.
+		_stun_slowmo = _time_engine.play(STUN_TIME_SCALE, Fighter.STUN_TIME / STUN_TIME_SCALE + 0.5, false)
 
 
 ## Le coup tombe sur un bouclier : personne ne perd de vie, l'attaquant est repoussé mais peut
