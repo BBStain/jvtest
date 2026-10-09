@@ -1494,6 +1494,13 @@ func _ready() -> void:
 	p2.recover()
 	await step(1)
 	check(game._stun_focus.is_empty() and game._time_engine._time_left <= TimeEngine.RAMP_TIME, "Sauvé (contre ou blocage parfait) : le ralenti s'arrête")
+	p2._invincible_timer = 0.0
+	p1.position = Vector2(p2.position.x - 60, p2.position.y); p1.velocity = Vector2.ZERO
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	check(p2.is_stunned() and is_equal_approx(Engine.time_scale, Game.STUN_TIME_SCALE) and game._time_engine._time_left > TimeEngine.RAMP_TIME,
+		"Resonné pendant le retour à la normale : le ralenti repart tout de suite (vitesse %.2f)" % Engine.time_scale)
+	p2.recover()
 	await step(40)
 	# Un micro-duel pendant qu'un joueur est sonné : le duel garde son ralenti, celui du sonné ne l'écrase pas
 	p1.position = Vector2(p2.position.x - 60, p2.position.y); p1.velocity = Vector2.ZERO
@@ -1502,6 +1509,14 @@ func _ready() -> void:
 	game._start_duel(p1, p2)
 	await step(1)
 	check(p2.is_stunned() and is_equal_approx(Engine.time_scale, Game.DUEL_TIME_SCALE), "Sonné pendant un micro-duel : le ralenti du duel reste")
+	game._time_engine._time_left = 0.05  # le duel se termine alors que J2 est encore sonné
+	await step(6)
+	check(p2.is_stunned() and game._duel.is_empty() and is_equal_approx(Engine.time_scale, Game.STUN_TIME_SCALE),
+		"Duel fini, J2 encore sonné : le ralenti du sonné reprend et le duel est bien terminé (vitesse %.2f)" % Engine.time_scale)
+	game._on_life_lost(p1)
+	check(is_equal_approx(Engine.time_scale, Game.STUN_TIME_SCALE), "Duel fini : il n'arrête plus le ralenti du sonné")
+	game._start_duel(p1, p2)
+	await step(1)
 	p2.recover()
 	await step(1)
 	check(game._time_engine._time_left > 4.0, "Sonné pendant un micro-duel : la fin du coup qui sonne n'arrête pas le duel")

@@ -54,6 +54,7 @@ var _match_over := false
 var _match_over_time := 0.0
 var _time_engine := TimeEngine.new()
 var _duel: Array[Fighter] = []             ## les deux joueurs du micro-duel en cours
+var _duel_slowmo := -1                     ## le ralenti du micro-duel en cours (voir TimeEngine.play())
 var _stun_focus: Array[Fighter] = []       ## 1 contre 1 : celui qui a sonné et le joueur sonné
 var _stun_slowmo := -1                     ## le ralenti lancé pour le joueur sonné (voir TimeEngine.play())
 var _shake_left := 0.0                     ## l'écran tremble encore pendant ce temps (vraies secondes)
@@ -110,8 +111,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	var real_delta := delta / Engine.time_scale  # la caméra garde sa vitesse pendant un ralenti
-	if not _is_online_guest() and not _time_engine.is_active():
-		_duel.clear()
+	if not _is_online_guest() and not _time_engine.is_playing(_duel_slowmo):
+		_duel.clear()  # le ralenti du duel est fini (ou un autre ralenti a pris sa place) : plus de duel
 	_update_camera(real_delta, false)
 	_update_shake(real_delta)
 
@@ -506,7 +507,7 @@ func _push_dir(a: Fighter, b: Fighter) -> Vector2:
 ## Micro-duel : la caméra serre les deux joueurs et le jeu ralentit pendant quelques secondes.
 func _start_duel(a: Fighter, b: Fighter) -> void:
 	_duel = [a, b]
-	_time_engine.play(DUEL_TIME_SCALE, DUEL_DURATION)
+	_duel_slowmo = _time_engine.play(DUEL_TIME_SCALE, DUEL_DURATION)
 
 
 ## Un duelliste touché ou tombé : le duel est tranché, le temps revient à la normale.
@@ -616,7 +617,8 @@ func _update_stun_slowmo() -> void:
 		if _time_engine.is_playing(_stun_slowmo):
 			_time_engine.stop()
 		return
-	if not _time_engine.is_active():
+	# Pas de ralenti en cours, ou le nôtre était en train de s'arrêter (resonné juste après) : il (re)part.
+	if not _time_engine.is_active() or (_time_engine.is_playing(_stun_slowmo) and _time_engine.is_stopping()):
 		# Assez long pour toute la durée sonné ; un contre ne le relance pas, il s'arrête juste avant.
 		_stun_slowmo = _time_engine.play(STUN_TIME_SCALE, Fighter.STUN_TIME / STUN_TIME_SCALE + 0.5, false)
 

@@ -66,6 +66,11 @@ func is_playing(effect: int) -> bool:
 	return is_active() and effect == _effect
 
 
+## stop() a été demandé : l'effet en cours revient à la vitesse normale.
+func is_stopping() -> bool:
+	return _stopping
+
+
 func _process(delta: float) -> void:
 	if _time_left <= 0.0 or get_tree().paused:
 		return  # pendant la pause, le ralenti attend
