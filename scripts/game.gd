@@ -44,7 +44,7 @@ const STUN_CAMERA_SMOOTHING := 12.0        ## la caméra fonce sur l'impact
 const SHAKE_TIME := 0.35                   ## en vraies secondes
 const SHAKE_STRENGTH := 12.0               ## pixels à l'écran au début, puis le tremblement se calme
 
-const ONLINE_HEADER := 7                   ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
+const ONLINE_HEADER := 8                   ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
 var fighters: Array[Fighter] = []
 var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
@@ -64,6 +64,7 @@ var online := false                        ## partie en ligne
 var _online_state: Array = []              ## (copain) le dernier état du jeu reçu de l'hôte
 
 var map: GameMap
+var projectiles: Array[Projectile] = []    ## les lances lancées (en vol, qui retombent ou plantées)
 @onready var _end_screen: Control = $UI/EndScreen
 @onready var _winner_label: Label = $UI/EndScreen/Winner
 @onready var _camera: Camera2D = $Camera
@@ -87,6 +88,7 @@ func _ready() -> void:
 		fighter.name = "Joueur%d" % (i + 1)
 		fighter.player_index = i
 		fighter.stats = GameSetup.character_for(i)
+		fighter.weapon = GameSetup.weapon_for(i)
 		fighter.max_lives = GameSetup.lives
 		fighter.lives = GameSetup.lives
 		fighter.color = PLAYER_COLORS[i]
@@ -100,6 +102,7 @@ func _ready() -> void:
 		fighter.facing = 1.0 if fighter.position.x < map.respawn_position().x else -1.0
 		add_child(fighter)
 		fighter.life_lost.connect(_on_life_lost)
+		fighter.weapon_thrown.connect(_on_weapon_thrown)
 		fighter.show_lives()
 		fighters.append(fighter)
 	var gauge_bar := CounterGaugeBar.new()
@@ -159,6 +162,7 @@ func _physics_process(delta: float) -> void:
 
 	_resolve_clashes()
 	_resolve_hits()
+	_resolve_projectiles()
 	_check_blast_zone()
 	_update_stun_slowmo()
 	_shake_on_life_loss()
@@ -198,6 +202,7 @@ func _guest_tick() -> void:
 	gauge.flash_timer -= get_physics_process_delta_time()
 	gauge.set_points(state[5])
 	map.apply_moving_state(state[6])
+	_apply_projectiles(state[7])
 	if state[2] != "" and not _match_over:
 		_show_end(state[2], fighters[state[3]].color if state[3] >= 0 else Color.WHITE)
 	for i in mini(fighters.size(), state.size() - ONLINE_HEADER):
@@ -205,7 +210,7 @@ func _guest_tick() -> void:
 
 
 ## (hôte) L'état du jeu envoyé aux copains : vitesse du temps, duel, fin de partie, zoom sur un joueur
-## sonné, jauge de contre, plateformes qui bougent, puis chaque joueur.
+## sonné, jauge de contre, plateformes qui bougent, lances lancées, puis chaque joueur.
 func online_state() -> Array:
 	var duel := []
 	for fighter in _duel:
@@ -218,7 +223,7 @@ func online_state() -> Array:
 		if _match_over and not fighters[i].eliminated:
 			winner = i
 	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, stun_focus, gauge.points,
-		map.moving_state()]
+		map.moving_state(), projectiles.map(func(p: Projectile) -> Array: return p.net_state())]
 	for fighter in fighters:
 		state.append(fighter.net_state())
 	return state
@@ -672,6 +677,7 @@ func _check_blast_zone() -> void:
 	for fighter in fighters:
 		if not fighter.eliminated and not map.blast_zone.has_point(fighter.global_position):
 			fighter.fall_out(_feet_to_center(map.respawn_position(), fighter.stats))
+			_return_weapon(fighter)  # on réapparaît avec son arme
 
 
 func _check_end_of_match() -> void:
@@ -696,3 +702,84 @@ func _show_end(text: String, color: Color) -> void:
 	_winner_label.text = text
 	_winner_label.add_theme_color_override("font_color", color)
 	_end_screen.visible = true
+
+
+# --- Lances lancées ---
+
+## Un joueur lance sa lance (attaque lourde de la lance) : elle part de sa main vers l'adversaire.
+func _on_weapon_thrown(fighter: Fighter, direction: Vector2, speed: float) -> void:
+	var spear := Projectile.new()
+	spear.owner_index = fighters.find(fighter)
+	spear.position = fighter.global_position + direction * 20.0
+	spear.velocity = direction * speed + Vector2(0.0, -Projectile.THROW_LIFT)
+	spear.rotation = direction.angle()
+	spear.knockback = fighter.attack_knockback()
+	spear.color = fighter.weapon.color
+	_add_projectile(spear)
+
+
+func _add_projectile(projectile: Projectile) -> void:
+	projectiles.append(projectile)
+	add_child(projectile)
+
+
+func _remove_projectile(projectile: Projectile) -> void:
+	projectiles.erase(projectile)
+	projectile.queue_free()
+
+
+## Une lance en vol touche le premier joueur sur son chemin (pas son lanceur) : comme un coup,
+## il est sonné ou perd une vie ; un bouclier l'arrête (et craque) ; un blocage parfait la renvoie
+## au sol. Une lance posée est ramassée par son lanceur quand il passe dessus.
+## Une lance sortie de la map revient tout de suite à son lanceur.
+func _resolve_projectiles() -> void:
+	for projectile: Projectile in projectiles.duplicate():
+		var thrower: Fighter = fighters[projectile.owner_index]
+		if not map.blast_zone.has_point(projectile.position):
+			_return_weapon(thrower)
+			continue
+		if projectile.state != Projectile.State.FLYING:
+			if not thrower.eliminated and thrower.body_rect().grow(12.0).has_point(projectile.position):
+				_return_weapon(thrower)
+			continue
+		for victim in fighters:
+			if victim == thrower or not victim.can_be_hit() or not _segment_hits_rect(
+					projectile.tail(), projectile.tip(), Projectile.RADIUS, victim.body_rect()):
+				continue
+			var dir := projectile.velocity.normalized()
+			if victim.is_parrying():
+				victim.recover()
+				gauge.add_counter(false)
+				_spawn_clash_mark(projectile.tip(), false, PARRY_COLOR)
+			elif victim.is_blocking() and not victim.is_stunned():
+				var push := Vector2(signf(dir.x) if dir.x != 0.0 else 1.0, 0.0)
+				if victim.absorb_hit(push, thrower.shield_damage(true)):
+					_spawn_clash_mark(victim.global_position, true)
+					victim.shield_burst(push, true)
+			else:
+				victim.take_hit(dir, projectile.knockback)
+				if victim.is_stunned() and _alive_count() == 2:
+					_stun_focus = [thrower, victim]
+			projectile.drop()
+			break
+
+
+## La lance revient à son lanceur (ramassée, sortie de la map, ou il a réapparu).
+func _return_weapon(fighter: Fighter) -> void:
+	var index := fighters.find(fighter)
+	for projectile: Projectile in projectiles.duplicate():
+		if projectile.owner_index == index:
+			_remove_projectile(projectile)
+	fighter.get_weapon_back()
+
+
+## (copain) Les lances reçues de l'hôte : on en crée ou on en retire pour avoir les mêmes.
+func _apply_projectiles(list: Array) -> void:
+	while projectiles.size() > list.size():
+		_remove_projectile(projectiles[-1])
+	while projectiles.size() < list.size():
+		var projectile := Projectile.new()
+		projectile.simulate = false
+		_add_projectile(projectile)
+	for i in list.size():
+		projectiles[i].apply_net_state(list[i])

@@ -28,7 +28,7 @@ var code := ""                      ## le code du salon
 var is_host := false
 var my_id := 0                      ## mon numéro réseau (1 = l'hôte)
 var message := ""                   ## ce qu'il faut afficher (connexion en cours, erreur...)
-var players: Array = []             ## le salon, dans l'ordre J1, J2... : {"id", "character", "ready"}
+var players: Array = []             ## le salon, dans l'ordre J1, J2... : {"id", "character", "weapon", "ready"}
 var map_index := 0
 var local_device := {}              ## la manette ou le côté du clavier de ce joueur
 var game: Node                      ## la partie en cours (Game), qui reçoit touches et état
@@ -229,7 +229,7 @@ func _on_welcome(id: int) -> void:
 		multiplayer.multiplayer_peer = _peer
 		status = Status.LOBBY
 		message = ""
-		players = [{"id": 1, "character": 0, "ready": false}]
+		players = [{"id": 1, "character": 0, "weapon": 0, "ready": false}]
 		print("En ligne : salon %s créé" % code)
 	else:
 		_peer.create_client(id)
@@ -318,7 +318,7 @@ func _on_signal(from: int, data) -> void:
 
 func _on_peer_connected(id: int) -> void:
 	if is_host and status == Status.LOBBY and index_of(id) == -1 and players.size() < MAX_PLAYERS:
-		players.append({"id": id, "character": 0, "ready": false})
+		players.append({"id": id, "character": 0, "weapon": 0, "ready": false})
 		_share_lobby()
 
 
@@ -351,32 +351,37 @@ func _on_host_lost() -> void:
 
 # --- Le salon : persos, prêts, map ---
 
-## Mon choix de perso et si je suis prêt (envoyé à l'hôte, qui le transmet à tous).
-func choose(character: int, ready: bool) -> void:
+## Mon choix de perso (et d'arme : -1 = je garde la mienne) et si je suis prêt
+## (envoyé à l'hôte, qui le transmet à tous).
+func choose(character: int, ready: bool, weapon := -1) -> void:
+	var me := my_index()
+	if weapon < 0:
+		weapon = players[me].get("weapon", 0) if me != -1 else 0
 	if is_host:
-		_apply_choice(1, character, ready)
+		_apply_choice(1, character, ready, weapon)
 	else:
 		# On l'affiche tout de suite, sans attendre que l'hôte renvoie le salon : sinon un appui
 		# rapide (droite puis A) repartirait de l'ancien perso.
-		var me := my_index()
 		if me != -1:
 			players[me].character = character
+			players[me].weapon = weapon
 			players[me].ready = ready
 			changed.emit()
-		_choice_to_host.rpc_id(1, character, ready)
+		_choice_to_host.rpc_id(1, character, ready, weapon)
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func _choice_to_host(character: int, ready: bool) -> void:
+func _choice_to_host(character: int, ready: bool, weapon: int) -> void:
 	if is_host:
-		_apply_choice(multiplayer.get_remote_sender_id(), character, ready)
+		_apply_choice(multiplayer.get_remote_sender_id(), character, ready, weapon)
 
 
-func _apply_choice(id: int, character: int, ready: bool) -> void:
+func _apply_choice(id: int, character: int, ready: bool, weapon := 0) -> void:
 	var index := index_of(id)
 	if index == -1:
 		return
 	players[index].character = clampi(character, 0, GameSetup.CHARACTERS.size() - 1)
+	players[index].weapon = clampi(weapon, 0, GameSetup.WEAPONS.size() - 1)
 	players[index].ready = ready
 	_share_lobby()
 
@@ -421,9 +426,11 @@ func _start_from_host(final_players: Array, map: int, lives: int) -> void:
 	status = Status.PLAYING
 	GameSetup.player_devices = []
 	GameSetup.player_characters = []
+	GameSetup.player_weapons = []
 	for i in players.size():
 		GameSetup.player_devices.append([local_device] if players[i].id == my_id else [])
 		GameSetup.player_characters.append(GameSetup.CHARACTERS[players[i].character])
+		GameSetup.player_weapons.append(GameSetup.WEAPONS[players[i].get("weapon", 0)])
 	GameSetup.map_path = GameSetup.MAPS[map_index]
 	GameSetup.lives = lives
 	get_tree().paused = false

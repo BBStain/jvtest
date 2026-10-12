@@ -11,6 +11,7 @@ extends CharacterBody2D
 ## Les constantes ci-dessous sont les règles communes à tous les personnages.
 
 signal life_lost(fighter: Fighter)
+signal weapon_thrown(fighter: Fighter, direction: Vector2, speed: float)  ## lance : game.gd crée la lance qui vole
 
 const PLATFORM_LAYER := 3  ## numéro de la couche "plateformes_traversables"
 
@@ -53,6 +54,14 @@ const HEAVY_COUNTERED_COOLDOWN := 1.0   ## attaque lourde contrée par une lég�
 const HEAVY_COUNTER_PUSH := 750.0       ## ... et les deux sont repoussés plus loin
 const HEAVY_CLASH_PUSH := 1150.0        ## deux attaques lourdes qui se percutent : micro-explosion, éjectés fort
 const HEAVY_CLASH_LIFT := 320.0         ## ... et un peu soulevés
+
+# --- Armes (voir weapon_stats.gd) ---
+const KATANA_DASH_END_KEEP := 0.4       ## fin du dash du katana : part de la vitesse gardée
+const KATANA_DASH_REACH := 0.8          ## la lame dépasse du perso de 0,8 fois la longueur de l'arme
+const SLAM_WAVE_TIME := 0.12            ## marteau : durée de l'onde de choc après l'arc
+const SLAM_WAVE_REACH := 150.0          ## ... jusqu'où elle va de chaque côté (x1,6 à pleine charge)
+const SLAM_WAVE_RADIUS := 14.0          ## ... sa hauteur (de chaque côté du sol)
+const THROW_CHARGE_SPEED := 1.5         ## lance / dash du katana : à pleine charge, 1,5 fois plus vite
 
 # --- Blocage (B) : un bouclier qui craque peu à peu (ses points sont dans les stats du perso) ---
 const SHIELD_REGEN_TIME := 2.0          ## 1 point regagné toutes les 2 s quand on ne bloque pas
@@ -101,11 +110,20 @@ const NET_VARS := [
 	"stamina", "_exhausted", "_sprinting", "_stamina_show_timer",
 	"shield", "shield_broken", "_blocking", "_shield_broken_timer", "_shield_flash_timer",
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
-	"_stun_timer", "_block_hold_time",
+	"_stun_timer", "_block_hold_time", "weapon_away",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
-var stats: CharacterStats = CharacterStats.new()  ## le personnage joué (choisi par game.gd)
+var stats: CharacterStats = CharacterStats.new()  ## le personnage joué, avec son arme en main (choisi par game.gd)
+var weapon: WeaponStats = WeaponStats.new()       ## l'arme choisie (choisie par game.gd ; mains nues par défaut)
+## Lance lancée et pas encore ramassée : on se bat à mains nues en attendant.
+var weapon_away := false:
+	set(value):
+		weapon_away = value
+		if _armed_stats != null:
+			stats = _bare_stats if value else _armed_stats
+var _bare_stats: CharacterStats                   ## le perso sans arme
+var _armed_stats: CharacterStats                  ## le perso avec son arme
 var player_index := 0
 var color := Color.WHITE
 var input_source: InputSource
@@ -170,6 +188,9 @@ var _blink_clock := 0.0
 
 ## Le corps est créé à l'entrée dans la partie, une fois le personnage (stats) choisi.
 func _ready() -> void:
+	_bare_stats = stats
+	_armed_stats = weapon.apply_to(stats)
+	stats = _bare_stats if weapon_away else _armed_stats
 	_air_jumps_left = stats.air_jumps
 	_air_dashes_left = stats.air_dashes
 	stamina = stats.stamina_max
@@ -244,6 +265,8 @@ func physics_tick(input: InputState, delta: float) -> void:
 
 	if is_dashing():
 		_tick_dash(delta)
+	elif is_katana_dashing():
+		velocity = _attack_dir * weapon.heavy_speed * lerpf(1.0, THROW_CHARGE_SPEED, _heavy_charge) * _move_mult()
 	elif is_heavy_swinging():
 		velocity = Vector2.ZERO  # immobilisé pendant la frappe lourde
 	else:
@@ -502,10 +525,44 @@ func _tick_attack(input: InputState, delta: float) -> void:
 			_attack_time = stats.heavy_startup
 			_attack_cooldown_timer = _cooldown(true)
 			velocity = Vector2.ZERO  # la frappe commence : on s'arrête net
+			if heavy_kind() == WeaponStats.Heavy.THROW:
+				_throw_weapon()
 		return
 	_attack_time += delta * _attack_speed()
 	if _attack_time >= _attack_startup() + _attack_active():
+		if is_katana_dashing():
+			velocity *= KATANA_DASH_END_KEEP
 		_attack_time = -1.0
+
+
+## Lance : elle part vers l'adversaire, et on continue à mains nues jusqu'à la ramasser.
+func _throw_weapon() -> void:
+	var speed := weapon.heavy_speed * lerpf(1.0, THROW_CHARGE_SPEED, _heavy_charge)
+	_cancel_attack()
+	weapon_away = true
+	weapon_thrown.emit(self, _attack_dir, speed)
+
+
+## On ramasse sa lance (ou elle revient quand on réapparaît).
+func get_weapon_back() -> void:
+	weapon_away = false
+
+
+## Ce que fait l'attaque lourde avec l'arme en main (l'arc habituel à mains nues).
+func heavy_kind() -> WeaponStats.Heavy:
+	return WeaponStats.Heavy.SWING if weapon_away else weapon.heavy
+
+
+## Katana : en plein dash tranchant (on traverse l'adversaire, on ne peut pas être touché).
+func is_katana_dashing() -> bool:
+	return heavy_kind() == WeaponStats.Heavy.DASH and is_heavy_swinging() \
+		and _attack_time < stats.heavy_startup + stats.heavy_active
+
+
+## Marteau : l'onde de choc au sol, juste après l'arc (seulement si on est au sol).
+func _is_slam_wave() -> bool:
+	return heavy_kind() == WeaponStats.Heavy.SLAM and is_heavy_swinging() \
+		and _attack_time >= stats.heavy_startup + stats.heavy_active
 
 
 func _attack_startup() -> float:
@@ -513,6 +570,8 @@ func _attack_startup() -> float:
 
 
 func _attack_active() -> float:
+	if _attack_heavy and heavy_kind() == WeaponStats.Heavy.SLAM:
+		return stats.heavy_active + SLAM_WAVE_TIME
 	return stats.heavy_active if _attack_heavy else stats.attack_active
 
 
@@ -601,7 +660,7 @@ func can_attack() -> bool:
 ## Le coup peut-il toucher en ce moment ?
 func is_attack_active() -> bool:
 	return not _heavy_charging and _attack_time >= _attack_startup() and _attack_time < _attack_startup() + _attack_active() \
-		and not _attack_has_hit
+		and not _attack_has_hit and not (_is_slam_wave() and not is_on_floor())
 
 
 func is_heavy_attack() -> bool:
@@ -614,6 +673,10 @@ func is_heavy_attack() -> bool:
 ## le centre : la zone s'arrête pile au centre du perso et ne déborde pas dans son dos.
 ## Attaque lourde : seulement le bout de l'arme.
 func attack_start() -> Vector2:
+	if _is_slam_wave():
+		return _feet() - Vector2(_slam_wave_reach(), 0.0)
+	if is_katana_dashing():
+		return global_position
 	if _attack_heavy:
 		return attack_center()
 	return global_position + _attack_dir * clampf(_light_reach() - stats.attack_radius, 0.0, stats.attack_radius)
@@ -621,6 +684,10 @@ func attack_start() -> Vector2:
 
 ## Le bout de la zone qui touche.
 func attack_center() -> Vector2:
+	if _is_slam_wave():
+		return _feet() + Vector2(_slam_wave_reach(), 0.0)
+	if is_katana_dashing():
+		return global_position + _attack_dir * stats.heavy_arc_radius * KATANA_DASH_REACH * _range_mult()
 	if _attack_heavy:
 		return global_position + _heavy_tip(_heavy_angle())
 	return global_position + _attack_dir * maxf(_light_reach() - stats.attack_radius, 0.0)
@@ -632,7 +699,19 @@ func _light_reach() -> float:
 	return stats.attack_reach * _range_mult() * lerpf(LIGHT_DEPLOY_START, 1.0, deploy)
 
 
+func _feet() -> Vector2:
+	return global_position + Vector2(0.0, stats.body_size.y / 2.0 - SLAM_WAVE_RADIUS)
+
+
+## Marteau : la moitié de la longueur de l'onde de choc (elle grandit pendant qu'elle part).
+func _slam_wave_reach() -> float:
+	var progress := clampf((_attack_time - stats.heavy_startup - stats.heavy_active) / SLAM_WAVE_TIME, 0.0, 1.0)
+	return SLAM_WAVE_REACH * lerpf(1.0, 1.6, _heavy_charge) * _range_mult() * lerpf(0.4, 1.0, progress)
+
+
 func attack_radius() -> float:
+	if _is_slam_wave():
+		return SLAM_WAVE_RADIUS
 	return stats.heavy_tip_radius * lerpf(1.0, HEAVY_CHARGE_TIP_GROWTH, _heavy_charge) if _attack_heavy else stats.attack_radius
 
 
@@ -644,9 +723,10 @@ func attack_direction() -> Vector2:
 	return _attack_dir
 
 
-## Peut-on se faire toucher ? Non pendant un dash ou une invincibilité.
+## Peut-on se faire toucher ? Non pendant un dash (aussi celui du katana) ou une invincibilité.
+## Le dash du katana peut quand même être contré (voir game.gd).
 func can_be_hit() -> bool:
-	return not eliminated and not is_dashing() and not is_invincible()
+	return not eliminated and not is_dashing() and not is_katana_dashing() and not is_invincible()
 
 
 func body_rect() -> Rect2:
@@ -683,7 +763,8 @@ func hit_shield(push_dir: Vector2) -> void:
 
 ## Points de bouclier que nos coups font perdre : plus quand notre jauge de contre est haute.
 func shield_damage(heavy: bool) -> int:
-	return (HEAVY_SHIELD_DAMAGE if heavy else 1) * PHASE_SHIELD_DAMAGE[counter_phase() - 1]
+	var damage := HEAVY_SHIELD_DAMAGE * (1 if weapon_away else weapon.heavy_shield_damage) if heavy else 1
+	return damage * PHASE_SHIELD_DAMAGE[counter_phase() - 1]
 
 
 ## Notre bouclier encaisse un coup (il craque de "damage" points). Renvoie true s'il vient de casser.
@@ -906,8 +987,30 @@ func _draw() -> void:
 	# Petit œil pour voir de quel côté on regarde
 	draw_rect(Rect2(Vector2(facing * 3.0 - 2.5, -stats.body_size.y / 2.0 + 9.0), Vector2(5, 5)), Color(0.08, 0.09, 0.13))
 
+	var weapon_color := Color(1, 1, 1) if weapon_away else weapon.color
+
+	# Katana : le dash tranchant, la lame pointée devant soi
+	if is_katana_dashing():
+		var blade_tip := attack_center() - global_position
+		for i in 3:
+			var ghost := body
+			ghost.position -= _attack_dir * 18.0 * (i + 1)
+			draw_rect(ghost, Color(color, 0.25 - i * 0.07))
+		draw_line(Vector2.ZERO, blade_tip, Color(weapon_color, 0.95), 5.0)
+		draw_line(-blade_tip * 0.6, blade_tip, Color(weapon_color, 0.3), 12.0)
+
+	# Marteau : l'onde de choc au sol, des deux côtés
+	elif _is_slam_wave():
+		if is_on_floor():
+			var reach := _slam_wave_reach()
+			var feet := _feet() - global_position
+			var fade := 1.0 - clampf((_attack_time - stats.heavy_startup - stats.heavy_active) / SLAM_WAVE_TIME, 0.0, 1.0)
+			draw_rect(Rect2(feet + Vector2(-reach, -SLAM_WAVE_RADIUS), Vector2(reach * 2.0, SLAM_WAVE_RADIUS * 2.0)),
+				Color(weapon_color, 0.25 + 0.5 * fade))
+			draw_rect(Rect2(feet + Vector2(-reach, SLAM_WAVE_RADIUS - 3.0), Vector2(reach * 2.0, 3.0)), Color(1, 1, 1, 0.8 * fade))
+
 	# L'attaque lourde : l'arme levée au-dessus de la tête, puis un arc jusqu'aux pieds
-	if is_attacking() and _attack_heavy:
+	elif is_attacking() and _attack_heavy:
 		var angle := _heavy_angle()
 		if _attack_time >= stats.heavy_startup:
 			var trail := PackedVector2Array()
@@ -917,9 +1020,9 @@ func _draw() -> void:
 			draw_polyline(trail, Color(color.lightened(0.5), 0.5), 10.0)
 		var tip := _heavy_tip(angle)
 		var weapon_scale := heavy_scale()
-		var blade_color := Color(1, 1, 1, 0.95)
+		var blade_color := Color(weapon_color, 0.95)
 		if _heavy_charging:
-			blade_color = Color(1, 1, 1, lerpf(0.55, 0.9, _heavy_charge))
+			blade_color = Color(weapon_color, lerpf(0.55, 0.9, _heavy_charge))
 			# La charge : un halo qui grossit au bout de l'arme, qui clignote quand c'est plein
 			var halo := attack_radius()
 			var full_blink := _heavy_charge >= 1.0 or (_heavy_charge > 0.95 and int(_blink_clock / 0.05) % 2 == 0)
@@ -946,11 +1049,19 @@ func _draw() -> void:
 		else:
 			# Le coup part : la barre jaillit du perso et s'allonge jusqu'au bout
 			var reach := _light_reach()
-			draw_rect(Rect2(10.0, -bar, maxf(reach - 10.0, 0.0), bar * 2.0), Color(1, 1, 1, 0.95))
+			draw_rect(Rect2(10.0, -bar, maxf(reach - 10.0, 0.0), bar * 2.0), Color(weapon_color, 0.95))
 			draw_rect(Rect2(reach - tip, -tip, tip, tip * 2.0), color.lightened(0.6))
 			if reach < length:
 				draw_rect(Rect2(reach, -1.5, length - reach, 3.0), Color(1, 1, 1, 0.25))
 		draw_set_transform(Vector2.ZERO, 0.0)
+
+	# L'arme dans la main quand on n'attaque pas (dessin très simple, à remplacer par un graphiste)
+	elif not weapon_away and weapon.held_length > 0.0:
+		var hand := Vector2(facing * stats.body_size.x / 2.0, 4.0)
+		var end := hand + Vector2(facing * 0.4, -1.0).normalized() * weapon.held_length
+		draw_line(hand, end, weapon_color, 3.0)
+		if weapon.held_head > 0.0:
+			draw_rect(Rect2(end - Vector2.ONE * weapon.held_head / 2.0, Vector2.ONE * weapon.held_head), weapon_color)
 
 	# La jauge d'endurance, sur le côté opposé à l'adversaire
 	if _stamina_show_timer > 0.0:

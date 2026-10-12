@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="WeaponStats" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/weapon_stats.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+display_name = "Marteau"
+description = "Lent, projette très loin. Lourde : onde de choc au sol."
+color = Color(0.85, 0.62, 0.42, 1)
+held_length = 30.0
+held_head = 12.0
+light_startup_mult = 1.6
+light_cooldown_mult = 1.5
+light_reach_mult = 1.05
+light_radius_mult = 1.35
+light_knockback_mult = 1.8
+heavy = 2
+heavy_cooldown_mult = 1.3
+heavy_reach_mult = 1.15
+heavy_radius_mult = 1.3
+heavy_knockback_mult = 1.25
+heavy_shield_damage = 2
