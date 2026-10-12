@@ -2,6 +2,9 @@ class_name GameMap
 extends Node2D
 ## Une map : le décor (sols, murs, plateformes), les points d'apparition et la zone de jeu.
 ##
+## L'Arène (scenes/maps/arene.tscn) est le labo : chaque nouveauté de décor (échelle, ascenseur...)
+## y est essayée en premier.
+##
 ## Pour créer une nouvelle map : duplique scenes/maps/arene.tscn (clic droit > Dupliquer),
 ## change le décor, puis ajoute-la dans MAPS de scripts/game_setup.gd.
 ## Une map doit garder ces deux nœuds :
@@ -22,3 +25,32 @@ func spawn_position(player_index: int) -> Vector2:
 
 func respawn_position() -> Vector2:
 	return ($RespawnPoint as Node2D).position
+
+
+## Les plateformes qui bougent (navettes, ascenseurs) de la map.
+func moving_platforms() -> Array[MovingPlatform]:
+	var found: Array[MovingPlatform] = []
+	_find_moving(self, found)
+	return found
+
+
+func _find_moving(node: Node, found: Array[MovingPlatform]) -> void:
+	for child in node.get_children():
+		if child is MovingPlatform:
+			found.append(child)
+		_find_moving(child, found)
+
+
+## Jeu en ligne (hôte) : où en sont les plateformes qui bougent.
+func moving_state() -> Array:
+	var times := []
+	for platform in moving_platforms():
+		times.append(platform.get_time())
+	return times
+
+
+## Jeu en ligne (copain) : on cale les plateformes sur celles de l'hôte.
+func apply_moving_state(times: Array) -> void:
+	var platforms := moving_platforms()
+	for i in mini(times.size(), platforms.size()):
+		platforms[i].set_time(times[i])

@@ -24,6 +24,12 @@ const DROP_STICK := 0.3                 ## stick poussé vers le bas au-delà de
 const WALL_JUMP_LOCK := 0.1             ## petit temps où l'on contrôle moins bien après un saut mural
 const WALL_JUMP_ACCEL := 2200.0
 
+# --- Échelle (voir ladder.gd) ---
+const LADDER_GRAB_STICK := 0.5          ## stick poussé vers le haut au-delà de ça : on s'accroche à l'échelle
+const LADDER_CLIMB_SPEED := 1500.0      ## on monte très vite, tout seul
+const LADDER_REGRAB_TIME := 0.35        ## après avoir lâché l'échelle, on ne se raccroche pas tout de suite
+const LADDER_FLING_TIME := 0.25         ## éjecté en haut de l'échelle : on garde son élan sur le côté ce temps
+
 # --- Dash ---
 const DASH_END_KEEP := 0.55             ## part de la vitesse gardée à la fin du dash
 
@@ -118,6 +124,9 @@ var _drop_timer := 0.0
 var _wall_normal_x := 0.0               ## -1 / 1 quand on glisse contre un mur, 0 sinon
 var _wall_jump_timer := 0.0
 var _jump_rising := false              ## true = on monte grâce à un saut (pour le petit saut)
+var _ladder: Ladder = null              ## l'échelle sur laquelle on grimpe (null = pas d'échelle)
+var _ladder_regrab_timer := 0.0
+var _ladder_fling_timer := 0.0
 
 var _dash_timer := 0.0
 var _dash_cooldown_timer := 0.0
@@ -205,6 +214,23 @@ func physics_tick(input: InputState, delta: float) -> void:
 			_dash_cooldown_timer = 0.0
 			facing = _wall_normal_x
 
+	# Échelle : "haut" en la touchant pour s'accrocher ; on monte tout seul (rien d'autre à faire).
+	if _ladder == null and _ladder_regrab_timer <= 0.0 and input.stick.y < -LADDER_GRAB_STICK \
+			and not is_heavy_swinging():
+		_ladder = _touched_ladder()
+		if _ladder != null:
+			_cancel_attack()
+			_dash_timer = 0.0
+			_air_jumps_left = stats.air_jumps
+			_air_dashes_left = stats.air_dashes
+	if _ladder != null:
+		_blocking = false
+		_sprinting = false
+		_tick_ladder(input)
+		move_and_slide()
+		queue_redraw()
+		return
+
 	# Descendre d'une plateforme traversable avec "bas" (pas besoin d'aller tout en bas avec le stick).
 	if on_floor and (input.down_pressed or input.stick.y > DROP_STICK):
 		_drop_timer = DROP_THROUGH_TIME
@@ -262,6 +288,8 @@ func _tick_timers(delta: float) -> void:
 	_shield_broken_timer -= delta
 	_shield_flash_timer -= delta
 	_stun_timer -= delta
+	_ladder_regrab_timer -= delta
+	_ladder_fling_timer -= delta
 	_blink_clock += delta
 
 
@@ -312,6 +340,8 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 		accel = KNOCKBACK_ACCEL
 	elif _wall_jump_timer > 0.0:
 		accel = WALL_JUMP_ACCEL
+	elif _ladder_fling_timer > 0.0:
+		accel = 0.0  # éjecté de l'échelle : on garde son élan
 	var speed := stats.run_speed * _move_mult()
 	if _sprinting:
 		speed *= stats.sprint_speed_mult
@@ -355,6 +385,45 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 			_jump_rising = true
 			_air_jumps_left -= 1
 			_jump_buffer_timer = 0.0
+
+
+## L'échelle que le corps touche, ou null.
+func _touched_ladder() -> Ladder:
+	for node in get_tree().get_nodes_in_group("echelles"):
+		var ladder := node as Ladder
+		if ladder != null and ladder.rect().intersects(body_rect()):
+			return ladder
+	return null
+
+
+## Sur l'échelle : on est collé au milieu et on monte. En haut, on est éjecté.
+func _tick_ladder(input: InputState) -> void:
+	if input.jump_pressed:
+		_leave_ladder()
+		velocity = Vector2(input.stick.x * stats.run_speed * _move_mult(), -stats.jump_speed)
+		_jump_rising = true
+		return
+	if input.down_pressed:
+		_leave_ladder()
+		velocity = Vector2.ZERO
+		return
+	global_position.x = _ladder.global_position.x
+	velocity = Vector2(0.0, -LADDER_CLIMB_SPEED * _move_mult())
+	if global_position.y + stats.body_size.y / 2.0 <= _ladder.top():
+		var push := _ladder.exit_push
+		_leave_ladder()
+		velocity = push
+		_jump_rising = false
+		_ladder_fling_timer = LADDER_FLING_TIME
+
+
+func _leave_ladder() -> void:
+	_ladder = null
+	_ladder_regrab_timer = LADDER_REGRAB_TIME
+
+
+func is_climbing() -> bool:
+	return _ladder != null
 
 
 func _try_start_dash(input: InputState, on_floor: bool) -> void:
@@ -595,6 +664,7 @@ func mark_attack_hit() -> void:
 ## attaquer pendant "cooldown".
 func clash(push: Vector2, cooldown := CLASH_LOCKOUT, lift := 150.0) -> void:
 	_cancel_attack()
+	_leave_ladder()
 	_attack_cooldown_timer = cooldown
 	velocity = _pushed(push) + Vector2(0.0, -lift)
 	_jump_rising = false
@@ -604,6 +674,7 @@ func clash(push: Vector2, cooldown := CLASH_LOCKOUT, lift := 150.0) -> void:
 ## Notre coup a frappé un bouclier : il s'arrête, on est repoussé, mais on peut refrapper tout de suite.
 func hit_shield(push_dir: Vector2) -> void:
 	_cancel_attack()
+	_leave_ladder()
 	_attack_cooldown_timer = 0.0
 	velocity = _pushed(push_dir * SHIELD_HIT_PUSH) + Vector2(0.0, -120.0)
 	_jump_rising = false
@@ -633,6 +704,7 @@ func absorb_hit(push_dir: Vector2, damage: int) -> bool:
 ## attaquer pendant SHIELD_BREAK_COOLDOWN (mais peut bouger).
 func shield_burst(push_dir: Vector2, own_shield_broke: bool) -> void:
 	_cancel_attack()
+	_leave_ladder()
 	velocity = _pushed(push_dir * SHIELD_BREAK_PUSH) + Vector2(0.0, -SHIELD_BREAK_LIFT)
 	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
@@ -650,6 +722,7 @@ func take_hit(hit_dir: Vector2, knockback := -1.0) -> bool:
 	if knockback < 0.0:
 		knockback = stats.hit_knockback
 	_cancel_attack()
+	_leave_ladder()
 	_dash_timer = 0.0
 	velocity = _pushed(hit_dir * knockback) + Vector2(0.0, -200.0)
 	_jump_rising = false
@@ -701,6 +774,7 @@ func _pushed(force: Vector2) -> Vector2:
 ## Sorti de la map : on perd une vie et on réapparaît au milieu.
 func fall_out(respawn_position: Vector2) -> void:
 	_cancel_attack()
+	_leave_ladder()
 	_dash_timer = 0.0
 	global_position = respawn_position
 	velocity = Vector2.ZERO
@@ -709,6 +783,7 @@ func fall_out(respawn_position: Vector2) -> void:
 	# On repart à neuf : plus de recul ni de saut en cours venant d'avant la chute.
 	_knockback_timer = 0.0
 	_wall_jump_timer = 0.0
+	_ladder_fling_timer = 0.0
 	_drop_timer = 0.0
 	_jump_buffer_timer = 0.0
 	_jump_rising = false

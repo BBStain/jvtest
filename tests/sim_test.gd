@@ -1557,6 +1557,70 @@ func _ready() -> void:
 	await step(1)
 	check(f3[1].lives == 2 and game._shake_left > 0.0, "Vie perdue à 3 joueurs : l'écran tremble")
 
+	# 17) Le toit de l'Arène (le labo) : on ne le traverse pas par en dessous ; on y monte par l'échelle
+	# (à gauche, très rapide, on est éjecté en haut) ou par l'ascenseur (à droite)
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	var roof := game.map.get_node("Toit/Plafond") as Node2D
+	var roof_top := roof.position.y - 20.0
+	var ladder := game.map.get_node("Toit/Echelle") as Ladder
+	var lift := game.map.get_node("Toit/AscenseurToit") as MovingPlatform
+	# 17a) Sous le toit : sauts + dash vers le haut, on cogne le plafond
+	p1.position = Vector2(640, -320 - 30)
+	p1.input_source = Scripted.new(func(s, f):
+		s.jump_pressed = f == 2 or f == 14
+		s.jump_held = true
+		s.stick.y = -1.0 if f >= 22 else 0.0
+		s.dash_pressed = f == 22)
+	var highest := p1.position.y
+	for i in 60:
+		await step(1)
+		highest = minf(highest, p1.position.y)
+	check(highest - 30 >= roof_top + 40 - 1, "Toit : on ne le traverse pas par en dessous (tête au plus haut %.0f)" % (highest - 30))
+	# 17b) L'échelle : "haut" en la touchant, on monte tout seul très vite, éjecté sur le toit en haut
+	p1.position = Vector2(ladder.position.x + 10, 300); p1.velocity = Vector2.ZERO
+	p1.input_source = Scripted.new(func(s, f): s.stick.y = -1.0 if f < 3 else 0.0)
+	await step(2)
+	check(p1.is_climbing() and is_equal_approx(p1.position.x, ladder.position.x), "Échelle : on s'y accroche avec haut")
+	var climb_frames := 0
+	while p1.is_climbing() and climb_frames < 120:
+		await step(1)
+		climb_frames += 1
+	check(climb_frames < 60, "Échelle : on monte très vite (%d frames pour %d px)" % [climb_frames, 300 + 30 - roof_top])
+	check(p1.velocity.y < -300 and p1.velocity.x > 200, "Échelle : en sortant en haut, on est éjecté (v = %s)" % p1.velocity)
+	await step(60)
+	check(p1.is_on_floor() and absf(p1.position.y + 30 - roof_top) < 3 and p1.position.x > roof.position.x - 2250,
+		"Échelle : on atterrit sur le toit (%s)" % p1.position)
+	await shot("17_toit")
+	# 17c) Un coup reçu en grimpant fait lâcher l'échelle
+	p1.position = Vector2(ladder.position.x, 200); p1.velocity = Vector2.ZERO
+	p1.input_source = Scripted.new(func(s, f): s.stick.y = -1.0)
+	await step(2)
+	check(p1.is_climbing(), "Échelle : accroché de nouveau")
+	p1.take_hit(Vector2.RIGHT)
+	await step(1)
+	check(not p1.is_climbing() and p1.is_stunned(), "Échelle : un coup reçu fait lâcher l'échelle")
+	# 17d) Sauter depuis l'échelle la lâche
+	p1._stun_timer = 0.0; p1._invincible_timer = 0.0
+	p1.position = Vector2(ladder.position.x, 200); p1.velocity = Vector2.ZERO; p1._ladder_regrab_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f):
+		s.stick.y = -1.0 if f < 5 else 0.0
+		s.jump_pressed = f == 5)
+	await step(7)
+	check(not p1.is_climbing() and p1.velocity.y < -500, "Échelle : on la lâche en sautant")
+	# 17e) L'ascenseur monte du sol de droite jusqu'au toit
+	lift.set_time(0.0)
+	p2.position = Vector2(lift.position.x, 570 - 30); p2.velocity = Vector2.ZERO
+	await step(5)
+	check(p2.is_on_floor(), "Ascenseur : J2 monte dessus en bas")
+	await step(int(lift.period * 30) + 20)
+	check(p2.is_on_floor() and absf(p2.position.y + 30 - roof_top) < 4, "Ascenseur : J2 arrive au niveau du toit (pieds à %.0f)" % (p2.position.y + 30))
+	p2.input_source = Scripted.new(func(s, f): s.stick.x = -1.0 if f < 30 else 0.0)
+	await step(50)
+	check(p2.is_on_floor() and absf(p2.position.y + 30 - roof_top) < 3 and p2.position.x < roof.position.x + 2250,
+		"Ascenseur : J2 descend sur le toit (%s)" % p2.position)
+
 	# 15) Jeu en ligne (sans réseau ici : on joue l'hôte puis un copain, et on passe les messages à la main)
 	# 15a) Les touches d'un copain arrivent par le réseau : un appui n'est jamais perdu
 	var net := NetworkInputSource.new()
@@ -1608,6 +1672,11 @@ func _ready() -> void:
 	await step(1)
 	check(g1.net_state() == host_state[Game.ONLINE_HEADER] and g2.net_state() == host_state[Game.ONLINE_HEADER + 1],
 		"En ligne (copain) : les joueurs sont affichés exactement comme chez l'hôte")
+	var guest_times: Array = game.map.moving_state()
+	var times_ok: bool = guest_times.size() == host_state[6].size() and guest_times.size() > 0
+	for i in guest_times.size():
+		times_ok = times_ok and absf(guest_times[i] - host_state[6][i]) < 0.05
+	check(times_ok, "En ligne (copain) : navettes et ascenseurs au même endroit que chez l'hôte")
 	check(g1.is_charging_heavy() and g2.shield == 7 and g2.lives == 2 and g2.is_stunned() and game.gauge.points == 6.0,
 		"En ligne (copain) : charge de la lourde, bouclier, vies, état sonné et jauge de contre reçus")
 	check(game._shake_left > 0.0, "En ligne (copain) : une vie perdue chez l'hôte fait trembler l'écran ici aussi")

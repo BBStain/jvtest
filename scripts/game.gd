@@ -44,7 +44,7 @@ const STUN_CAMERA_SMOOTHING := 12.0        ## la caméra fonce sur l'impact
 const SHAKE_TIME := 0.35                   ## en vraies secondes
 const SHAKE_STRENGTH := 12.0               ## pixels à l'écran au début, puis le tremblement se calme
 
-const ONLINE_HEADER := 6                   ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
+const ONLINE_HEADER := 7                   ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
 var fighters: Array[Fighter] = []
 var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
@@ -197,6 +197,7 @@ func _guest_tick() -> void:
 		_stun_focus.append(fighters[index])
 	gauge.flash_timer -= get_physics_process_delta_time()
 	gauge.set_points(state[5])
+	map.apply_moving_state(state[6])
 	if state[2] != "" and not _match_over:
 		_show_end(state[2], fighters[state[3]].color if state[3] >= 0 else Color.WHITE)
 	for i in mini(fighters.size(), state.size() - ONLINE_HEADER):
@@ -204,7 +205,7 @@ func _guest_tick() -> void:
 
 
 ## (hôte) L'état du jeu envoyé aux copains : vitesse du temps, duel, fin de partie, zoom sur un joueur
-## sonné, jauge de contre, puis chaque joueur.
+## sonné, jauge de contre, plateformes qui bougent, puis chaque joueur.
 func online_state() -> Array:
 	var duel := []
 	for fighter in _duel:
@@ -216,7 +217,8 @@ func online_state() -> Array:
 	for i in fighters.size():
 		if _match_over and not fighters[i].eliminated:
 			winner = i
-	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, stun_focus, gauge.points]
+	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, stun_focus, gauge.points,
+		map.moving_state()]
 	for fighter in fighters:
 		state.append(fighter.net_state())
 	return state
