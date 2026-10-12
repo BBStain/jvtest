@@ -5,7 +5,8 @@ extends InputSource
 ## Un appui (saut, coup...) n'est jamais perdu : s'il arrive entre deux frames, ou si deux
 ## messages arrivent dans la même frame, il est gardé jusqu'à la frame suivante.
 
-const PRESSED := ["down_pressed", "jump_pressed", "attack_pressed", "aimed_attack_pressed", "heavy_pressed", "dash_pressed"]
+const PRESSED := ["down_pressed", "jump_pressed", "attack_pressed", "aimed_attack_pressed", "heavy_pressed", "dash_pressed",
+	"item_pressed"]
 
 var _latest := InputState.new()
 var _pending := {}  ## les appuis reçus depuis la dernière frame

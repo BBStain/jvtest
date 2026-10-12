@@ -16,6 +16,8 @@ var heavy_held := false      ## attaque lourde maintenue (on charge tant qu'on g
 var dash_pressed := false
 var block_held := false     ## blocage maintenu (B)
 var sprint_held := false    ## course maintenue (LT / Shift)
+var item_pressed := false   ## objet (RT) appuyé cette frame : tirer au pistolet, lever le bouclier...
+var item_held := false      ## objet maintenu : la grenade est dégoupillée tant qu'on garde
 
 
 func to_dict() -> Dictionary:
@@ -23,7 +25,7 @@ func to_dict() -> Dictionary:
 		"sx": stick.x, "sy": stick.y, "dp": down_pressed,
 		"j": jump_pressed, "jh": jump_held, "a": attack_pressed, "aa": aimed_attack_pressed,
 		"ax": aim.x, "ay": aim.y, "h": heavy_pressed, "hh": heavy_held, "d": dash_pressed,
-		"b": block_held, "r": sprint_held,
+		"b": block_held, "r": sprint_held, "o": item_pressed, "oh": item_held,
 	}
 
 
@@ -41,4 +43,6 @@ static func from_dict(data: Dictionary) -> InputState:
 	s.dash_pressed = data.get("d", false)
 	s.block_held = data.get("b", false)
 	s.sprint_held = data.get("r", false)
+	s.item_pressed = data.get("o", false)
+	s.item_held = data.get("oh", false)
 	return s

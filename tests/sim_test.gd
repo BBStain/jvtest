@@ -1695,6 +1695,144 @@ func _ready() -> void:
 	check(not p1.weapon_away and game.projectiles.is_empty(), "Lance : tombé de la map, on réapparaît avec sa lance")
 	GameSetup.player_weapons = []
 
+	# 19) Les objets qui tombent sur la map : pistolet, grenade, bouclier (RT pour les utiliser)
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	# 19a) Un objet tombe du ciel, on le ramasse en passant dessus (un seul à la fois)
+	p1.position.x = 150  # rien au-dessus (pas de plateforme)
+	game.spawn_pickup("pistolet", Vector2(p1.position.x, 200))
+	game.spawn_pickup("grenade", Vector2(p1.position.x, 100))
+	await step(60)
+	check(p1.item == "pistolet" and p1.item_ammo == Fighter.PISTOL_AMMO and game.pickups.size() == 1 and game.pickups[0].landed,
+		"Objets : on ramasse le pistolet en passant dessus ; la grenade reste par terre (un seul objet à la fois)")
+	await shot("19_objet_par_terre")
+	# 19b) Pistolet : une balle par appui sur RT, elle touche l'adversaire
+	game._remove_pickup(game.pickups[0])
+	p1.position = Vector2(400, 540); p2.position = Vector2(900, 540)
+	p1.input_source = Scripted.new(func(s, f): s.item_pressed = f == 1)
+	await step(3)
+	check(game.projectiles.size() == 1 and game.projectiles[0].kind == "balle" and p1.item_ammo == Fighter.PISTOL_AMMO - 1,
+		"Pistolet : RT tire une balle (reste %d)" % p1.item_ammo)
+	await shot("19_balle")
+	for i in 30:
+		await step(1)
+	check(touched(p2) and game.projectiles.is_empty(), "Pistolet : la balle touche l'adversaire")
+	p1.input_source = Scripted.new(func(s, f): s.item_pressed = f % 15 == 1)
+	await step(70)
+	check(p1.item == "", "Pistolet : vide après 5 balles, le slot se libère")
+	# 19c) Renvoi de balle au bon moment (timing parfait) : droit sur le tireur, et c'est un contre
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.position = Vector2(300, 540); p2.position = Vector2(900, 540)
+	var gauge_before: float = game.gauge.points
+	var bullet := Projectile.new()
+	bullet.kind = "balle"; bullet.owner_index = 0; bullet.length = 16.0
+	bullet.position = Vector2(860, 540); bullet.velocity = Vector2(game.BULLET_SPEED, 0.0)
+	game._add_projectile(bullet)
+	p2._attack_heavy = false; p2._attack_has_hit = false; p2._attack_dir = Vector2.LEFT; p2._attack_cooldown_timer = 0.0
+	p2._attack_time = p2.stats.light_startup()
+	await step(1)
+	var to_shooter := (p1.global_position - bullet.position).normalized()
+	check(bullet.owner_index == 1 and bullet.velocity.normalized().dot(to_shooter) > 0.99 and game.gauge.points > gauge_before,
+		"Renvoi parfait : la balle repart droit sur le tireur, ça compte comme un contre")
+	for i in 40:
+		await step(1)
+	check(touched(p1), "Renvoi parfait : le tireur est touché par sa propre balle")
+	# 19d) Renvoi en retard : la balle est déviée (vers le haut), jusqu'à 90°
+	bullet = Projectile.new()
+	bullet.kind = "balle"; bullet.owner_index = 0; bullet.length = 16.0
+	p2.position = Vector2(900, 540)
+	bullet.position = Vector2(860, 540); bullet.velocity = Vector2(game.BULLET_SPEED, 0.0)
+	game._add_projectile(bullet)
+	p2._attack_heavy = false; p2._attack_has_hit = false; p2._attack_dir = Vector2.LEFT
+	p2._attack_time = p2.stats.light_startup() + p2.stats.attack_active * 0.85
+	await step(1)
+	var deviation := rad_to_deg(bullet.velocity.angle_to((p1.global_position - p2.global_position)))
+	check(bullet.owner_index == 1 and absf(deviation) > 50.0 and bullet.velocity.y < 0.0,
+		"Renvoi en retard : la balle est déviée vers le haut (%.0f°)" % deviation)
+	# 19e) Grenade : RT gardé = dégoupillée ; plus on garde, plus elle part loin
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 31
+		s.item_held = f >= 31 and f < 34)
+	await step(30)
+	p1.take_item("grenade")
+	await step(6)
+	var short_throw: float = game.projectiles[0].velocity.length() if game.projectiles.size() == 1 else 0.0
+	game._remove_projectile(game.projectiles[0])
+	p1.take_item("grenade")
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f >= 1 and f < 70)
+	await step(40)
+	await shot("19_grenade_degoupillee")
+	await step(35)
+	var long_throw: float = game.projectiles[0].velocity.length() if game.projectiles.size() == 1 else 0.0
+	check(short_throw > 0.0 and long_throw > short_throw * 1.8 and p1.item == "",
+		"Grenade : plus on garde RT, plus elle part loin (%.0f -> %.0f)" % [short_throw, long_throw])
+	check(game.projectiles[0].fuse < Fighter.GRENADE_FUSE - 1.0, "Grenade : la mèche a commencé dès l'appui (reste %.1f s)" % game.projectiles[0].fuse)
+	# 19f) Elle explose au bout de sa mèche : ceux qui sont autour sont touchés et éjectés
+	game.projectiles[0].position = p2.position + Vector2(-40, 0); game.projectiles[0].velocity = Vector2.ZERO
+	game.projectiles[0].fuse = 0.05
+	await step(5)
+	check(game.projectiles.is_empty() and touched(p2) and p2.velocity.x > 300, "Grenade : l'explosion touche et éjecte (vx %.0f)" % p2.velocity.x)
+	# 19g) Frappée par un coup, elle repart dans le sens du coup
+	var grenade := Projectile.new()
+	grenade.kind = "grenade"; grenade.fuse = 3.0; grenade.length = 18.0; grenade.owner_index = 1
+	p1.position = Vector2(500, 540); p1._invincible_timer = 0.0
+	grenade.position = Vector2(560, 545)
+	game._add_projectile(grenade)
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	check(grenade.velocity.x > 500, "Grenade : un coup la repousse (vx %.0f)" % grenade.velocity.x)
+	game._remove_projectile(grenade)
+	# 19h) Gardée trop longtemps : elle explose en main
+	p1.position = Vector2(500, 540); p1._invincible_timer = 0.0; p1._stun_timer = 0.0
+	var lives_before := p1.lives
+	p1.take_item("grenade")
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f >= 1)
+	await step(int(Fighter.GRENADE_FUSE * 60) + 5)
+	check(p1.item == "" and (p1.is_stunned() or p1.lives < lives_before), "Grenade : gardée trop longtemps, elle explose en main")
+	# 19i) Bouclier : RT le lève ; qui frappe dedans est projeté très loin, sans toucher
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p2.take_item("bouclier")
+	p2.input_source = Scripted.new(func(s, f): s.item_pressed = f == 1)
+	await step(3)
+	check(p2.is_item_shielded() and p2.item == "", "Bouclier : RT le lève (le slot se libère)")
+	p1.position = Vector2(600, 540); p2.position = Vector2(660, 540)
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	check(untouched(p2) and p1.velocity.x < -900 and not p1.can_attack(), "Bouclier : l'attaquant est projeté très loin (vx %.0f)" % p1.velocity.x)
+	await shot("19_bouclier")
+	await step(int(Fighter.ITEM_SHIELD_TIME * 60))
+	check(not p2.is_item_shielded(), "Bouclier : il disparaît au bout de %d s" % Fighter.ITEM_SHIELD_TIME)
+	# 19j) Un objet tombe toutes les 10 s, au plus 2 par terre
+	for pickup in game.pickups.duplicate():
+		game._remove_pickup(pickup)
+	for i in 3:
+		game._item_spawn_timer = 0.0
+		await step(1)
+	check(game.pickups.size() == game.MAX_PICKUPS, "Objets : un objet tombe à chaque fois, au plus %d par terre" % game.MAX_PICKUPS)
+	await step(180)
+	var all_landed := true
+	for pickup in game.pickups:
+		all_landed = all_landed and pickup.landed
+	check(all_landed, "Objets : ils se posent sur le décor")
+
 	# 17) Le toit de l'Arène (le labo) : on ne le traverse pas par en dessous ; on y monte par l'échelle
 	# (à gauche, très rapide, on est éjecté en haut) ou par l'ascenseur (à droite)
 	await new_game()
@@ -1824,6 +1962,14 @@ func _ready() -> void:
 	game.receive_online_state(host_state)
 	await step(1)
 	check(game.projectiles.is_empty(), "En ligne (copain) : ramassée chez l'hôte, elle disparaît ici")
+	var item_state := host_state.duplicate()
+	item_state[8] = [["grenade", Vector2(700, 400)]]
+	game.receive_online_state(item_state)
+	await step(1)
+	check(game.pickups.size() == 1 and game.pickups[0].kind == "grenade" and game.pickups[0].position == Vector2(700, 400) \
+		and not game.pickups[0].simulate, "En ligne (copain) : les objets par terre s'affichent comme chez l'hôte")
+	game.receive_online_state(host_state)
+	await step(1)
 	check(g1.is_charging_heavy() and g2.shield == 7 and g2.lives == 2 and g2.is_stunned() and game.gauge.points == 6.0,
 		"En ligne (copain) : charge de la lourde, bouclier, vies, état sonné et jauge de contre reçus")
 	check(game._shake_left > 0.0, "En ligne (copain) : une vie perdue chez l'hôte fait trembler l'écran ici aussi")

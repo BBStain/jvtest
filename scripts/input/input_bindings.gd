@@ -8,26 +8,27 @@ extends RefCounted
 ##   {"type": "joypad", "id": 2}        -> la manette n°2 connectée
 ##
 ## Manette : stick gauche ou croix pour bouger, A sauter, X attaque légère, Y attaque lourde,
-## B bloquer, gâchette gauche (LT) courir, LB dash, stick droit attaque légère visée.
+## B bloquer, gâchette gauche (LT) courir, LB dash, stick droit attaque légère visée,
+## gâchette droite (RT, ou RB) utiliser l'objet ramassé.
 ## Les touches clavier sont des touches PHYSIQUES : "W A S D" ici = "Z Q S D" sur un clavier AZERTY.
 
 const KEYBOARD_LAYOUTS := [
 	# Clavier gauche : Z Q S D pour bouger, Espace saut, F attaque légère, R attaque lourde, G dash, C blocage,
-	# Shift gauche pour courir
+	# Shift gauche pour courir, E objet
 	{
 		"name": "Clavier (Z Q S D)",
 		"left": [KEY_A], "right": [KEY_D], "up": [KEY_W], "down": [KEY_S],
 		"jump": [KEY_SPACE], "attack": [KEY_F], "heavy": [KEY_R], "dash": [KEY_G],
-		"block": [KEY_C], "sprint": [KEY_SHIFT], "sprint_location": KEY_LOCATION_LEFT,
+		"block": [KEY_C], "sprint": [KEY_SHIFT], "sprint_location": KEY_LOCATION_LEFT, "item": [KEY_E],
 	},
 	# Clavier droit : flèches pour bouger, L saut, K attaque légère, I attaque lourde, J dash, U blocage,
-	# Shift droit pour courir
-	# (ou pavé numérique 0 / 1 / 3 / 2 / 4)
+	# Shift droit pour courir, O objet
+	# (ou pavé numérique 0 / 1 / 3 / 2 / 4 / 5)
 	{
 		"name": "Clavier (flèches)",
 		"left": [KEY_LEFT], "right": [KEY_RIGHT], "up": [KEY_UP], "down": [KEY_DOWN],
 		"jump": [KEY_L, KEY_KP_0], "attack": [KEY_K, KEY_KP_1], "heavy": [KEY_I, KEY_KP_3],
-		"dash": [KEY_J, KEY_KP_2], "block": [KEY_U, KEY_KP_4],
+		"dash": [KEY_J, KEY_KP_2], "block": [KEY_U, KEY_KP_4], "item": [KEY_O, KEY_KP_5],
 		"sprint": [KEY_SHIFT], "sprint_location": KEY_LOCATION_RIGHT,
 	},
 ]
@@ -36,16 +37,16 @@ const GAMEPAD_BUTTONS := {
 	"left": [JOY_BUTTON_DPAD_LEFT], "right": [JOY_BUTTON_DPAD_RIGHT],
 	"up": [JOY_BUTTON_DPAD_UP], "down": [JOY_BUTTON_DPAD_DOWN],
 	"jump": [JOY_BUTTON_A], "attack": [JOY_BUTTON_X], "heavy": [JOY_BUTTON_Y],
-	"block": [JOY_BUTTON_B], "dash": [JOY_BUTTON_LEFT_SHOULDER],
+	"block": [JOY_BUTTON_B], "dash": [JOY_BUTTON_LEFT_SHOULDER], "item": [JOY_BUTTON_RIGHT_SHOULDER],
 }
 const GAMEPAD_AXES := {
 	"left": [JOY_AXIS_LEFT_X, -1.0], "right": [JOY_AXIS_LEFT_X, 1.0],
 	"up": [JOY_AXIS_LEFT_Y, -1.0], "down": [JOY_AXIS_LEFT_Y, 1.0],
-	"sprint": [JOY_AXIS_TRIGGER_LEFT, 1.0],
+	"sprint": [JOY_AXIS_TRIGGER_LEFT, 1.0], "item": [JOY_AXIS_TRIGGER_RIGHT, 1.0],
 	"aim_left": [JOY_AXIS_RIGHT_X, -1.0], "aim_right": [JOY_AXIS_RIGHT_X, 1.0],
 	"aim_up": [JOY_AXIS_RIGHT_Y, -1.0], "aim_down": [JOY_AXIS_RIGHT_Y, 1.0],
 }
-const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "heavy", "dash", "block", "sprint",
+const ACTIONS := ["left", "right", "up", "down", "jump", "attack", "heavy", "dash", "block", "sprint", "item",
 	"aim_left", "aim_right", "aim_up", "aim_down"]
 const DEADZONE := 0.35
 

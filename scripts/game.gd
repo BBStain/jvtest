@@ -44,7 +44,22 @@ const STUN_CAMERA_SMOOTHING := 12.0        ## la caméra fonce sur l'impact
 const SHAKE_TIME := 0.35                   ## en vraies secondes
 const SHAKE_STRENGTH := 12.0               ## pixels à l'écran au début, puis le tremblement se calme
 
-const ONLINE_HEADER := 8                   ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
+# --- Objets qui tombent sur la map (voir item_pickup.gd) ---
+const ITEM_SPAWN_TIME := 10.0              ## un objet tombe toutes les 10 s...
+const MAX_PICKUPS := 2                     ## ... s'il n'y en a pas déjà 2 par terre
+const BULLET_SPEED := 1700.0
+const BULLET_KNOCKBACK := 450.0
+const DEFLECT_PERFECT := 0.04              ## balle frappée dans les 0,04 s où le coup sort : renvoyée droit sur le tireur
+const DEFLECT_MAX_ANGLE := 90.0            ## ... sinon déviée, jusqu'à 90° pour un coup donné tout à la fin
+const DEFLECT_SPEED := 1.15                ## une balle renvoyée va un peu plus vite
+const GRENADE_MIN_THROW := 350.0           ## RT juste tapé : la grenade tombe tout près...
+const GRENADE_MAX_THROW := 1100.0          ## ... RT gardé 1 s : elle part le plus loin possible
+const GRENADE_HIT_SPEED := 900.0           ## frappée par un coup, elle repart dans le sens du coup
+const GRENADE_RADIUS := 140.0              ## rayon de l'explosion
+const GRENADE_KNOCKBACK := 1150.0
+const GRENADE_SHIELD_DAMAGE := 3
+
+const ONLINE_HEADER := 9                   ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
 var fighters: Array[Fighter] = []
 var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
@@ -64,7 +79,10 @@ var online := false                        ## partie en ligne
 var _online_state: Array = []              ## (copain) le dernier état du jeu reçu de l'hôte
 
 var map: GameMap
-var projectiles: Array[Projectile] = []    ## les lances lancées (en vol, qui retombent ou plantées)
+var projectiles: Array[Projectile] = []    ## ce qui vole : lances lancées, balles, grenades
+var pickups: Array[ItemPickup] = []        ## les objets tombés sur la map, pas encore ramassés
+var rng := RandomNumberGenerator.new()     ## où et quel objet tombe (seul l'hôte tire au sort)
+var _item_spawn_timer := ITEM_SPAWN_TIME
 @onready var _end_screen: Control = $UI/EndScreen
 @onready var _winner_label: Label = $UI/EndScreen/Winner
 @onready var _camera: Camera2D = $Camera
@@ -103,6 +121,7 @@ func _ready() -> void:
 		add_child(fighter)
 		fighter.life_lost.connect(_on_life_lost)
 		fighter.weapon_thrown.connect(_on_weapon_thrown)
+		fighter.item_used.connect(_on_item_used)
 		fighter.show_lives()
 		fighters.append(fighter)
 	var gauge_bar := CounterGaugeBar.new()
@@ -157,12 +176,14 @@ func _physics_process(delta: float) -> void:
 			input.heavy_pressed = false
 			input.dash_pressed = false
 			input.down_pressed = false
+			input.item_pressed = false
 		fighter.physics_tick(input, delta)
 	_resume_grace -= 1
 
 	_resolve_clashes()
 	_resolve_hits()
 	_resolve_projectiles()
+	_tick_pickups(delta)
 	_check_blast_zone()
 	_update_stun_slowmo()
 	_shake_on_life_loss()
@@ -203,6 +224,7 @@ func _guest_tick() -> void:
 	gauge.set_points(state[5])
 	map.apply_moving_state(state[6])
 	_apply_projectiles(state[7])
+	_apply_pickups(state[8])
 	if state[2] != "" and not _match_over:
 		_show_end(state[2], fighters[state[3]].color if state[3] >= 0 else Color.WHITE)
 	for i in mini(fighters.size(), state.size() - ONLINE_HEADER):
@@ -210,7 +232,7 @@ func _guest_tick() -> void:
 
 
 ## (hôte) L'état du jeu envoyé aux copains : vitesse du temps, duel, fin de partie, zoom sur un joueur
-## sonné, jauge de contre, plateformes qui bougent, lances lancées, puis chaque joueur.
+## sonné, jauge de contre, plateformes qui bougent, ce qui vole, objets par terre, puis chaque joueur.
 func online_state() -> Array:
 	var duel := []
 	for fighter in _duel:
@@ -223,7 +245,8 @@ func online_state() -> Array:
 		if _match_over and not fighters[i].eliminated:
 			winner = i
 	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, stun_focus, gauge.points,
-		map.moving_state(), projectiles.map(func(p: Projectile) -> Array: return p.net_state())]
+		map.moving_state(), projectiles.map(func(p: Projectile) -> Array: return p.net_state()),
+		pickups.map(func(p: ItemPickup) -> Array: return p.net_state())]
 	for fighter in fighters:
 		state.append(fighter.net_state())
 	return state
@@ -593,6 +616,9 @@ func _resolve_hits() -> void:
 			continue
 		if not victim.can_be_hit():
 			continue  # déjà touché cette frame par quelqu'un d'autre
+		if victim.is_item_shielded():
+			_bounce_off_item_shield(attacker, victim)
+			continue
 		if victim.is_parrying():
 			_parry(attacker, victim)
 			continue
@@ -709,7 +735,7 @@ func _show_end(text: String, color: Color) -> void:
 ## Un joueur lance sa lance (attaque lourde de la lance) : elle part de sa main vers l'adversaire.
 func _on_weapon_thrown(fighter: Fighter, direction: Vector2, speed: float) -> void:
 	var spear := Projectile.new()
-	spear.owner_index = fighters.find(fighter)
+	spear.owner_index = fighter.player_index
 	spear.position = fighter.global_position + direction * 20.0
 	spear.velocity = direction * speed + Vector2(0.0, -Projectile.THROW_LIFT)
 	spear.rotation = direction.angle()
@@ -728,47 +754,246 @@ func _remove_projectile(projectile: Projectile) -> void:
 	projectile.queue_free()
 
 
-## Une lance en vol touche le premier joueur sur son chemin (pas son lanceur) : comme un coup,
-## il est sonné ou perd une vie ; un bouclier l'arrête (et craque) ; un blocage parfait la renvoie
-## au sol. Une lance posée est ramassée par son lanceur quand il passe dessus.
-## Une lance sortie de la map revient tout de suite à son lanceur.
+## Ce qui vole : les lances et les balles touchent le premier joueur sur leur chemin, les
+## grenades explosent au bout de leur mèche. Un coup peut renvoyer une balle ou repousser une grenade.
+## Une lance posée est ramassée par son lanceur quand il passe dessus ; sortie de la map, elle
+## revient tout de suite à son lanceur.
 func _resolve_projectiles() -> void:
 	for projectile: Projectile in projectiles.duplicate():
-		var thrower: Fighter = fighters[projectile.owner_index]
-		if not map.blast_zone.has_point(projectile.position):
+		if not projectile in projectiles:
+			continue  # déjà retirée (lance revenue à son lanceur)
+		match projectile.kind:
+			"balle":
+				_resolve_bullet(projectile)
+			"grenade":
+				_resolve_grenade(projectile)
+			_:
+				_resolve_spear(projectile)
+
+
+func _resolve_spear(projectile: Projectile) -> void:
+	var thrower: Fighter = fighters[projectile.owner_index]
+	if not map.blast_zone.has_point(projectile.position):
+		_return_weapon(thrower)
+		return
+	if projectile.state != Projectile.State.FLYING:
+		if not thrower.eliminated and thrower.body_rect().grow(12.0).has_point(projectile.position):
 			_return_weapon(thrower)
+		return
+	var victim := _projectile_victim(projectile)
+	if victim == null:
+		return
+	if victim.is_item_shielded():
+		projectile.drop()
+		return
+	_projectile_hits(projectile, victim, Fighter.HEAVY_SHIELD_DAMAGE)
+	projectile.drop()
+
+
+## Une balle : renvoyée par un coup bien placé, sinon elle touche le premier joueur sur son chemin.
+func _resolve_bullet(bullet: Projectile) -> void:
+	if bullet.finished or not map.blast_zone.has_point(bullet.position):
+		_remove_projectile(bullet)
+		return
+	for fighter in fighters:
+		if fighter.player_index != bullet.owner_index and fighter.is_attack_active() and _projectile_in_attack(bullet, fighter):
+			_deflect_bullet(bullet, fighter)
+			return
+	var victim := _projectile_victim(bullet)
+	if victim == null:
+		return
+	if victim.is_item_shielded():
+		bullet.velocity = -bullet.velocity  # le bouclier ramassé renvoie la balle
+		bullet.owner_index = victim.player_index
+		return
+	_projectile_hits(bullet, victim, 1)
+	_remove_projectile(bullet)
+
+
+## Renvoi de balle, selon le TIMING : frappée pile quand le coup sort (dans les DEFLECT_PERFECT
+## premières secondes), elle repart droit sur le tireur. Plus le coup était déjà avancé, plus elle
+## est déviée (jusqu'à DEFLECT_MAX_ANGLE à la toute fin du coup), toujours vers le haut.
+## Un renvoi parfait compte comme un contre.
+func _deflect_bullet(bullet: Projectile, deflector: Fighter) -> void:
+	deflector.mark_attack_hit()  # le coup est « utilisé » par la balle
+	var shooter: Fighter = fighters[bullet.owner_index]
+	var back := -bullet.velocity.normalized()
+	if not shooter.eliminated:
+		back = (shooter.global_position - bullet.position).normalized()
+	var error := deflector.attack_time_since_active() - DEFLECT_PERFECT
+	var window := maxf(deflector.attack_active_duration() - DEFLECT_PERFECT, 0.001)
+	var angle := deg_to_rad(DEFLECT_MAX_ANGLE) * clampf(error / window, 0.0, 1.0)
+	var up := back.rotated(angle)
+	var down := back.rotated(-angle)
+	var dir := up if up.y <= down.y else down
+	bullet.velocity = dir * bullet.velocity.length() * DEFLECT_SPEED
+	bullet.rotation = dir.angle()
+	bullet.owner_index = deflector.player_index
+	var perfect := error <= 0.0
+	_spawn_clash_mark(bullet.position, false, PARRY_COLOR if perfect else Color.WHITE)
+	if perfect:
+		gauge.add_counter(false)
+		deflector.recover()
+
+
+## Une grenade : un coup la repousse ; au bout de sa mèche, elle explose.
+func _resolve_grenade(grenade: Projectile) -> void:
+	if not map.blast_zone.has_point(grenade.position):
+		_remove_projectile(grenade)
+		return
+	if grenade.finished:
+		_explode(grenade.position)
+		_remove_projectile(grenade)
+		return
+	for fighter in fighters:
+		if fighter.is_attack_active() and _projectile_in_attack(grenade, fighter):
+			fighter.mark_attack_hit()
+			grenade.velocity = fighter.attack_direction() * GRENADE_HIT_SPEED + Vector2(0.0, -300.0)
+			return
+
+
+## L'explosion d'une grenade : tous ceux qui sont dans le rayon (le lanceur aussi) sont touchés
+## et éjectés loin du centre. Un bouclier la bloque (et craque beaucoup).
+func _explode(where: Vector2) -> void:
+	_spawn_explosion(where, Color(1.0, 0.55, 0.2))
+	for fighter in fighters:
+		if fighter.eliminated or fighter.is_invincible() or fighter.is_item_shielded():
 			continue
-		if projectile.state != Projectile.State.FLYING:
-			if not thrower.eliminated and thrower.body_rect().grow(12.0).has_point(projectile.position):
-				_return_weapon(thrower)
+		var body := fighter.body_rect()
+		if where.clamp(body.position, body.end).distance_to(where) > GRENADE_RADIUS:
 			continue
-		for victim in fighters:
-			if victim == thrower or not victim.can_be_hit() or not _segment_hits_rect(
-					projectile.tail(), projectile.tip(), Projectile.RADIUS, victim.body_rect()):
-				continue
-			var dir := projectile.velocity.normalized()
-			if victim.is_parrying():
-				victim.recover()
-				gauge.add_counter(false)
-				_spawn_clash_mark(projectile.tip(), false, PARRY_COLOR)
-			elif victim.is_blocking() and not victim.is_stunned():
-				var push := Vector2(signf(dir.x) if dir.x != 0.0 else 1.0, 0.0)
-				if victim.absorb_hit(push, thrower.shield_damage(true)):
-					_spawn_clash_mark(victim.global_position, true)
-					victim.shield_burst(push, true)
-			else:
-				victim.take_hit(dir, projectile.knockback)
-				if victim.is_stunned() and _alive_count() == 2:
-					_stun_focus = [thrower, victim]
-			projectile.drop()
-			break
+		var away := fighter.global_position - where
+		var dir := (away.normalized() if away.length() > 1.0 else Vector2.UP) + Vector2(0.0, -0.4)
+		if fighter.is_blocking() and not fighter.is_stunned():
+			var push := Vector2(signf(away.x) if away.x != 0.0 else 1.0, 0.0)
+			if fighter.absorb_hit(push, GRENADE_SHIELD_DAMAGE):
+				fighter.shield_burst(push, true)
+			continue
+		fighter.take_hit(dir.normalized(), GRENADE_KNOCKBACK)
+
+
+## Le joueur qu'un objet en vol touche (pas son lanceur), ou null.
+func _projectile_victim(projectile: Projectile) -> Fighter:
+	for victim in fighters:
+		if victim.player_index != projectile.owner_index and victim.can_be_hit() and _segment_hits_rect(
+				projectile.tail(), projectile.tip(), Projectile.RADIUS, victim.body_rect()):
+			return victim
+	return null
+
+
+## La zone qui touche du coup de "fighter" passe-t-elle sur l'objet en vol ?
+func _projectile_in_attack(projectile: Projectile, fighter: Fighter) -> bool:
+	var closest := Geometry2D.get_closest_points_between_segments(
+		fighter.attack_start(), fighter.attack_center(), projectile.tail(), projectile.tip())
+	return closest[0].distance_to(closest[1]) <= fighter.attack_radius() + Projectile.RADIUS
+
+
+## Un objet en vol touche un joueur : blocage parfait (un contre), bouclier (qui craque),
+## ou coup reçu (sonné, ou une vie en moins si on l'était déjà).
+func _projectile_hits(projectile: Projectile, victim: Fighter, shield_damage: int) -> void:
+	var thrower: Fighter = fighters[projectile.owner_index]
+	var dir := projectile.velocity.normalized()
+	if victim.is_parrying():
+		victim.recover()
+		gauge.add_counter(false)
+		_spawn_clash_mark(projectile.tip(), false, PARRY_COLOR)
+	elif victim.is_blocking() and not victim.is_stunned():
+		var push := Vector2(signf(dir.x) if dir.x != 0.0 else 1.0, 0.0)
+		if victim.absorb_hit(push, shield_damage * thrower.shield_damage(false)):
+			_spawn_clash_mark(victim.global_position, true)
+			victim.shield_burst(push, true)
+	else:
+		victim.take_hit(dir, projectile.knockback)
+		if victim.is_stunned() and _alive_count() == 2:
+			_stun_focus = [thrower, victim]
+
+
+## Le coup tombe sur le bouclier ramassé : personne n'est touché, l'attaquant est projeté très loin
+## et ne peut plus frapper un instant.
+func _bounce_off_item_shield(attacker: Fighter, victim: Fighter) -> void:
+	var push := _push_dir(attacker, victim)
+	_spawn_clash_mark((attacker.global_position + victim.global_position) / 2.0, false, ItemPickup.color_of("bouclier"))
+	attacker.clash(push * Fighter.ITEM_SHIELD_PUSH * victim.stats.mass(), Fighter.ITEM_SHIELD_COOLDOWN, 250.0)
+
+
+# --- Objets ---
+
+## Un objet utilisé : une balle tirée, ou une grenade lancée (ou lâchée, ou qui explose en main).
+func _on_item_used(fighter: Fighter, kind: String, direction: Vector2, power: float, fuse: float) -> void:
+	var projectile := Projectile.new()
+	projectile.kind = kind
+	projectile.owner_index = fighter.player_index
+	projectile.position = fighter.global_position
+	match kind:
+		"balle":
+			projectile.position += direction * 24.0
+			projectile.velocity = direction * BULLET_SPEED
+			projectile.rotation = direction.angle()
+			projectile.length = 16.0
+			projectile.knockback = BULLET_KNOCKBACK
+			projectile.color = Color(1.0, 0.9, 0.5)
+		"grenade":
+			if fuse <= 0.0:
+				_explode(fighter.global_position)  # gardée trop longtemps : elle explose en main
+				return
+			projectile.fuse = fuse
+			projectile.length = 18.0
+			projectile.color = ItemPickup.color_of("grenade")
+			if direction != Vector2.ZERO:
+				# Lancée en cloche vers l'adversaire, plus ou moins loin selon le temps où RT a été gardé.
+				var lob := (direction + Vector2(0.0, -0.7)).normalized()
+				projectile.velocity = lob * lerpf(GRENADE_MIN_THROW, GRENADE_MAX_THROW, power)
+	_add_projectile(projectile)
+
+
+## Toutes les ITEM_SPAWN_TIME secondes, un objet tiré au sort apparaît à un des points prévus
+## par la map et tombe jusqu'à ce qu'il y a dessous. On le ramasse en passant dessus (si on n'a pas déjà un objet).
+func _tick_pickups(delta: float) -> void:
+	_item_spawn_timer -= delta
+	if _item_spawn_timer <= 0.0:
+		_item_spawn_timer = ITEM_SPAWN_TIME
+		if pickups.size() < MAX_PICKUPS:
+			var points := map.item_spawn_points()
+			spawn_pickup(ItemPickup.KINDS[rng.randi() % ItemPickup.KINDS.size()], points[rng.randi() % points.size()])
+	for pickup: ItemPickup in pickups.duplicate():
+		if not map.blast_zone.has_point(pickup.position):
+			_remove_pickup(pickup)
+			continue
+		for fighter in fighters:
+			if not fighter.eliminated and fighter.body_rect().intersects(pickup.rect()) and fighter.take_item(pickup.kind):
+				_remove_pickup(pickup)
+				break
+
+
+func spawn_pickup(kind: String, where: Vector2) -> ItemPickup:
+	var pickup := ItemPickup.new()
+	pickup.kind = kind
+	pickup.position = where
+	pickups.append(pickup)
+	add_child(pickup)
+	return pickup
+
+
+func _remove_pickup(pickup: ItemPickup) -> void:
+	pickups.erase(pickup)
+	pickup.queue_free()
+
+
+## (copain) Les objets par terre reçus de l'hôte.
+func _apply_pickups(list: Array) -> void:
+	while pickups.size() > list.size():
+		_remove_pickup(pickups[-1])
+	while pickups.size() < list.size():
+		var pickup := spawn_pickup("pistolet", Vector2.ZERO)
+		pickup.simulate = false
+	for i in list.size():
+		pickups[i].apply_net_state(list[i])
 
 
 ## La lance revient à son lanceur (ramassée, sortie de la map, ou il a réapparu).
 func _return_weapon(fighter: Fighter) -> void:
-	var index := fighters.find(fighter)
 	for projectile: Projectile in projectiles.duplicate():
-		if projectile.owner_index == index:
+		if projectile.kind == "lance" and projectile.owner_index == fighter.player_index:
 			_remove_projectile(projectile)
 	fighter.get_weapon_back()
 

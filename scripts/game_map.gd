@@ -10,6 +10,7 @@ extends Node2D
 ## Une map doit garder ces deux nœuds :
 ##   SpawnPoints   -> 4 Marker2D : où apparaissent les joueurs 1 à 4 au début (le marqueur = les pieds)
 ##   RespawnPoint  -> un Marker2D : où l'on réapparaît après une chute (le marqueur = les pieds)
+## Et si on veut, ItemSpawns -> des Marker2D : où apparaissent (puis tombent) les objets à ramasser.
 ## Les tests automatiques vérifient chaque map de MAPS (points présents, dans la zone de jeu,
 ## joueurs qui atterrissent bien) : s'il manque quelque chose, la mise en ligne s'arrête.
 
@@ -25,6 +26,18 @@ func spawn_position(player_index: int) -> Vector2:
 
 func respawn_position() -> Vector2:
 	return ($RespawnPoint as Node2D).position
+
+
+## Où les objets apparaissent (les Marker2D du nœud ItemSpawns : l'objet apparaît là et tombe
+## jusqu'à ce qu'il y a dessous). Sans ce nœud, ils apparaissent au-dessus du point de réapparition.
+func item_spawn_points() -> Array[Vector2]:
+	var points: Array[Vector2] = []
+	if has_node("ItemSpawns"):
+		for marker in $ItemSpawns.get_children():
+			points.append((marker as Node2D).position)
+	if points.is_empty():
+		points.append(respawn_position() - Vector2(0.0, 200.0))
+	return points
 
 
 ## Les plateformes qui bougent (navettes, ascenseurs) de la map.

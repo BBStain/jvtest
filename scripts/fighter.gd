@@ -12,6 +12,9 @@ extends CharacterBody2D
 
 signal life_lost(fighter: Fighter)
 signal weapon_thrown(fighter: Fighter, direction: Vector2, speed: float)  ## lance : game.gd crée la lance qui vole
+## Un objet utilisé (balle tirée, grenade lancée ou lâchée) : game.gd crée ce qui vole.
+## power : 0 à 1 (distance de la grenade) ; fuse : temps restant avant que la grenade explose.
+signal item_used(fighter: Fighter, kind: String, direction: Vector2, power: float, fuse: float)
 
 const PLATFORM_LAYER := 3  ## numéro de la couche "plateformes_traversables"
 
@@ -63,6 +66,15 @@ const SLAM_WAVE_REACH := 150.0          ## ... jusqu'où elle va de chaque côt�
 const SLAM_WAVE_RADIUS := 14.0          ## ... sa hauteur (de chaque côté du sol)
 const THROW_CHARGE_SPEED := 1.5         ## lance / dash du katana : à pleine charge, 1,5 fois plus vite
 
+# --- Objets ramassés sur la map (un seul à la fois, utilisé avec RT ; voir item_pickup.gd) ---
+const PISTOL_AMMO := 5                  ## balles du pistolet (une par appui)
+const PISTOL_COOLDOWN := 0.18           ## temps minimum entre deux balles
+const GRENADE_FUSE := 3.0               ## la grenade explose 3 s après avoir été dégoupillée (RT appuyé)
+const GRENADE_FULL_HOLD := 1.0          ## RT gardé ce temps : la grenade part le plus loin possible
+const ITEM_SHIELD_TIME := 5.0           ## le bouclier ramassé reste levé 5 s
+const ITEM_SHIELD_PUSH := 1300.0        ## qui frappe le bouclier ramassé est projeté très loin...
+const ITEM_SHIELD_COOLDOWN := 0.5       ## ... et ne peut plus frapper un instant
+
 # --- Blocage (B) : un bouclier qui craque peu à peu (ses points sont dans les stats du perso) ---
 const SHIELD_REGEN_TIME := 2.0          ## 1 point regagné toutes les 2 s quand on ne bloque pas
 const SHIELD_BREAK_COOLDOWN := 2.0      ## bouclier cassé : pas d'attaque pendant ce temps (on peut bouger)
@@ -111,6 +123,7 @@ const NET_VARS := [
 	"shield", "shield_broken", "_blocking", "_shield_broken_timer", "_shield_flash_timer",
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
 	"_stun_timer", "_block_hold_time", "weapon_away",
+	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -176,6 +189,13 @@ var _block_hold_time := 0.0             ## depuis combien de temps B est appuyé
 var _shield_regen_timer := 0.0
 var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
 var _shield_flash_timer := 0.0          ## petit éclat quand le bouclier encaisse un coup
+
+var item := ""                          ## l'objet ramassé : "", "pistolet", "grenade" ou "bouclier"
+var item_ammo := 0                      ## balles qui restent dans le pistolet
+var item_shield_timer := 0.0            ## bouclier ramassé levé encore ce temps
+var _item_cooldown := 0.0
+var _grenade_fuse := -1.0               ## grenade dégoupillée en main : temps avant l'explosion (-1 = non)
+var _grenade_hold := 0.0                ## depuis combien de temps RT est gardé (distance du lancer)
 
 var gauge := CounterGauge.new()         ## la jauge de contre de la partie (partagée, donnée par game.gd)
 
@@ -291,6 +311,7 @@ func physics_tick(input: InputState, delta: float) -> void:
 			_heavy_buffer_timer = 0.0
 			_try_start_attack(true)
 	_tick_attack(input, delta)
+	_tick_item(input, delta)
 
 	move_and_slide()
 	queue_redraw()
@@ -313,6 +334,8 @@ func _tick_timers(delta: float) -> void:
 	_stun_timer -= delta
 	_ladder_regrab_timer -= delta
 	_ladder_fling_timer -= delta
+	_item_cooldown -= delta
+	item_shield_timer -= delta
 	_blink_clock += delta
 
 
@@ -408,6 +431,64 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 			_jump_rising = true
 			_air_jumps_left -= 1
 			_jump_buffer_timer = 0.0
+
+
+## On ramasse un objet (seulement si on n'en a pas déjà un).
+func take_item(kind: String) -> bool:
+	if item != "":
+		return false
+	item = kind
+	item_ammo = PISTOL_AMMO if kind == "pistolet" else 0
+	return true
+
+
+## RT : pistolet = une balle par appui ; grenade = dégoupillée à l'appui, lancée en lâchant
+## (plus on garde, plus elle va loin) ; bouclier = levé pour quelques secondes.
+func _tick_item(input: InputState, delta: float) -> void:
+	if _grenade_fuse >= 0.0:
+		_grenade_fuse -= delta
+		_grenade_hold += delta
+		if _grenade_fuse <= 0.0:
+			_release_grenade(Vector2.ZERO, 0.0)  # gardée trop longtemps : elle explose en main
+		elif not input.item_held:
+			_release_grenade(_item_direction(), clampf(_grenade_hold / GRENADE_FULL_HOLD, 0.0, 1.0))
+		return
+	if not input.item_pressed or _blocking or is_dashing():
+		return
+	match item:
+		"pistolet":
+			if _item_cooldown <= 0.0:
+				_item_cooldown = PISTOL_COOLDOWN
+				item_ammo -= 1
+				if item_ammo <= 0:
+					item = ""
+				item_used.emit(self, "balle", _item_direction(), 1.0, 0.0)
+		"grenade":
+			_grenade_fuse = GRENADE_FUSE
+			_grenade_hold = 0.0
+		"bouclier":
+			item = ""
+			item_shield_timer = ITEM_SHIELD_TIME
+
+
+func _release_grenade(direction: Vector2, power: float) -> void:
+	var fuse := maxf(_grenade_fuse, 0.0)
+	item = ""
+	_grenade_fuse = -1.0
+	item_used.emit(self, "grenade", direction, power, fuse)
+
+
+## Vers l'adversaire visé (comme les attaques), ou devant soi.
+func _item_direction() -> Vector2:
+	if target != null and not target.eliminated:
+		var to_target := target.global_position - global_position
+		if to_target.length() > 1.0:
+			return to_target.normalized()
+	return Vector2(facing, 0.0)
+
+
+func is_item_shielded() -> bool:
+	return item_shield_timer > 0.0
 
 
 ## L'échelle que le corps touche, ou null.
@@ -663,6 +744,15 @@ func is_attack_active() -> bool:
 		and not _attack_has_hit and not (_is_slam_wave() and not is_on_floor())
 
 
+## Depuis combien de temps le coup peut toucher (pour le renvoi de balle au bon moment).
+func attack_time_since_active() -> float:
+	return _attack_time - _attack_startup()
+
+
+func attack_active_duration() -> float:
+	return _attack_active()
+
+
 func is_heavy_attack() -> bool:
 	return _attack_heavy
 
@@ -803,6 +893,8 @@ func take_hit(hit_dir: Vector2, knockback := -1.0) -> bool:
 	if knockback < 0.0:
 		knockback = stats.hit_knockback
 	_cancel_attack()
+	if _grenade_fuse >= 0.0:
+		_release_grenade(Vector2.ZERO, 0.0)  # touché : la grenade dégoupillée tombe des mains
 	_leave_ladder()
 	_dash_timer = 0.0
 	velocity = _pushed(hit_dir * knockback) + Vector2(0.0, -200.0)
@@ -865,6 +957,9 @@ func fall_out(respawn_position: Vector2) -> void:
 	_knockback_timer = 0.0
 	_wall_jump_timer = 0.0
 	_ladder_fling_timer = 0.0
+	if _grenade_fuse >= 0.0:
+		item = ""  # tombé avec une grenade dégoupillée : elle est perdue
+		_grenade_fuse = -1.0
 	_drop_timer = 0.0
 	_jump_buffer_timer = 0.0
 	_jump_rising = false
@@ -1063,6 +1158,8 @@ func _draw() -> void:
 		if weapon.held_head > 0.0:
 			draw_rect(Rect2(end - Vector2.ONE * weapon.held_head / 2.0, Vector2.ONE * weapon.held_head), weapon_color)
 
+	_draw_item(body)
+
 	# La jauge d'endurance, sur le côté opposé à l'adversaire
 	if _stamina_show_timer > 0.0:
 		_draw_stamina_gauge()
@@ -1080,6 +1177,31 @@ func _draw() -> void:
 				draw_rect(pip, Color(color, alpha))
 			else:
 				draw_rect(pip, Color(1, 1, 1, 0.5 * alpha), false, 2.0)
+
+
+## L'objet ramassé (dessin très simple, à remplacer par un graphiste) : pistolet et ses balles,
+## grenade (qui clignote de plus en plus vite une fois dégoupillée), bouclier levé devant soi.
+func _draw_item(body: Rect2) -> void:
+	if is_item_shielded():
+		var fade := clampf(item_shield_timer / 0.5, 0.0, 1.0)
+		var plate := Rect2(Vector2(facing * (body.size.x / 2.0 + 6.0) - 5.0, -body.size.y / 2.0 - 6.0), Vector2(10.0, body.size.y + 12.0))
+		draw_rect(plate, Color(ItemPickup.color_of("bouclier"), 0.85 * fade))
+		draw_rect(plate.grow(2.0), Color(1, 1, 1, 0.6 * fade), false, 2.0)
+	var hand := Vector2(facing * (body.size.x / 2.0 + 6.0), 6.0)
+	match item:
+		"pistolet":
+			draw_rect(Rect2(hand + Vector2(-5.0 if facing < 0.0 else 0.0, -3.0), Vector2(14.0 * facing, 6.0)).abs(), ItemPickup.color_of("pistolet"))
+			for i in item_ammo:
+				draw_rect(Rect2(Vector2(-body.size.x / 2.0 + i * 5.0, body.size.y / 2.0 + 4.0), Vector2(3.0, 5.0)), Color(1, 0.9, 0.5, 0.8))
+		"grenade":
+			var grenade_color := ItemPickup.color_of("grenade")
+			if _grenade_fuse >= 0.0 and int(_blink_clock / lerpf(0.05, 0.25, _grenade_fuse / GRENADE_FUSE)) % 2 == 0:
+				grenade_color = Color(1, 0.3, 0.2)
+			draw_circle(hand, 7.0, grenade_color)
+			if _grenade_fuse >= 0.0:
+				# Plus RT est gardé, plus elle partira loin
+				var power := clampf(_grenade_hold / GRENADE_FULL_HOLD, 0.0, 1.0)
+				draw_arc(hand, 12.0, -PI / 2.0, -PI / 2.0 + TAU * power, 20, Color(1, 1, 1, 0.8), 2.0)
 
 
 ## Prépare les fissures du bouclier : chacune part du bord de la surbrillance vers le perso

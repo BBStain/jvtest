@@ -544,6 +544,7 @@ func _controls_table() -> GridContainer:
 		["Dash", "LB", "G", "J"],
 		["Courir (garder)", "LT", "Shift gauche", "Shift droit"],
 		["Bloquer (garder)", "B", "C", "U"],
+		["Objet", "RT", "E", "O"],
 		["Pause", "Start", "Échap ou P", "Échap ou P"],
 	]
 	for r in rows.size():
