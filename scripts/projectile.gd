@@ -144,7 +144,9 @@ func _draw() -> void:
 			draw_line(Vector2(-length / 2.0 - 24.0, 0.0), Vector2(-length / 2.0, 0.0), Color(color, 0.3), 2.0)
 			draw_line(Vector2(-length / 2.0, 0.0), Vector2(length / 2.0, 0.0), color, 4.0)
 		"grenade":
-			var blink := int(age / lerpf(0.05, 0.25, clampf(fuse / 3.0, 0.0, 1.0))) % 2 == 0
+			# Clignote d'après la mèche (envoyée aux copains en ligne), pas d'après l'âge (qui n'est
+			# compté que chez l'hôte : chez un copain, la grenade restait rouge sans clignoter).
+			var blink := int(fuse / lerpf(0.05, 0.25, clampf(fuse / 3.0, 0.0, 1.0))) % 2 == 0
 			draw_circle(Vector2.ZERO, 8.0, Color(1, 0.3, 0.2) if blink and fuse < 1.5 else color)
 			draw_arc(Vector2.ZERO, 8.0, 0.0, TAU, 16, Color(1, 1, 1, 0.6), 1.5)
 		_:
