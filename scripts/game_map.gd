@@ -18,6 +18,8 @@ extends Node2D
 ## Au-delà de ce rectangle, le joueur est sorti de la map et perd une vie.
 @export var blast_zone := Rect2(-2150, -1500, 5400, 2450)
 
+var _windows: Array[BreakableWindow] = []
+
 
 func spawn_position(player_index: int) -> Vector2:
 	var points := $SpawnPoints.get_children()
@@ -67,3 +69,37 @@ func apply_moving_state(times: Array) -> void:
 	var platforms := moving_platforms()
 	for i in mini(times.size(), platforms.size()):
 		platforms[i].set_time(times[i])
+
+
+## Les fenêtres cassables de la map (cherchées une seule fois).
+func windows() -> Array[BreakableWindow]:
+	if _windows.is_empty():
+		_find_windows(self, _windows)
+	return _windows
+
+
+func _find_windows(node: Node, found: Array[BreakableWindow]) -> void:
+	for child in node.get_children():
+		if child is BreakableWindow:
+			found.append(child)
+		_find_windows(child, found)
+
+
+## Casse les fenêtres touchées par une zone ronde (explosion).
+func smash_windows_in(center: Vector2, radius: float) -> void:
+	for window in windows():
+		var r := window.rect()
+		if center.clamp(r.position, r.end).distance_to(center) <= radius:
+			window.smash()
+
+
+## Jeu en ligne (hôte) : quelles fenêtres sont cassées.
+func window_state() -> Array:
+	return windows().map(func(w: BreakableWindow) -> bool: return w.broken)
+
+
+## Jeu en ligne (copain) : on casse / répare les fenêtres comme chez l'hôte.
+func apply_window_state(states: Array) -> void:
+	var list := windows()
+	for i in mini(states.size(), list.size()):
+		list[i].set_broken(states[i])

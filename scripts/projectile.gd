@@ -53,6 +53,9 @@ func _tick_spear(delta: float) -> void:
 	velocity.y += (FLY_GRAVITY if state == State.FLYING else DROP_GRAVITY) * delta
 	var step := velocity * delta
 	var hit := _ray(position, tip() + step, velocity.y > 0.0)
+	if state == State.FLYING and not hit.is_empty() and hit.collider is BreakableWindow:
+		(hit.collider as BreakableWindow).smash()  # la lance casse la fenêtre et passe au travers
+		hit = {}
 	if not hit.is_empty():
 		position += (hit.position as Vector2) - tip()
 		velocity = Vector2.ZERO
@@ -65,7 +68,10 @@ func _tick_spear(delta: float) -> void:
 
 func _tick_bullet(delta: float) -> void:
 	var step := velocity * delta
-	if age > BULLET_LIFETIME or not _ray(position, tip() + step, false).is_empty():
+	var hit := _ray(position, tip() + step, false)
+	if not hit.is_empty() and hit.collider is BreakableWindow:
+		(hit.collider as BreakableWindow).smash()  # la balle casse la fenêtre et s'arrête
+	if age > BULLET_LIFETIME or not hit.is_empty():
 		finished = true
 		return
 	position += step

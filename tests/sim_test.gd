@@ -2028,6 +2028,66 @@ func _ready() -> void:
 	await step(60)
 	check(p1.is_on_floor() and absf(p1.position.y + 30 - (top_right.position.y - 8)) < 3, "Ascenseur des cimes : on passe sur les cimes de droite")
 	await shot("18_hauteurs")
+	# 18c) Les colonnes de fenêtres : on les casse en les percutant vite (dash), en les frappant,
+	# au pistolet ou avec une explosion ; marcher dedans ne les casse pas ; elles reviennent
+	var cols: Node = game.map.get_node("Toit/Hauteurs/ColonneGauche")
+	var win1 := cols.get_node("Fenetre1") as BreakableWindow
+	var win_feet := roof_top
+	p2.position = Vector2(win1.position.x + 300, win_feet - 30); p2.velocity = Vector2.ZERO
+	p1._leave_vine(); p1._stun_timer = 0.0; p1._invincible_timer = 0.0; p1._knockback_timer = 0.0
+	p1.position = Vector2(win1.position.x - 150, win_feet - 30); p1.velocity = Vector2.ZERO
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = 1.0)
+	await step(60)
+	check(not win1.broken and p1.position.x < win1.position.x, "Fenêtre : marcher dedans ne la casse pas")
+	p1.position = Vector2(win1.position.x - 150, win_feet - 30); p1.velocity = Vector2.ZERO
+	p1._dash_cooldown_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = 1.0; s.dash_pressed = f == 1)
+	await step(20)
+	check(win1.broken and p1.position.x > win1.position.x + win1.size.x / 2.0,
+		"Fenêtre : un dash la casse et on passe au travers (x = %.0f)" % p1.position.x)
+	var win2 := cols.get_node("Fenetre2") as BreakableWindow
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.position = Vector2(win2.position.x - 70, win2.position.y); p1.velocity = Vector2.ZERO
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	check(win2.broken, "Fenêtre : un coup la casse")
+	var win3 := cols.get_node("Fenetre3") as BreakableWindow
+	p1._cancel_attack()
+	p1.position = Vector2(win3.position.x - 200, win3.position.y); p1.velocity = Vector2.ZERO
+	p2.position = Vector2(win3.position.x + 200, win3.position.y); p2.velocity = Vector2.ZERO
+	await step(1)
+	p1.take_item("pistolet")
+	p1._item_cooldown = 0.0
+	p1.input_source = Scripted.new(func(s, f): s.item_pressed = f == 0)
+	await step(20)
+	check(win3.broken and untouched(p2), "Fenêtre : une balle la casse (et s'arrête)")
+	var win5 := cols.get_node("Fenetre5") as BreakableWindow
+	game._explode(win5.position + Vector2(-90, 0))
+	check(win5.broken, "Fenêtre : une explosion la casse")
+	var online_copy: Array = game.map.window_state()
+	check(online_copy.count(true) >= 4, "Fenêtres en ligne : l'hôte envoie lesquelles sont cassées (%d)" % online_copy.count(true))
+	game.map.apply_window_state([false, false, false, false])
+	check(not win1.broken and not win2.broken and not win3.broken, "Fenêtres en ligne : le copain les répare comme l'hôte")
+	game.map.apply_window_state(online_copy)
+	await shot("18_fenetres")
+	p1.position = Vector2(win2.position.x - 300, win2.position.y); p2.position = Vector2(win2.position.x + 300, win2.position.y)
+	await step(int(BreakableWindow.RESPAWN_TIME * 60) + 5)
+	check(not win1.broken and not win2.broken and not win5.broken, "Fenêtres : elles reviennent au bout de %d s" % BreakableWindow.RESPAWN_TIME)
+	# 18d) Le 2e toit ferme le haut : on ne le traverse pas en sautant
+	var roof2 := game.map.get_node("Toit/Toit2") as Node2D
+	var top_mid := game.map.get_node("Toit/Hauteurs/SommetMilieu2") as Node2D
+	p1.position = Vector2(top_mid.position.x, top_mid.position.y - 8 - 30); p1.velocity = Vector2.ZERO
+	p1._air_dashes_left = 1; p1._dash_cooldown_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f):
+		s.jump_pressed = f == 2 or f == 14
+		s.jump_held = true
+		s.stick.y = -1.0 if f >= 22 else 0.0
+		s.dash_pressed = f == 22)
+	var top_head := p1.position.y
+	for i in 60:
+		await step(1)
+		top_head = minf(top_head, p1.position.y - 30)
+	check(top_head >= roof2.position.y + 20 - 1, "Toit du haut : on ne le traverse pas (tête au plus haut %.0f)" % top_head)
 
 	# 15) Jeu en ligne (sans réseau ici : on joue l'hôte puis un copain, et on passe les messages à la main)
 	# 15a) Les touches d'un copain arrivent par le réseau : un appui n'est jamais perdu

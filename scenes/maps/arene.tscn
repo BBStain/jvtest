@@ -1,4 +1,4 @@
-[gd_scene load_steps=30 format=3]
+[gd_scene load_steps=35 format=3]
 
 [ext_resource type="Script" path="res://scripts/game_map.gd" id="0_map"]
 
@@ -11,6 +11,8 @@
 [ext_resource type="Script" path="res://scripts/curved_bar.gd" id="5_bar"]
 
 [ext_resource type="Script" path="res://scripts/jungle_tree.gd" id="6_tree"]
+
+[ext_resource type="Script" path="res://scripts/breakable_window.gd" id="7_window"]
 
 [sub_resource type="RectangleShape2D" id="Shape_Sol"]
 size = Vector2(1100, 60)
@@ -81,10 +83,22 @@ size = Vector2(140, 40)
 [sub_resource type="RectangleShape2D" id="Shape_H_160x40"]
 size = Vector2(160, 40)
 
+[sub_resource type="RectangleShape2D" id="Shape_H_150x16"]
+size = Vector2(150, 16)
+
+[sub_resource type="RectangleShape2D" id="Shape_H_300x16"]
+size = Vector2(300, 16)
+
+[sub_resource type="RectangleShape2D" id="Shape_H_200x16"]
+size = Vector2(200, 16)
+
+[sub_resource type="RectangleShape2D" id="Shape_H_4500x40"]
+size = Vector2(4500, 40)
+
 [node name="Arene" type="Node2D"]
 script = ExtResource("0_map")
 map_name = "Arène"
-blast_zone = Rect2(-2150, -2600, 5400, 3550)
+blast_zone = Rect2(-2150, -3300, 5400, 4250)
 
 [node name="Sol" type="StaticBody2D" parent="."]
 position = Vector2(640, 600)
@@ -806,7 +820,7 @@ script = ExtResource("4_vine")
 length = 290.0
 
 [node name="Arbre" type="Node2D" parent="Toit/Jungle"]
-position = Vector2(450, -700)
+position = Vector2(1000, -700)
 script = ExtResource("6_tree")
 branches = Array[Rect2]([Rect2(-250, -230, 250, 20), Rect2(0, -360, 270, 20), Rect2(-210, -480, 210, 20)])
 
@@ -816,7 +830,7 @@ script = ExtResource("4_vine")
 length = 230.0
 
 [node name="Arche3" type="Node2D" parent="Toit/Jungle"]
-position = Vector2(1350, -700)
+position = Vector2(1450, -700)
 script = ExtResource("5_bar")
 
 [node name="Liane" type="Node2D" parent="Toit/Jungle/Arche3"]
@@ -932,7 +946,7 @@ mouse_filter = 2
 color = Color(0.42, 0.6, 0.42, 1)
 
 [node name="Marchepied2" type="StaticBody2D" parent="Toit/Hauteurs"]
-position = Vector2(100, -1600)
+position = Vector2(-50, -1600)
 collision_layer = 4
 collision_mask = 0
 
@@ -949,7 +963,7 @@ mouse_filter = 2
 color = Color(0.42, 0.6, 0.42, 1)
 
 [node name="Marchepied3" type="StaticBody2D" parent="Toit/Hauteurs"]
-position = Vector2(1050, -1300)
+position = Vector2(1400, -1350)
 collision_layer = 4
 collision_mask = 0
 
@@ -983,7 +997,7 @@ mouse_filter = 2
 color = Color(0.42, 0.6, 0.42, 1)
 
 [node name="Canopee" type="StaticBody2D" parent="Toit/Hauteurs"]
-position = Vector2(450, -1420)
+position = Vector2(1000, -1420)
 collision_layer = 4
 collision_mask = 0
 
@@ -1000,7 +1014,7 @@ mouse_filter = 2
 color = Color(0.42, 0.6, 0.42, 1)
 
 [node name="LianeCanopee" type="Node2D" parent="Toit/Hauteurs"]
-position = Vector2(620, -1412)
+position = Vector2(1170, -1412)
 script = ExtResource("4_vine")
 length = 280.0
 
@@ -1121,6 +1135,460 @@ script = ExtResource("3_ladder")
 size = Vector2(40, 510)
 exit_push = Vector2(-520, -760)
 
+[node name="Puits1" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(320, -950)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/Puits1"]
+shape = SubResource("Shape_H_150x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/Puits1"]
+offset_left = -75.0
+offset_top = -8.0
+offset_right = 75.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="Puits2" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(460, -1200)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/Puits2"]
+shape = SubResource("Shape_H_150x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/Puits2"]
+offset_left = -75.0
+offset_top = -8.0
+offset_right = 75.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="Puits3" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(320, -1450)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/Puits3"]
+shape = SubResource("Shape_H_150x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/Puits3"]
+offset_left = -75.0
+offset_top = -8.0
+offset_right = 75.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="Puits4" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(460, -1700)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/Puits4"]
+shape = SubResource("Shape_H_150x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/Puits4"]
+offset_left = -75.0
+offset_top = -8.0
+offset_right = 75.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="Puits5" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(320, -1950)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/Puits5"]
+shape = SubResource("Shape_H_150x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/Puits5"]
+offset_left = -75.0
+offset_top = -8.0
+offset_right = 75.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="Puits6" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(460, -2200)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/Puits6"]
+shape = SubResource("Shape_H_150x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/Puits6"]
+offset_left = -75.0
+offset_top = -8.0
+offset_right = 75.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="Puits7" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(320, -2450)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/Puits7"]
+shape = SubResource("Shape_H_150x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/Puits7"]
+offset_left = -75.0
+offset_top = -8.0
+offset_right = 75.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="LianePuits" type="Node2D" parent="Toit/Hauteurs"]
+position = Vector2(390, -2680)
+script = ExtResource("4_vine")
+length = 300.0
+
+[node name="EchelleSommet" type="Node2D" parent="Toit/Hauteurs"]
+position = Vector2(-1500, -1814.0)
+script = ExtResource("3_ladder")
+size = Vector2(40, 772)
+exit_push = Vector2(520, -760)
+
+[node name="SommetGauche" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(-1400, -2150)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/SommetGauche"]
+shape = SubResource("Shape_H_400x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/SommetGauche"]
+offset_left = -200.0
+offset_top = -8.0
+offset_right = 200.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="SommetGauche2" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(-700, -2300)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/SommetGauche2"]
+shape = SubResource("Shape_H_300x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/SommetGauche2"]
+offset_left = -150.0
+offset_top = -8.0
+offset_right = 150.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="SommetGauche3" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(-1100, -2500)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/SommetGauche3"]
+shape = SubResource("Shape_H_300x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/SommetGauche3"]
+offset_left = -150.0
+offset_top = -8.0
+offset_right = 150.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="SommetGauche4" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(-200, -2150)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/SommetGauche4"]
+shape = SubResource("Shape_H_200x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/SommetGauche4"]
+offset_left = -100.0
+offset_top = -8.0
+offset_right = 100.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="LianeSommetGauche" type="Node2D" parent="Toit/Hauteurs"]
+position = Vector2(-600, -2292)
+script = ExtResource("4_vine")
+length = 250.0
+
+[node name="AscenseurSommet" type="AnimatableBody2D" parent="Toit/Hauteurs"]
+position = Vector2(1900, -1758)
+script = ExtResource("2_moving")
+size = Vector2(140, 16)
+travel = Vector2(0, -700)
+period = 7.0
+pause = 1.5
+color = Color(0.85, 0.7, 0.4, 1)
+
+[node name="SommetDroite" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(2200, -2458)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/SommetDroite"]
+shape = SubResource("Shape_H_400x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/SommetDroite"]
+offset_left = -200.0
+offset_top = -8.0
+offset_right = 200.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="SommetMilieu" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(1100, -2200)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/SommetMilieu"]
+shape = SubResource("Shape_H_400x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/SommetMilieu"]
+offset_left = -200.0
+offset_top = -8.0
+offset_right = 200.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="SommetMilieu2" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(1500, -2500)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/SommetMilieu2"]
+shape = SubResource("Shape_H_300x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/SommetMilieu2"]
+offset_left = -150.0
+offset_top = -8.0
+offset_right = 150.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="SommetMilieu3" type="StaticBody2D" parent="Toit/Hauteurs"]
+position = Vector2(800, -2450)
+collision_layer = 4
+collision_mask = 0
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Hauteurs/SommetMilieu3"]
+shape = SubResource("Shape_H_200x16")
+one_way_collision = true
+
+[node name="Visuel" type="ColorRect" parent="Toit/Hauteurs/SommetMilieu3"]
+offset_left = -100.0
+offset_top = -8.0
+offset_right = 100.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.42, 0.6, 0.42, 1)
+
+[node name="NavetteSommet" type="AnimatableBody2D" parent="Toit/Hauteurs"]
+position = Vector2(1000, -2350)
+script = ExtResource("2_moving")
+size = Vector2(160, 16)
+travel = Vector2(600, 0)
+period = 8.0
+
+[node name="LianeSommetMilieu" type="Node2D" parent="Toit/Hauteurs"]
+position = Vector2(1250, -2192)
+script = ExtResource("4_vine")
+length = 250.0
+
+[node name="Toit2" type="StaticBody2D" parent="Toit"]
+position = Vector2(390, -2700)
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Toit2"]
+shape = SubResource("Shape_H_4500x40")
+
+[node name="Visuel" type="ColorRect" parent="Toit/Toit2"]
+offset_left = -2250.0
+offset_top = -20.0
+offset_right = 2250.0
+offset_bottom = 20.0
+mouse_filter = 2
+color = Color(0.36, 0.4, 0.5, 1)
+
+[node name="ColonneGauche" type="Node2D" parent="Toit/Hauteurs"]
+
+[node name="Fenetre1" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -755)
+script = ExtResource("7_window")
+
+[node name="Fenetre2" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -865)
+script = ExtResource("7_window")
+
+[node name="Fenetre3" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -975)
+script = ExtResource("7_window")
+
+[node name="Fenetre4" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -1085)
+script = ExtResource("7_window")
+
+[node name="Fenetre5" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -1195)
+script = ExtResource("7_window")
+
+[node name="Fenetre6" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -1305)
+script = ExtResource("7_window")
+
+[node name="Fenetre7" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -1415)
+script = ExtResource("7_window")
+
+[node name="Fenetre8" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -1525)
+script = ExtResource("7_window")
+
+[node name="Fenetre9" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -1635)
+script = ExtResource("7_window")
+
+[node name="Fenetre10" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -1745)
+script = ExtResource("7_window")
+
+[node name="Fenetre11" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -1855)
+script = ExtResource("7_window")
+
+[node name="Fenetre12" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -1965)
+script = ExtResource("7_window")
+
+[node name="Fenetre13" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -2075)
+script = ExtResource("7_window")
+
+[node name="Fenetre14" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -2185)
+script = ExtResource("7_window")
+
+[node name="Fenetre15" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -2295)
+script = ExtResource("7_window")
+
+[node name="Fenetre16" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -2405)
+script = ExtResource("7_window")
+
+[node name="Fenetre17" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -2515)
+script = ExtResource("7_window")
+
+[node name="Fenetre18" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+position = Vector2(190, -2625)
+script = ExtResource("7_window")
+
+[node name="ColonneDroite" type="Node2D" parent="Toit/Hauteurs"]
+
+[node name="Fenetre1" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -755)
+script = ExtResource("7_window")
+
+[node name="Fenetre2" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -865)
+script = ExtResource("7_window")
+
+[node name="Fenetre3" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -975)
+script = ExtResource("7_window")
+
+[node name="Fenetre4" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -1085)
+script = ExtResource("7_window")
+
+[node name="Fenetre5" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -1195)
+script = ExtResource("7_window")
+
+[node name="Fenetre6" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -1305)
+script = ExtResource("7_window")
+
+[node name="Fenetre7" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -1415)
+script = ExtResource("7_window")
+
+[node name="Fenetre8" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -1525)
+script = ExtResource("7_window")
+
+[node name="Fenetre9" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -1635)
+script = ExtResource("7_window")
+
+[node name="Fenetre10" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -1745)
+script = ExtResource("7_window")
+
+[node name="Fenetre11" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -1855)
+script = ExtResource("7_window")
+
+[node name="Fenetre12" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -1965)
+script = ExtResource("7_window")
+
+[node name="Fenetre13" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -2075)
+script = ExtResource("7_window")
+
+[node name="Fenetre14" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -2185)
+script = ExtResource("7_window")
+
+[node name="Fenetre15" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -2295)
+script = ExtResource("7_window")
+
+[node name="Fenetre16" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -2405)
+script = ExtResource("7_window")
+
+[node name="Fenetre17" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -2515)
+script = ExtResource("7_window")
+
+[node name="Fenetre18" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+position = Vector2(590, -2625)
+script = ExtResource("7_window")
+
 [node name="ItemSpawns" type="Node2D" parent="."]
 
 [node name="SolGauche" type="Marker2D" parent="ItemSpawns"]
@@ -1148,7 +1616,7 @@ position = Vector2(-640, -500)
 position = Vector2(-1215, 0)
 
 [node name="Toit1" type="Marker2D" parent="ItemSpawns"]
-position = Vector2(300, -900)
+position = Vector2(390, -900)
 
 [node name="Toit2" type="Marker2D" parent="ItemSpawns"]
 position = Vector2(1500, -900)
@@ -1157,7 +1625,7 @@ position = Vector2(1500, -900)
 position = Vector2(-1450, -1600)
 
 [node name="HauteursCanopee" type="Marker2D" parent="ItemSpawns"]
-position = Vector2(450, -1600)
+position = Vector2(1000, -1600)
 
 [node name="HauteursCimesGauche" type="Marker2D" parent="ItemSpawns"]
 position = Vector2(-800, -2000)
@@ -1167,6 +1635,18 @@ position = Vector2(1050, -2000)
 
 [node name="HauteursCimesDroite" type="Marker2D" parent="ItemSpawns"]
 position = Vector2(2160, -2000)
+
+[node name="HauteursSommetGauche" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(-1400, -2300)
+
+[node name="HauteursPuits" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(390, -2550)
+
+[node name="HauteursSommetDroite" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(2200, -2600)
+
+[node name="HauteursSommetMilieu" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(1100, -2350)
 
 [node name="SpawnPoints" type="Node2D" parent="."]
 

@@ -45,6 +45,10 @@ const VINE_MAX_ANGLE := 1.75            ## on monte au plus un peu au-dessus de 
 const VINE_JUMP_BOOST := 0.4            ## en sautant de la liane : petit saut en plus de l'élan (part du double saut)
 const VINE_FLING_TIME := 0.3            ## après avoir lâché la liane, on garde son élan ce temps
 
+# --- Fenêtres (voir breakable_window.gd) ---
+const WINDOW_BREAK_SPEED := 900.0       ## percuter une fenêtre au moins aussi vite (dash, projeté) la casse
+const WINDOW_BREAK_KEEP := 0.85         ## ... et on passe au travers en gardant cette part de sa vitesse
+
 # --- Dash ---
 const DASH_END_KEEP := 0.55             ## part de la vitesse gardée à la fin du dash
 
@@ -358,7 +362,7 @@ func physics_tick(input: InputState, delta: float) -> void:
 	_tick_attack(input, delta)
 	_tick_item(input, delta)
 
-	move_and_slide()
+	_move()
 	queue_redraw()
 
 
@@ -636,7 +640,7 @@ func _tick_vine(input: InputState, delta: float) -> void:
 		_swing_speed = 0.0
 	var target := _swing_anchor + Vector2(sin(_swing_angle), cos(_swing_angle)) * _swing_length
 	velocity = (target - global_position) / maxf(delta, 0.0001)
-	move_and_slide()
+	_move()
 	if is_on_floor():
 		_leave_vine()  # on s'est posé : on lâche
 	elif get_slide_collision_count() > 0:
@@ -644,6 +648,23 @@ func _tick_vine(input: InputState, delta: float) -> void:
 		var offset := global_position - _swing_anchor
 		_swing_angle = atan2(offset.x, offset.y)
 		_swing_speed *= -0.3
+
+
+## Avance (move_and_slide). Une fenêtre percutée assez vite casse, et on passe au travers.
+## Tomber dessus par le haut ne la casse pas.
+func _move() -> void:
+	var before := velocity
+	move_and_slide()
+	for i in get_slide_collision_count():
+		var collision := get_slide_collision(i)
+		var window := collision.get_collider() as BreakableWindow
+		if window == null:
+			continue
+		var normal := collision.get_normal()
+		if normal.y < -0.5:
+			continue
+		if -before.dot(normal) >= WINDOW_BREAK_SPEED and window.smash():
+			velocity = before * WINDOW_BREAK_KEEP
 
 
 func _leave_vine() -> void:
