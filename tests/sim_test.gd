@@ -1618,6 +1618,21 @@ func _ready() -> void:
 	p1.position.x = 500; p2.position.x = 700
 	await step(30)
 	check(untouched(p2) and untouched(p1) and not game._duel.is_empty(), "Katana : le dash tranchant contré par un coup léger -> micro-duel")
+	# 18c bis) Toute lourde d'une arme contrée l'use : plus petite, cassée au 3e contre (court ralenti zoomé)
+	check(p1.weapon_counters == 1 and p1.weapon_length() < 1.0 and p1._armed_stats.attack_reach < p1._bare_stats.attack_reach * p1.weapon.light_reach_mult,
+		"Arme usée : le katana contré rapetisse")
+	check(not game._wear_weapon(p2, p1) and p2.weapon_counters == 0, "Arme usée : à mains nues, rien ne s'use")
+	check(not game._wear_weapon(p1, p2) and p1.weapon_counters == 2, "Arme usée : 2e contre, pas encore cassée")
+	check(game._wear_weapon(p1, p2) and p1.is_weapon_broken() and p1.weapon_away and p1.heavy_kind() == WeaponStats.Heavy.SWING,
+		"Arme usée : au 3e contre l'arme casse (mains nues)")
+	await step(2)
+	check(Engine.time_scale < 0.5 and game._break_focus == [p1, p2], "Arme cassée : court ralenti et zoom sur les deux joueurs")
+	await step(120)
+	check(game._break_focus.is_empty() and Engine.time_scale > 0.99, "Arme cassée : le ralenti est court")
+	p1.position = Vector2(640, 2000)
+	await step(2)
+	check(not p1.weapon_away and p1.weapon_counters == 0 and p1.heavy_kind() == WeaponStats.Heavy.DASH,
+		"Arme cassée : une neuve revient à la prochaine vie perdue")
 	# 18d) Marteau : le coup léger projette bien plus loin ; la lourde fait une onde de choc au sol
 	GameSetup.player_weapons = [GameSetup.WEAPONS[2], GameSetup.WEAPONS[0]]
 	await new_game()
@@ -1715,14 +1730,14 @@ func _ready() -> void:
 	spear.position = p2.attack_center()
 	spear.velocity = Vector2(300, 0)
 	await step(1)
-	check(p1.spear_counters == 1 and spear.state == Projectile.State.DROPPED and untouched(p2),
+	check(p1.weapon_counters == 1 and spear.state == Projectile.State.DROPPED and untouched(p2),
 		"Lance contrée : frappée en vol, elle retombe sans toucher")
 	check(game.gauge.points > points_before and p2.attack_cooldown_left() == 0.0,
 		"Lance contrée : ça compte comme un contre (jauge, recharge à zéro)")
 	check(spear.length < Projectile.SPEAR_LENGTH and p1._armed_stats.attack_reach < base.attack_reach * spear_weapon.light_reach_mult,
 		"Lance contrée : elle est plus courte (lancée et en main)")
 	game._counter_spear(spear, p2)
-	check(p1.spear_counters == 2 and not p1.is_weapon_broken() and game.projectiles.size() == 1, "Lance contrée 2 fois : pas encore cassée")
+	check(p1.weapon_counters == 2 and not p1.is_weapon_broken() and game.projectiles.size() == 1, "Lance contrée 2 fois : pas encore cassée")
 	game._counter_spear(spear, p2)
 	check(p1.is_weapon_broken() and game.projectiles.is_empty() and p1.weapon_away, "Lance contrée 3 fois : cassée")
 	p1._attack_cooldown_timer = 0.0
@@ -1731,7 +1746,7 @@ func _ready() -> void:
 		"Lance cassée : on reste à mains nues")
 	p1.position = Vector2(640, 2000)
 	await step(2)
-	check(not p1.weapon_away and p1.spear_counters == 0 and is_equal_approx(p1.stats.attack_reach, base.attack_reach * spear_weapon.light_reach_mult),
+	check(not p1.weapon_away and p1.weapon_counters == 0 and is_equal_approx(p1.stats.attack_reach, base.attack_reach * spear_weapon.light_reach_mult),
 		"Lance cassée : une lance neuve revient à la prochaine vie perdue")
 	GameSetup.player_weapons = []
 

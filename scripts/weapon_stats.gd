@@ -38,6 +38,11 @@ enum Heavy {
 @export var heavy_speed := 0.0           ## katana : vitesse du dash ; lance : vitesse du lancer (pleine charge = x1,5)
 
 
+## Mains nues : pas d'arme qui s'use ni qui casse.
+func is_bare_hands() -> bool:
+	return heavy == Heavy.SWING and held_length <= 0.0
+
+
 ## Les stats du perso avec cette arme en main (une copie : le perso de base ne change pas).
 func apply_to(base: CharacterStats) -> CharacterStats:
 	var s := base.duplicate() as CharacterStats

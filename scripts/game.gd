@@ -33,6 +33,10 @@ const DUEL_GROUP_CAMERA_MARGIN := Vector2(480, 320)  ## à 3 ou 4 : tout le mond
 const SHIELD_BREAK_TIME_SCALE := 0.3        ## bouclier cassé : ralenti (3 fois moins vite)...
 const SHIELD_BREAK_SLOWMO := 1.2            ## ... pendant 1,2 vraie seconde
 const PARRY_COLOR := Color(0.55, 0.85, 1.0)  ## la marque d'un blocage parfait
+const WEAPON_BREAK_TIME_SCALE := 0.25       ## arme cassée (3e contre de sa lourde) : court ralenti...
+const WEAPON_BREAK_SLOWMO := 0.8            ## ... pendant 0,8 vraie seconde...
+const WEAPON_BREAK_CAMERA_MARGIN := Vector2(260, 180)  ## ... et la caméra zoome fort sur l'arme qui casse
+const WEAPON_BREAK_ZOOM_MAX := 2.4
 
 # --- 1 contre 1 : tant qu'un joueur est sonné, la caméra serre les deux joueurs et le temps ralentit un peu ---
 const STUN_TIME_SCALE := 0.75              ## le jeu va un peu moins vite (2 s sonné = 2,7 vraies secondes)
@@ -59,7 +63,7 @@ const GRENADE_RADIUS := 140.0              ## rayon de l'explosion
 const GRENADE_KNOCKBACK := 1150.0
 const GRENADE_SHIELD_DAMAGE := 3
 
-const ONLINE_HEADER := 10                  ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
+const ONLINE_HEADER := 11                  ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
 var fighters: Array[Fighter] = []
 var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
@@ -72,6 +76,8 @@ var _duel: Array[Fighter] = []             ## les deux joueurs du micro-duel en 
 var _duel_slowmo := -1                     ## le ralenti du micro-duel en cours (voir TimeEngine.play())
 var _stun_focus: Array[Fighter] = []       ## 1 contre 1 : celui qui a sonné et le joueur sonné
 var _stun_slowmo := -1                     ## le ralenti lancé pour le joueur sonné (voir TimeEngine.play())
+var _break_focus: Array[Fighter] = []      ## arme qui vient de casser : son porteur et celui qui l'a contré
+var _break_slowmo := -1                    ## le court ralenti de l'arme cassée (voir TimeEngine.play())
 var _shake_left := 0.0                     ## l'écran tremble encore pendant ce temps (vraies secondes)
 var _lives_seen: Array[int] = []           ## les vies de chacun à la frame d'avant (pour voir une vie perdue)
 var gauge := CounterGauge.new()            ## la jauge de contre, une seule pour tous les joueurs
@@ -135,6 +141,8 @@ func _process(delta: float) -> void:
 	var real_delta := delta / Engine.time_scale  # la caméra garde sa vitesse pendant un ralenti
 	if not _is_online_guest() and not _time_engine.is_playing(_duel_slowmo):
 		_duel.clear()  # le ralenti du duel est fini (ou un autre ralenti a pris sa place) : plus de duel
+	if not _is_online_guest() and not _time_engine.is_playing(_break_slowmo):
+		_break_focus.clear()
 	_update_camera(real_delta, false)
 	_update_shake(real_delta)
 
@@ -231,6 +239,9 @@ func _guest_tick() -> void:
 	_apply_projectiles(state[7])
 	_apply_pickups(state[8])
 	map.apply_window_state(state[9])
+	_break_focus.clear()
+	for index in state[10]:
+		_break_focus.append(fighters[index])
 	if state[2] != "" and not _match_over:
 		_show_end(state[2], fighters[state[3]].color if state[3] >= 0 else Color.WHITE)
 	for i in mini(fighters.size(), state.size() - ONLINE_HEADER):
@@ -247,13 +258,16 @@ func online_state() -> Array:
 	var stun_focus := []
 	for fighter in _stun_focus:
 		stun_focus.append(fighters.find(fighter))
+	var break_focus := []
+	for fighter in _break_focus:
+		break_focus.append(fighters.find(fighter))
 	var winner := -1
 	for i in fighters.size():
 		if _match_over and not fighters[i].eliminated:
 			winner = i
 	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, stun_focus, gauge.points,
 		map.moving_state(), projectiles.map(func(p: Projectile) -> Array: return p.net_state()),
-		pickups.map(func(p: ItemPickup) -> Array: return p.net_state()), map.window_state()]
+		pickups.map(func(p: ItemPickup) -> Array: return p.net_state()), map.window_state(), break_focus]
 	for fighter in fighters:
 		state.append(fighter.net_state())
 	return state
@@ -351,9 +365,10 @@ func _update_camera(delta: float, instant: bool) -> void:
 	var box := Rect2()
 	var first := true
 	var one_on_one := _alive_count() <= 2
-	var stun_zoom := not _stun_focus.is_empty() and one_on_one
-	var duel_zoom := not stun_zoom and not _duel.is_empty() and one_on_one
-	var framed := _stun_focus if stun_zoom else _duel if duel_zoom else fighters
+	var break_zoom := not _break_focus.is_empty() and one_on_one
+	var stun_zoom := not break_zoom and not _stun_focus.is_empty() and one_on_one
+	var duel_zoom := not break_zoom and not stun_zoom and not _duel.is_empty() and one_on_one
+	var framed := _break_focus if break_zoom else _stun_focus if stun_zoom else _duel if duel_zoom else fighters
 	for fighter in framed:
 		if fighter.eliminated:
 			continue
@@ -368,7 +383,11 @@ func _update_camera(delta: float, instant: bool) -> void:
 	var margin := CAMERA_MARGIN
 	var zoom_max := CAMERA_ZOOM_MAX
 	var smoothing := CAMERA_SMOOTHING
-	if stun_zoom:
+	if break_zoom:
+		margin = WEAPON_BREAK_CAMERA_MARGIN
+		zoom_max = WEAPON_BREAK_ZOOM_MAX
+		smoothing = STUN_CAMERA_SMOOTHING
+	elif stun_zoom:
 		margin = STUN_CAMERA_MARGIN
 		zoom_max = STUN_ZOOM_MAX
 		smoothing = STUN_CAMERA_SMOOTHING
@@ -471,6 +490,10 @@ func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -
 	var push := _push_dir(a, b)
 	var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
 	var explosion := a.is_heavy_attack() and b.is_heavy_attack()
+	var worn: Array[Fighter] = []  # les lourdes contrées : leur arme s'use (voir _wear_weapon)
+	for fighter in [a, b]:
+		if fighter.is_heavy_attack() and not fighter.weapon_away:
+			worn.append(fighter)
 	_spawn_clash_mark(where, heavy_countered or explosion)
 	gauge.add_counter(heavy_countered or explosion)  # contrer une lourde compte triple
 	for fighter in [a, b]:
@@ -492,6 +515,7 @@ func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -
 		else:
 			_renew_slowmo(a, b)  # pendant un duel, pas de 2e duel : il change d'adversaire (ou pas)
 	else:
+		worn.clear()  # deux légères : pas de lourde contrée
 		for fighter in [a, b]:
 			var other: Fighter = b if fighter == a else a
 			var direction := push if fighter == a else -push
@@ -500,6 +524,8 @@ func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -
 				cooldown = maxf(fighter.attack_cooldown_left(), Fighter.CLASH_LOCKOUT)  # contré : sa recharge continue
 			fighter.clash(direction * Fighter.CLASH_PUSH * other.stats.mass(), cooldown)
 		_renew_slowmo(a, b)
+	for fighter in worn:
+		_wear_weapon(fighter, b if fighter == a else a)
 
 
 ## Blocage parfait : le défenseur a appuyé sur B pile au moment du coup. C'est un contre :
@@ -508,11 +534,28 @@ func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -
 func _parry(attacker: Fighter, defender: Fighter) -> void:
 	var push := _push_dir(attacker, defender)
 	_spawn_clash_mark((attacker.global_position + defender.global_position) / 2.0, false, PARRY_COLOR)
-	gauge.add_counter(attacker.is_heavy_attack())
+	var heavy := attacker.is_heavy_attack()
+	var armed := not attacker.weapon_away
+	gauge.add_counter(heavy)
 	defender.recover()
 	attacker.clash(push * Fighter.CLASH_PUSH * defender.stats.mass(), Fighter.PARRY_COOLDOWN)
 	defender.clash(-push * Fighter.CLASH_PUSH * attacker.stats.mass(), 0.0)
 	_renew_slowmo(attacker, defender)
+	if heavy and armed:
+		_wear_weapon(attacker, defender)
+
+
+## La lourde d'une arme a été contrée : l'arme rapetisse, et au 3e contre elle casse (voir
+## Fighter.weapon_countered). Casse : éclat de la couleur de l'arme, court ralenti et zoom sur
+## les deux joueurs (il prend la place d'un micro-duel en cours). Renvoie true si elle a cassé.
+## À mains nues (lance lancée et pas encore ramassée comprise), rien ne s'use.
+func _wear_weapon(holder: Fighter, by: Fighter) -> bool:
+	if not holder.weapon_countered():
+		return false
+	_spawn_explosion(holder.global_position, holder.weapon.color)
+	_break_focus = [holder, by]
+	_break_slowmo = _time_engine.play(WEAPON_BREAK_TIME_SCALE, WEAPON_BREAK_SLOWMO, false)
+	return true
 
 
 ## Un contre relance le ralenti en cours pour toute sa durée. Pendant un micro-duel, il faut
@@ -811,8 +854,7 @@ func _resolve_spear(projectile: Projectile) -> void:
 
 ## Lance lancée contrée (frappée en vol, ou blocage parfait) : c'est un contre de lourde (compte
 ## triple), celui qui contre peut refrapper tout de suite. La lance retombe, plus courte ;
-## contrée pour la SPEAR_MAX_COUNTERS-ième fois, elle se casse (une neuve revient quand son
-## lanceur perd une vie).
+## contrée pour la 3e fois, elle se casse (voir _wear_weapon).
 func _counter_spear(spear: Projectile, counterer: Fighter) -> void:
 	var thrower: Fighter = fighters[spear.owner_index]
 	if counterer.is_attack_active():
@@ -822,9 +864,7 @@ func _counter_spear(spear: Projectile, counterer: Fighter) -> void:
 	gauge.add_counter(true)
 	_spawn_clash_mark(spear.tip(), true, PARRY_COLOR if counterer.is_parrying() else Color.WHITE)
 	_renew_slowmo(counterer, thrower)
-	thrower.spear_countered()
-	if thrower.is_weapon_broken():
-		_spawn_explosion(spear.position, spear.color)
+	if _wear_weapon(thrower, counterer):
 		_remove_projectile(spear)
 		return
 	spear.length = Projectile.SPEAR_LENGTH * thrower.weapon_length()
