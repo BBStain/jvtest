@@ -20,7 +20,7 @@ const MENU_SCENE := "res://scenes/menu.tscn"
 
 # --- Caméra : elle suit le milieu des joueurs et dézoome quand ils s'éloignent ---
 const CAMERA_MARGIN := Vector2(700, 450)   ## espace gardé autour des joueurs (en pixels)
-const CAMERA_ZOOM_MIN := 0.3               ## zoom le plus éloigné (plus petit = voit plus loin)
+const CAMERA_ZOOM_MIN := 0.2              ## zoom le plus éloigné (plus petit = voit plus loin)
 const CAMERA_ZOOM_MAX := 1.2               ## zoom le plus proche
 const CAMERA_SMOOTHING := 6.0              ## plus grand = la caméra réagit plus vite
 
@@ -59,7 +59,7 @@ const GRENADE_RADIUS := 140.0              ## rayon de l'explosion
 const GRENADE_KNOCKBACK := 1150.0
 const GRENADE_SHIELD_DAMAGE := 3
 
-const ONLINE_HEADER := 9                   ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
+const ONLINE_HEADER := 10                  ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
 var fighters: Array[Fighter] = []
 var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
@@ -225,6 +225,7 @@ func _guest_tick() -> void:
 	map.apply_moving_state(state[6])
 	_apply_projectiles(state[7])
 	_apply_pickups(state[8])
+	map.apply_window_state(state[9])
 	if state[2] != "" and not _match_over:
 		_show_end(state[2], fighters[state[3]].color if state[3] >= 0 else Color.WHITE)
 	for i in mini(fighters.size(), state.size() - ONLINE_HEADER):
@@ -232,7 +233,8 @@ func _guest_tick() -> void:
 
 
 ## (hôte) L'état du jeu envoyé aux copains : vitesse du temps, duel, fin de partie, zoom sur un joueur
-## sonné, jauge de contre, plateformes qui bougent, ce qui vole, objets par terre, puis chaque joueur.
+## sonné, jauge de contre, plateformes qui bougent, ce qui vole, objets par terre, fenêtres cassées,
+## puis chaque joueur.
 func online_state() -> Array:
 	var duel := []
 	for fighter in _duel:
@@ -246,7 +248,7 @@ func online_state() -> Array:
 			winner = i
 	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, stun_focus, gauge.points,
 		map.moving_state(), projectiles.map(func(p: Projectile) -> Array: return p.net_state()),
-		pickups.map(func(p: ItemPickup) -> Array: return p.net_state())]
+		pickups.map(func(p: ItemPickup) -> Array: return p.net_state()), map.window_state()]
 	for fighter in fighters:
 		state.append(fighter.net_state())
 	return state
@@ -577,6 +579,10 @@ func _resolve_hits() -> void:
 	for attacker in fighters:
 		if not attacker.is_attack_active():
 			continue
+		for window in map.windows():  # un coup casse les fenêtres qu'il frappe
+			if not window.broken and _segment_hits_rect(
+					attacker.attack_start(), attacker.attack_center(), attacker.attack_radius(), window.rect()):
+				window.smash()
 		reached[attacker] = []
 		for victim in fighters:
 			if victim != attacker and victim.can_be_hit() and _segment_hits_rect(
@@ -887,6 +893,7 @@ func _resolve_grenade(grenade: Projectile) -> void:
 ## et éjectés loin du centre. Un bouclier la bloque (et craque beaucoup).
 func _explode(where: Vector2) -> void:
 	_spawn_explosion(where, Color(1.0, 0.55, 0.2))
+	map.smash_windows_in(where, GRENADE_RADIUS)
 	for fighter in fighters:
 		if fighter.eliminated or fighter.is_invincible() or fighter.is_item_shielded():
 			continue

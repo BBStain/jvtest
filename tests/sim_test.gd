@@ -1934,6 +1934,161 @@ func _ready() -> void:
 	check(p2.is_on_floor() and absf(p2.position.y + 30 - roof_top) < 3 and p2.position.x < roof.position.x + 2250,
 		"Ascenseur : J2 descend sur le toit (%s)" % p2.position)
 
+	# 18) La jungle sur le toit : on s'accroche tout seul à une liane en la touchant en l'air,
+	# gauche / droite donne de l'élan, sauter lâche en gardant l'élan, un coup fait lâcher
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	var vine := game.map.get_node("Toit/Jungle/Arche3/Liane") as Vine
+	var anchor := vine.global_position
+	p1.position = anchor + Vector2(-20, 160); p1.velocity = Vector2(500, -100)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(3)
+	check(p1.is_swinging(), "Liane : on s'y accroche en la touchant en l'air")
+	await step(1)
+	check(vine._holder == p1, "Liane : elle suit le joueur qui s'y balance")
+	# Pousser dans le sens du balancement : il grandit
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = signf(p1._swing_speed) if p1._swing_speed != 0.0 else 1.0)
+	var widest := 0.0
+	for i in 150:
+		await step(1)
+		widest = maxf(widest, absf(p1._swing_angle))
+	check(p1.is_swinging() and widest > 1.0, "Liane : gauche / droite donne de l'élan (angle max %.2f rad)" % widest)
+	check(p1.position.distance_to(anchor) <= vine.length + 1.0, "Liane : on reste au bout de la liane")
+	# Lâcher en sautant quand on part vers la droite : on garde l'élan
+	var waited := 0
+	while not (p1._swing_speed > 0.0 and absf(p1._swing_angle) < 0.3) and waited < 240:
+		await step(1)
+		waited += 1
+	p1.input_source = Scripted.new(func(s, f): s.jump_pressed = f == 0; s.jump_held = true)
+	await step(1)
+	var release_speed := p1.velocity.x
+	check(not p1.is_swinging() and release_speed > 500 and p1.velocity.y < 0, "Liane : on la lâche en sautant, avec l'élan (v = %s)" % p1.velocity)
+	await step(10)
+	check(p1.velocity.x > release_speed * 0.8, "Liane : l'élan est gardé après avoir lâché (vx = %.0f)" % p1.velocity.x)
+	await step(30)
+	check(not p1.is_swinging() or p1._vine != vine, "Liane : on ne se raccroche pas tout de suite à la même")
+	# Un coup reçu fait lâcher
+	p1.position = anchor + Vector2(0, 150); p1.velocity = Vector2.ZERO
+	p1._vine_regrab_timer = 0.0; p1._knockback_timer = 0.0; p1._ladder_fling_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(3)
+	check(p1.is_swinging(), "Liane : accroché de nouveau")
+	p1.take_hit(Vector2.RIGHT)
+	await step(1)
+	check(not p1.is_swinging(), "Liane : un coup reçu fait lâcher")
+	# Bas : on se laisse tomber
+	p1._stun_timer = 0.0; p1._invincible_timer = 0.0
+	p1.position = anchor + Vector2(0, 150); p1.velocity = Vector2.ZERO
+	p1._vine_regrab_timer = 0.0; p1._knockback_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f): s.down_pressed = f == 2)
+	await step(4)
+	check(not p1.is_swinging(), "Liane : bas pour la lâcher")
+	# Arbre : on se pose sur une grosse branche
+	var tree := game.map.get_node("Toit/Jungle/Arbre") as JungleTree
+	var branch: Rect2 = tree.branches[0]
+	p1.position = tree.global_position + Vector2(branch.get_center().x, branch.position.y - 100); p1.velocity = Vector2.ZERO
+	p1._vine_regrab_timer = 0.0
+	await step(40)
+	check(p1.is_on_floor() and absf(p1.position.y + 30 - (tree.global_position.y + branch.position.y)) < 3,
+		"Arbre : on se pose sur une branche (%s)" % p1.position)
+	# En ligne : la liane suit aussi le joueur chez les copains
+	p1.position = anchor + Vector2(0, 150); p1.velocity = Vector2.ZERO; p1._vine_regrab_timer = 0.0
+	await step(3)
+	var copy := p2.net_state()
+	p2.apply_net_state(p1.net_state())
+	check(p2.is_swinging_on(vine), "Liane en ligne : le copain sait qui s'y balance")
+	p2.apply_net_state(copy)
+	await shot("18_jungle")
+	# 18b) Les hauteurs au-dessus du toit : chaque échelle mène à un étage où l'on atterrit
+	for node in get_tree().get_nodes_in_group("echelles"):
+		var lad := node as Ladder
+		p1._stun_timer = 0.0; p1._invincible_timer = 0.0; p1._knockback_timer = 0.0
+		p1._ladder_regrab_timer = 0.0; p1._vine_regrab_timer = 0.0; p1._leave_vine()
+		p1.position = Vector2(lad.position.x, lad.position.y + lad.size.y / 2.0 - 40.0); p1.velocity = Vector2.ZERO
+		p1.input_source = Scripted.new(func(s, f): s.stick.y = -1.0 if f < 3 else 0.0)
+		await step(3)
+		var grabbed := p1.is_climbing()
+		var t := 0
+		while not (t > 20 and p1.is_on_floor() and not p1.is_climbing()) and t < 240:
+			await step(1)
+			t += 1
+		check(grabbed and p1.is_on_floor() and p1.position.y + 30 < lad.top() + 120,
+			"%s : on monte et on atterrit en haut (pieds à %.0f, haut %.0f)" % [lad.name, p1.position.y + 30, lad.top()])
+	# L'ascenseur des cimes monte du toit jusqu'aux cimes de droite
+	var lift2 := game.map.get_node("Toit/Hauteurs/AscenseurCimes") as MovingPlatform
+	var top_right := game.map.get_node("Toit/Hauteurs/CimesDroite") as Node2D
+	lift2.set_time(0.0)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.position = Vector2(lift2.position.x, roof_top - 100); p1.velocity = Vector2.ZERO
+	await step(int(lift2.period * 30) + 40)
+	check(p1.is_on_floor() and absf(p1.position.y + 30 - (top_right.position.y - 8)) < 4,
+		"Ascenseur des cimes : on arrive en haut (pieds à %.0f)" % (p1.position.y + 30))
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = 1.0 if f < 30 else 0.0)
+	await step(60)
+	check(p1.is_on_floor() and absf(p1.position.y + 30 - (top_right.position.y - 8)) < 3, "Ascenseur des cimes : on passe sur les cimes de droite")
+	await shot("18_hauteurs")
+	# 18c) Les colonnes de fenêtres : on les casse en les percutant vite (dash), en les frappant,
+	# au pistolet ou avec une explosion ; marcher dedans ne les casse pas ; elles reviennent
+	var cols: Node = game.map.get_node("Toit/Hauteurs/ColonneGauche")
+	var win1 := cols.get_node("Fenetre1") as BreakableWindow
+	var win_feet := roof_top
+	p2.position = Vector2(win1.position.x + 300, win_feet - 30); p2.velocity = Vector2.ZERO
+	p1._leave_vine(); p1._stun_timer = 0.0; p1._invincible_timer = 0.0; p1._knockback_timer = 0.0
+	p1.position = Vector2(win1.position.x - 150, win_feet - 30); p1.velocity = Vector2.ZERO
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = 1.0)
+	await step(60)
+	check(not win1.broken and p1.position.x < win1.position.x, "Fenêtre : marcher dedans ne la casse pas")
+	p1.position = Vector2(win1.position.x - 150, win_feet - 30); p1.velocity = Vector2.ZERO
+	p1._dash_cooldown_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = 1.0; s.dash_pressed = f == 1)
+	await step(20)
+	check(win1.broken and p1.position.x > win1.position.x + win1.size.x / 2.0,
+		"Fenêtre : un dash la casse et on passe au travers (x = %.0f)" % p1.position.x)
+	var win2 := cols.get_node("Fenetre2") as BreakableWindow
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.position = Vector2(win2.position.x - 70, win2.position.y); p1.velocity = Vector2.ZERO
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	check(win2.broken, "Fenêtre : un coup la casse")
+	var win3 := cols.get_node("Fenetre3") as BreakableWindow
+	p1._cancel_attack()
+	p1.position = Vector2(win3.position.x - 200, win3.position.y); p1.velocity = Vector2.ZERO
+	p2.position = Vector2(win3.position.x + 200, win3.position.y); p2.velocity = Vector2.ZERO
+	await step(1)
+	p1.take_item("pistolet")
+	p1._item_cooldown = 0.0
+	p1.input_source = Scripted.new(func(s, f): s.item_pressed = f == 0)
+	await step(20)
+	check(win3.broken and untouched(p2), "Fenêtre : une balle la casse (et s'arrête)")
+	var win5 := cols.get_node("Fenetre5") as BreakableWindow
+	game._explode(win5.position + Vector2(-90, 0))
+	check(win5.broken, "Fenêtre : une explosion la casse")
+	var online_copy: Array = game.map.window_state()
+	check(online_copy.count(true) >= 4, "Fenêtres en ligne : l'hôte envoie lesquelles sont cassées (%d)" % online_copy.count(true))
+	game.map.apply_window_state([false, false, false, false])
+	check(not win1.broken and not win2.broken and not win3.broken, "Fenêtres en ligne : le copain les répare comme l'hôte")
+	game.map.apply_window_state(online_copy)
+	await shot("18_fenetres")
+	p1.position = Vector2(win2.position.x - 300, win2.position.y); p2.position = Vector2(win2.position.x + 300, win2.position.y)
+	await step(int(BreakableWindow.RESPAWN_TIME * 60) + 5)
+	check(not win1.broken and not win2.broken and not win5.broken, "Fenêtres : elles reviennent au bout de %d s" % BreakableWindow.RESPAWN_TIME)
+	# 18d) Le 2e toit ferme le haut : on ne le traverse pas en sautant
+	var roof2 := game.map.get_node("Toit/Toit2") as Node2D
+	var top_mid := game.map.get_node("Toit/Hauteurs/SommetMilieu2") as Node2D
+	p1.position = Vector2(top_mid.position.x, top_mid.position.y - 8 - 30); p1.velocity = Vector2.ZERO
+	p1._air_dashes_left = 1; p1._dash_cooldown_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f):
+		s.jump_pressed = f == 2 or f == 14
+		s.jump_held = true
+		s.stick.y = -1.0 if f >= 22 else 0.0
+		s.dash_pressed = f == 22)
+	var top_head := p1.position.y
+	for i in 60:
+		await step(1)
+		top_head = minf(top_head, p1.position.y - 30)
+	check(top_head >= roof2.position.y + 20 - 1, "Toit du haut : on ne le traverse pas (tête au plus haut %.0f)" % top_head)
+
 	# 15) Jeu en ligne (sans réseau ici : on joue l'hôte puis un copain, et on passe les messages à la main)
 	# 15a) Les touches d'un copain arrivent par le réseau : un appui n'est jamais perdu
 	var net := NetworkInputSource.new()

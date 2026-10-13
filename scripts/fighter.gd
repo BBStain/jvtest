@@ -34,6 +34,21 @@ const LADDER_CLIMB_SPEED := 1500.0      ## on monte très vite, tout seul
 const LADDER_REGRAB_TIME := 0.35        ## après avoir lâché l'échelle, on ne se raccroche pas tout de suite
 const LADDER_FLING_TIME := 0.25         ## éjecté en haut de l'échelle : on garde son élan sur le côté ce temps
 
+# --- Liane (voir vine.gd) : on s'y balance comme un pendule ---
+const VINE_GRAB_MARGIN := 14.0          ## on attrape la liane à cette distance du corps
+const VINE_REGRAB_TIME := 0.3           ## après avoir lâché une liane, on ne se raccroche pas tout de suite
+const VINE_MIN_LENGTH := 60.0           ## on ne se tient jamais plus près que ça du point d'accroche
+const VINE_PUMP := 1500.0               ## élan pris avec gauche / droite
+const VINE_DAMPING := 0.2               ## le balancement ralentit un peu tout seul
+const VINE_MAX_SPEED := 1200.0          ## vitesse max en se balançant
+const VINE_MAX_ANGLE := 1.75            ## on monte au plus un peu au-dessus de l'horizontale (en radians, 1,57 = horizontal)
+const VINE_JUMP_BOOST := 0.4            ## en sautant de la liane : petit saut en plus de l'élan (part du double saut)
+const VINE_FLING_TIME := 0.3            ## après avoir lâché la liane, on garde son élan ce temps
+
+# --- Fenêtres (voir breakable_window.gd) ---
+const WINDOW_BREAK_SPEED := 900.0       ## percuter une fenêtre au moins aussi vite (dash, projeté) la casse
+const WINDOW_BREAK_KEEP := 0.85         ## ... et on passe au travers en gardant cette part de sa vitesse
+
 # --- Dash ---
 const DASH_END_KEEP := 0.55             ## part de la vitesse gardée à la fin du dash
 
@@ -126,6 +141,7 @@ const NET_VARS := [
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
 	"_stun_timer", "_block_hold_time", "weapon_away", "spear_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
+	"_swinging", "_swing_anchor",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -168,7 +184,14 @@ var _wall_jump_timer := 0.0
 var _jump_rising := false              ## true = on monte grâce à un saut (pour le petit saut)
 var _ladder: Ladder = null              ## l'échelle sur laquelle on grimpe (null = pas d'échelle)
 var _ladder_regrab_timer := 0.0
-var _ladder_fling_timer := 0.0
+var _ladder_fling_timer := 0.0          ## éjecté (échelle) ou lâché d'une liane : on garde son élan
+var _vine: Vine = null                  ## la liane à laquelle on se balance (null = pas de liane)
+var _swinging := false                  ## pareil, envoyé aux copains en ligne (pour dessiner la liane)
+var _swing_anchor := Vector2.ZERO       ## le point d'accroche de la liane
+var _swing_length := 0.0
+var _swing_angle := 0.0                 ## 0 = droit sous le point d'accroche
+var _swing_speed := 0.0                 ## vitesse de rotation (radians par seconde)
+var _vine_regrab_timer := 0.0
 
 var _dash_timer := 0.0
 var _dash_cooldown_timer := 0.0
@@ -219,6 +242,7 @@ var _blink_clock := 0.0
 
 ## Le corps est créé à l'entrée dans la partie, une fois le personnage (stats) choisi.
 func _ready() -> void:
+	add_to_group("combattants")
 	_bare_stats = stats
 	_update_armed_stats()
 	stats = _bare_stats if weapon_away else _armed_stats
@@ -283,6 +307,20 @@ func physics_tick(input: InputState, delta: float) -> void:
 		queue_redraw()
 		return
 
+	# Liane : on s'y accroche tout seul en la touchant en l'air, et on se balance.
+	if _vine == null and not on_floor and _vine_regrab_timer <= 0.0 and _knockback_timer <= 0.0 \
+			and not is_heavy_swinging() and not is_katana_dashing():
+		var vine := _touched_vine()
+		if vine != null:
+			_grab_vine(vine)
+	if _vine != null:
+		_blocking = false
+		_sprinting = false
+		_tick_vine(input, delta)
+		_tick_item(input, delta)
+		queue_redraw()
+		return
+
 	# Descendre d'une plateforme traversable avec "bas" (pas besoin d'aller tout en bas avec le stick).
 	if on_floor and (input.down_pressed or input.stick.y > DROP_STICK):
 		_drop_timer = DROP_THROUGH_TIME
@@ -324,7 +362,7 @@ func physics_tick(input: InputState, delta: float) -> void:
 	_tick_attack(input, delta)
 	_tick_item(input, delta)
 
-	move_and_slide()
+	_move()
 	queue_redraw()
 
 
@@ -345,6 +383,7 @@ func _tick_timers(delta: float) -> void:
 	_stun_timer -= delta
 	_ladder_regrab_timer -= delta
 	_ladder_fling_timer -= delta
+	_vine_regrab_timer -= delta
 	_item_cooldown -= delta
 	item_shield_timer -= delta
 	_blink_clock += delta
@@ -539,6 +578,110 @@ func _leave_ladder() -> void:
 
 func is_climbing() -> bool:
 	return _ladder != null
+
+
+## La liane que le corps touche (en pendant droit), ou null.
+func _touched_vine() -> Vine:
+	var reach := stats.body_size.x / 2.0 + VINE_GRAB_MARGIN
+	for node in get_tree().get_nodes_in_group("lianes"):
+		var vine := node as Vine
+		if vine == null:
+			continue
+		var anchor := vine.global_position
+		if global_position.y < anchor.y + VINE_MIN_LENGTH:
+			continue
+		var closest := Geometry2D.get_closest_point_to_segment(global_position, anchor, vine.bottom())
+		if global_position.distance_to(closest) <= reach:
+			return vine
+	return null
+
+
+## On attrape la liane : la longueur du balancier = là où on l'a attrapée ; on garde son élan.
+func _grab_vine(vine: Vine) -> void:
+	_vine = vine
+	_swinging = true
+	_swing_anchor = vine.global_position
+	var offset := global_position - _swing_anchor
+	_swing_length = clampf(offset.length(), VINE_MIN_LENGTH, vine.length)
+	_swing_angle = clampf(atan2(offset.x, offset.y), -VINE_MAX_ANGLE, VINE_MAX_ANGLE)
+	var tangent := Vector2(cos(_swing_angle), -sin(_swing_angle))
+	_swing_speed = velocity.dot(tangent) / _swing_length
+	_cancel_attack()
+	_dash_timer = 0.0
+	_jump_rising = false
+	_air_jumps_left = stats.air_jumps
+	_air_dashes_left = stats.air_dashes
+	_dash_cooldown_timer = 0.0
+
+
+## Sur la liane : un pendule. Gauche / droite donne de l'élan ; saut = on lâche en gardant l'élan
+## (plus un petit saut) ; bas = on se laisse tomber. En touchant le sol, on lâche.
+func _tick_vine(input: InputState, delta: float) -> void:
+	var tangent := Vector2(cos(_swing_angle), -sin(_swing_angle))
+	if input.jump_pressed:
+		var push := tangent * _swing_speed * _swing_length
+		_leave_vine()
+		velocity = Vector2(push.x, minf(push.y, 0.0) - stats.double_jump_speed * VINE_JUMP_BOOST)
+		_ladder_fling_timer = VINE_FLING_TIME
+		return
+	if input.down_pressed:
+		velocity = tangent * _swing_speed * _swing_length
+		_leave_vine()
+		_ladder_fling_timer = VINE_FLING_TIME
+		return
+	var accel := -stats.gravity * sin(_swing_angle) + input.stick.x * VINE_PUMP * _move_mult()
+	_swing_speed += accel / _swing_length * delta
+	_swing_speed *= maxf(1.0 - VINE_DAMPING * delta, 0.0)
+	var max_speed := VINE_MAX_SPEED * _move_mult() / _swing_length
+	_swing_speed = clampf(_swing_speed, -max_speed, max_speed)
+	_swing_angle += _swing_speed * delta
+	if absf(_swing_angle) > VINE_MAX_ANGLE:
+		_swing_angle = clampf(_swing_angle, -VINE_MAX_ANGLE, VINE_MAX_ANGLE)
+		_swing_speed = 0.0
+	var target := _swing_anchor + Vector2(sin(_swing_angle), cos(_swing_angle)) * _swing_length
+	velocity = (target - global_position) / maxf(delta, 0.0001)
+	_move()
+	if is_on_floor():
+		_leave_vine()  # on s'est posé : on lâche
+	elif get_slide_collision_count() > 0:
+		# Cogné un mur ou le plafond : on reste à l'endroit atteint, le balancement repart dans l'autre sens.
+		var offset := global_position - _swing_anchor
+		_swing_angle = atan2(offset.x, offset.y)
+		_swing_speed *= -0.3
+
+
+## Avance (move_and_slide). Une fenêtre percutée assez vite casse, et on passe au travers.
+## Tomber dessus par le haut ne la casse pas.
+func _move() -> void:
+	var before := velocity
+	move_and_slide()
+	for i in get_slide_collision_count():
+		var collision := get_slide_collision(i)
+		var window := collision.get_collider() as BreakableWindow
+		if window == null:
+			continue
+		var normal := collision.get_normal()
+		if normal.y < -0.5:
+			continue
+		if -before.dot(normal) >= WINDOW_BREAK_SPEED and window.smash():
+			velocity = before * WINDOW_BREAK_KEEP
+
+
+func _leave_vine() -> void:
+	if _vine == null:
+		return
+	_vine = null
+	_swinging = false
+	_vine_regrab_timer = VINE_REGRAB_TIME
+
+
+func is_swinging() -> bool:
+	return _swinging
+
+
+## Pour la liane : est-ce qu'on se balance à elle ? (marche aussi chez les copains en ligne)
+func is_swinging_on(vine: Vine) -> bool:
+	return _swinging and _swing_anchor.is_equal_approx(vine.global_position)
 
 
 func _try_start_dash(input: InputState, on_floor: bool) -> void:
@@ -872,6 +1015,7 @@ func mark_attack_hit() -> void:
 func clash(push: Vector2, cooldown := CLASH_LOCKOUT, lift := 150.0) -> void:
 	_cancel_attack()
 	_leave_ladder()
+	_leave_vine()
 	_attack_cooldown_timer = cooldown
 	velocity = _pushed(push) + Vector2(0.0, -lift)
 	_jump_rising = false
@@ -882,6 +1026,7 @@ func clash(push: Vector2, cooldown := CLASH_LOCKOUT, lift := 150.0) -> void:
 func hit_shield(push_dir: Vector2) -> void:
 	_cancel_attack()
 	_leave_ladder()
+	_leave_vine()
 	_attack_cooldown_timer = 0.0
 	velocity = _pushed(push_dir * SHIELD_HIT_PUSH) + Vector2(0.0, -120.0)
 	_jump_rising = false
@@ -913,6 +1058,7 @@ func absorb_hit(push_dir: Vector2, damage: int) -> bool:
 func shield_burst(push_dir: Vector2, own_shield_broke: bool) -> void:
 	_cancel_attack()
 	_leave_ladder()
+	_leave_vine()
 	velocity = _pushed(push_dir * SHIELD_BREAK_PUSH) + Vector2(0.0, -SHIELD_BREAK_LIFT)
 	_jump_rising = false
 	_knockback_timer = KNOCKBACK_TIME
@@ -933,6 +1079,7 @@ func take_hit(hit_dir: Vector2, knockback := -1.0) -> bool:
 	if _grenade_fuse >= 0.0:
 		_release_grenade(Vector2.ZERO, 0.0)  # touché : la grenade dégoupillée tombe des mains
 	_leave_ladder()
+	_leave_vine()
 	_dash_timer = 0.0
 	velocity = _pushed(hit_dir * knockback) + Vector2(0.0, -200.0)
 	_jump_rising = false
@@ -985,6 +1132,7 @@ func _pushed(force: Vector2) -> Vector2:
 func fall_out(respawn_position: Vector2) -> void:
 	_cancel_attack()
 	_leave_ladder()
+	_leave_vine()
 	_dash_timer = 0.0
 	global_position = respawn_position
 	velocity = Vector2.ZERO
@@ -1012,6 +1160,7 @@ func _lose_life() -> void:
 		spear_counters = 0  # lance cassée : une neuve revient à la vie suivante
 		weapon_away = false
 	if lives <= 0:
+		_leave_vine()
 		eliminated = true
 		visible = false
 		set_collision_mask_value(1, false)
