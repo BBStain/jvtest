@@ -57,7 +57,7 @@ const WEIGHT_TEMPO := 0.5  ## 1,4 fois plus lourd que la Barre = attaques 1,2 fo
 @export_group("Attaque lourde")
 @export var heavy_startup: float = 0.14  ## charge minimale : on lève l'arme avant de frapper
 @export var heavy_active: float = 0.15  ## durée du balayage
-@export var heavy_cooldown: float = 0.8  ## temps de recharge après la frappe
+@export var heavy_cooldown: float = 1.1  ## temps de recharge après la frappe (assez long pour ne pas la marteler ; un contre la remet à zéro)
 @export var heavy_arc_radius: float = 56.0  ## distance entre le centre du perso et le bout de l'arme
 @export var heavy_tip_radius: float = 24.0  ## taille de la zone qui touche au bout de l'arme
 @export var heavy_knockback: float = 940.0

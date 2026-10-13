@@ -1693,6 +1693,39 @@ func _ready() -> void:
 	p1.position = Vector2(640, 2000)
 	await step(2)
 	check(not p1.weapon_away and game.projectiles.is_empty(), "Lance : tombé de la map, on réapparaît avec sa lance")
+	# 18g) Lance lancée contrée : un coup dessus la fait retomber (plus courte), 3 contres la cassent
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 3)
+	p1.position = Vector2(300, 560); p2.position = Vector2(700, 560)
+	p2._attack_cooldown_timer = 0.0
+	p2.recover()
+	await step(1)
+	for i in 30:
+		await step(1)
+		if p2.is_attack_active():
+			break
+	check(p2.is_attack_active(), "Lance contrée : le coup léger de l'adversaire est sorti")
+	var points_before: float = game.gauge.points
+	p1.weapon_away = true
+	game._on_weapon_thrown(p1, Vector2.RIGHT, 300.0)
+	var spear: Projectile = game.projectiles[0]
+	spear.position = p2.attack_center()
+	spear.velocity = Vector2(300, 0)
+	await step(1)
+	check(p1.spear_counters == 1 and spear.state == Projectile.State.DROPPED and untouched(p2),
+		"Lance contrée : frappée en vol, elle retombe sans toucher")
+	check(game.gauge.points > points_before and p2.attack_cooldown_left() == 0.0,
+		"Lance contrée : ça compte comme un contre (jauge, recharge à zéro)")
+	check(spear.length < Projectile.SPEAR_LENGTH and p1._armed_stats.attack_reach < base.attack_reach * spear_weapon.light_reach_mult,
+		"Lance contrée : elle est plus courte (lancée et en main)")
+	game._counter_spear(spear, p2)
+	check(p1.spear_counters == 2 and not p1.is_weapon_broken() and game.projectiles.size() == 1, "Lance contrée 2 fois : pas encore cassée")
+	game._counter_spear(spear, p2)
+	check(p1.is_weapon_broken() and game.projectiles.is_empty() and p1.weapon_away, "Lance contrée 3 fois : cassée")
+	p1.position = Vector2(640, 2000)
+	await step(2)
+	check(p1.weapon_away and p1.heavy_kind() == WeaponStats.Heavy.SWING and is_equal_approx(p1.stats.attack_reach, base.attack_reach),
+		"Lance cassée : elle ne revient plus de la partie (mains nues)")
 	GameSetup.player_weapons = []
 
 	# 19) Les objets qui tombent sur la map : pistolet, grenade, bouclier (RT pour les utiliser)
