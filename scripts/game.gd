@@ -101,7 +101,7 @@ func _ready() -> void:
 		$UI/EndScreen/Restart.text = "Start, A ou Entrée : rejouer      B ou Échap : retour au salon" if Online.is_host \
 			else "L'hôte peut relancer une partie"
 	add_child(_time_engine)
-	map = (load(GameSetup.map_path) as PackedScene).instantiate()
+	map = GameSetup.make_map(GameSetup.map_path)
 	add_child(map)
 	move_child(map, 0)  # le décor est dessiné derrière les joueurs
 	InputBindings.register_menu_actions()
@@ -164,7 +164,7 @@ func _physics_process(delta: float) -> void:
 				if online:
 					Online.back_to_lobby()
 				else:
-					get_tree().change_scene_to_file(MENU_SCENE)
+					get_tree().change_scene_to_file(GameSetup.exit_scene())
 		# Partie finie : plus personne n'est touché, mais une balle arrivée dans un mur (ou une grenade
 		# à la fin de sa mèche) ne doit pas rester figée à l'écran.
 		for projectile: Projectile in projectiles.duplicate():

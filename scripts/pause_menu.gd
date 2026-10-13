@@ -113,7 +113,7 @@ func choose(index: int) -> void:
 		3:
 			get_tree().paused = false
 			if change_scene:
-				get_tree().change_scene_to_file(Game.MENU_SCENE)
+				get_tree().change_scene_to_file(GameSetup.exit_scene())
 
 
 func resume() -> void:

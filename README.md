@@ -174,6 +174,19 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
   S'il manque quelque chose, la mise en ligne s'arrête et le jeu en ligne n'est pas cassé.
 - **La caméra** : en haut de `scripts/game.gd`, les réglages `CAMERA_...` (marge autour des joueurs, zoom le plus proche et le plus éloigné, vitesse).
 
+## Créer une map dans le jeu (ÉDITEUR)
+
+Dans le menu principal, **ÉDITEUR** ouvre l'éditeur de map (à la souris et au clavier) :
+- **à gauche, le catalogue** : un clic pose un bloc plein, une plateforme traversable, une fenêtre cassable, une plateforme mobile,
+  une échelle, une liane, le départ d'un joueur, la réapparition ou un point d'apparition d'objet ;
+- **au milieu, la map** : clic pour choisir et déplacer, carré jaune pour changer la taille, rond violet pour le trajet d'une
+  plateforme mobile, R pour tourner, clic droit pour bouger la vue, molette pour zoomer ;
+- **à droite, les réglages** de l'élément choisi (position, taille, rotation, direction parmi 12, durée…) ;
+- **en haut** : la grille (oui / non, sa taille), l'aimant (coller à la grille ou placement libre), Sauver, Ouvrir, **TESTER**.
+
+TESTER lance une partie à 2 sur la map ; QUITTER dans le menu pause ramène dans l'éditeur. Les maps sauvées restent dans le
+navigateur et apparaissent dans le choix de la map (après l'Arène). Elles sont rangées en JSON (voir `scripts/editor/map_data.gd`).
+
 ## Jouer en ligne avec les copains
 
 1. Dans le menu, choisis **EN LIGNE**, puis **CRÉER UN SALON**. Le jeu affiche un code de 4 lettres (ex. `KBZT`) : donne-le à tes copains.
@@ -202,6 +215,7 @@ Comment ça marche : le petit serveur des salons (dossier `server/`, sur Cloudfl
 | `scripts/game_setup.gd` | La liste des maps et des personnages, et les choix des joueurs (appareil, personnage, map) |
 | `scenes/main.tscn` | Le combat : la caméra et l'écran de fin (la map est chargée à part) |
 | `scenes/maps/` + `scripts/game_map.gd` | Les maps : le décor, les points d'apparition et la zone de jeu |
+| `scenes/editor.tscn` + `scripts/editor/` | L'éditeur de map : les données d'une map (`map_data.gd`, en JSON), leur transformation en map jouable (`map_builder.gd`) et l'éditeur lui-même (`map_editor.gd`) |
 | `characters/` + `scripts/character_stats.gd` | Les personnages et leurs caractéristiques (vitesse, sauts, attaques, poids…) |
 | `scripts/game.gd` | Crée les joueurs, gère les coups, les chocs d'attaques, les chutes, la caméra et la fin de partie |
 | `scripts/fighter.gd` | Un combattant : déplacements, saut, dash, attaques, blocage, vies, dessin, et les règles communes |

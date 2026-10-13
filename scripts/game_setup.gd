@@ -8,6 +8,10 @@ extends RefCounted
 const MAPS := [
 	"res://scenes/maps/arene.tscn",
 ]
+const SAVED_MAP_PREFIX := "carte:"
+const EDITOR_MAP := "editeur"
+const MENU_SCENE := "res://scenes/menu.tscn"
+
 ## Tous les personnages du jeu. Pour en ajouter un : crée son fichier dans characters/ et ajoute-le ici.
 const CHARACTERS := [
 	"res://characters/barre.tres",
@@ -29,8 +33,13 @@ static var player_devices: Array = []
 static var player_characters: Array = []
 ## L'arme de chaque joueur (chemin d'un fichier de WEAPONS). Vide = mains nues.
 static var player_weapons: Array = []
-## La map de la partie (chemin d'une scène de MAPS).
+## La map de la partie : le chemin d'une scène de MAPS, ou une map faite dans l'éditeur
+## ("carte:" + son nom de sauvegarde, ou EDITOR_MAP pour celle qu'on teste depuis l'éditeur).
 static var map_path: String = MAPS[0]
+## La map qu'on teste depuis l'éditeur (les données de MapData), quand map_path == EDITOR_MAP.
+static var editor_map: Dictionary = {}
+## Où revient-on en quittant la partie (vide = le menu). L'éditeur y met sa scène quand on teste.
+static var return_scene := ""
 ## Le nombre de vies de chaque joueur (réglable dans OPTIONS).
 static var lives := 3
 
@@ -60,3 +69,32 @@ static func weapon_for(player_index: int) -> WeaponStats:
 	if player_index < player_weapons.size() and player_weapons[player_index] != "":
 		path = player_weapons[player_index]
 	return load(path) as WeaponStats
+
+
+## Toutes les maps qu'on peut choisir : celles du jeu (MAPS), puis celles faites dans l'éditeur.
+static func all_maps() -> Array[String]:
+	var maps: Array[String] = []
+	maps.assign(MAPS)
+	for saved in MapData.list_saved():
+		maps.append(SAVED_MAP_PREFIX + saved)
+	return maps
+
+
+## Crée la map d'un chemin de all_maps() (ou EDITOR_MAP). Une map de l'éditeur introuvable
+## donne la première map du jeu.
+static func make_map(path: String) -> GameMap:
+	if path == EDITOR_MAP and not editor_map.is_empty():
+		return MapBuilder.build(editor_map)
+	if path.begins_with(SAVED_MAP_PREFIX):
+		var data := MapData.load_saved(path.trim_prefix(SAVED_MAP_PREFIX))
+		if not data.is_empty():
+			return MapBuilder.build(data)
+		path = MAPS[0]
+	if not path.begins_with("res://"):
+		path = MAPS[0]
+	return (load(path) as PackedScene).instantiate() as GameMap
+
+
+## La scène où l'on revient en quittant une partie : le menu, ou l'éditeur si on y testait sa map.
+static func exit_scene() -> String:
+	return return_scene if return_scene != "" else MENU_SCENE
