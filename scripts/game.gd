@@ -800,7 +800,8 @@ func _resolve_spear(projectile: Projectile) -> void:
 
 ## Lance lancée contrée (frappée en vol, ou blocage parfait) : c'est un contre de lourde (compte
 ## triple), celui qui contre peut refrapper tout de suite. La lance retombe, plus courte ;
-## contrée pour la SPEAR_MAX_COUNTERS-ième fois, elle se casse pour toute la partie.
+## contrée pour la SPEAR_MAX_COUNTERS-ième fois, elle se casse (une neuve revient quand son
+## lanceur perd une vie).
 func _counter_spear(spear: Projectile, counterer: Fighter) -> void:
 	var thrower: Fighter = fighters[spear.owner_index]
 	if counterer.is_attack_active():

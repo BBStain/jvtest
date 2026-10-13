@@ -1722,10 +1722,14 @@ func _ready() -> void:
 	check(p1.spear_counters == 2 and not p1.is_weapon_broken() and game.projectiles.size() == 1, "Lance contrée 2 fois : pas encore cassée")
 	game._counter_spear(spear, p2)
 	check(p1.is_weapon_broken() and game.projectiles.is_empty() and p1.weapon_away, "Lance contrée 3 fois : cassée")
+	p1._attack_cooldown_timer = 0.0
+	p1.get_weapon_back()
+	check(p1.weapon_away and p1.heavy_kind() == WeaponStats.Heavy.SWING and is_equal_approx(p1.stats.attack_reach, base.attack_reach),
+		"Lance cassée : on reste à mains nues")
 	p1.position = Vector2(640, 2000)
 	await step(2)
-	check(p1.weapon_away and p1.heavy_kind() == WeaponStats.Heavy.SWING and is_equal_approx(p1.stats.attack_reach, base.attack_reach),
-		"Lance cassée : elle ne revient plus de la partie (mains nues)")
+	check(not p1.weapon_away and p1.spear_counters == 0 and is_equal_approx(p1.stats.attack_reach, base.attack_reach * spear_weapon.light_reach_mult),
+		"Lance cassée : une lance neuve revient à la prochaine vie perdue")
 	GameSetup.player_weapons = []
 
 	# 19) Les objets qui tombent sur la map : pistolet, grenade, bouclier (RT pour les utiliser)
