@@ -79,8 +79,8 @@ const KATANA_DASH_REACH := 0.8          ## la lame dépasse du perso de 0,8 fois
 const SLAM_WAVE_TIME := 0.12            ## marteau : durée de l'onde de choc après l'arc
 const SLAM_WAVE_REACH := 150.0          ## ... jusqu'où elle va de chaque côté (x1,6 à pleine charge)
 const SLAM_WAVE_RADIUS := 14.0          ## ... sa hauteur (de chaque côté du sol)
-const SPEAR_MAX_COUNTERS := 3          ## lance lancée contrée 3 fois : cassée jusqu'à la prochaine vie perdue
-const SPEAR_SHORTEN := 0.2              ## chaque contre raccourcit la lance de 20 % (100 %, 80 %, 60 %)
+const WEAPON_MAX_COUNTERS := 3         ## lourde d'une arme contrée 3 fois : arme cassée jusqu'à la prochaine vie perdue
+const WEAPON_SHRINK := 0.2              ## chaque contre rapetisse l'arme de 20 % (100 %, 80 %, 60 %)
 const THROW_CHARGE_SPEED := 1.5         ## lance / dash du katana : à pleine charge, 1,5 fois plus vite
 
 # --- Objets ramassés sur la map (un seul à la fois, utilisé avec RT ; voir item_pickup.gd) ---
@@ -140,7 +140,7 @@ const NET_VARS := [
 	"stamina", "_exhausted", "_sprinting", "_stamina_show_timer",
 	"shield", "shield_broken", "_blocking", "_shield_broken_timer", "_shield_flash_timer",
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
-	"_stun_timer", "_block_hold_time", "weapon_away", "spear_counters",
+	"_stun_timer", "_block_hold_time", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
 	"_swinging", "_swing_anchor", "_item_flash_timer",
 ]
@@ -156,14 +156,14 @@ var weapon_away := false:
 		weapon_away = value
 		if _armed_stats != null:
 			stats = _bare_stats if value else _armed_stats
-## Lance : combien de fois sa lance lancée a été contrée. Chaque contre la raccourcit ;
-## au bout de SPEAR_MAX_COUNTERS elle est cassée : mains nues jusqu'à la prochaine vie perdue,
-## où une lance neuve revient.
-var spear_counters := 0:
+## Combien de fois l'attaque lourde de son arme a été contrée (lance lancée comprise). Chaque contre
+## rapetisse l'arme ; au bout de WEAPON_MAX_COUNTERS elle est cassée : mains nues jusqu'à la prochaine
+## vie perdue, où une arme neuve revient.
+var weapon_counters := 0:
 	set(value):
-		if value == spear_counters:
+		if value == weapon_counters:
 			return  # pareil : on ne recalcule l'arme que si elle change
-		spear_counters = value
+		weapon_counters = value
 		if _armed_stats != null:
 			_update_armed_stats()
 			stats = _bare_stats if weapon_away else _armed_stats
@@ -787,30 +787,39 @@ func _throw_weapon() -> void:
 	weapon_thrown.emit(self, _attack_dir, speed)
 
 
-## On ramasse sa lance (ou elle revient quand on réapparaît). Cassée : elle revient à la vie suivante.
+## On ramasse sa lance (ou elle revient quand on réapparaît). Arme cassée : elle revient à la vie suivante.
 func get_weapon_back() -> void:
 	weapon_away = is_weapon_broken()
 
 
-## Le perso avec son arme en main ; une lance contrée est plus courte (coup léger et lourde).
+## Le perso avec son arme en main ; une arme contrée est plus petite (coup léger et lourde).
 func _update_armed_stats() -> void:
 	_armed_stats = weapon.apply_to(_bare_stats)
 	_armed_stats.attack_reach *= weapon_length()
 	_armed_stats.heavy_arc_radius *= weapon_length()
+	_armed_stats.heavy_tip_radius *= weapon_length()
 
 
-## Longueur de l'arme : 1 = neuve ; chaque contre de la lance lancée la raccourcit.
+## Taille de l'arme : 1 = neuve ; chaque contre de sa lourde la rapetisse.
 func weapon_length() -> float:
-	return 1.0 - SPEAR_SHORTEN * mini(spear_counters, SPEAR_MAX_COUNTERS - 1)
+	return 1.0 - WEAPON_SHRINK * mini(weapon_counters, WEAPON_MAX_COUNTERS - 1)
 
 
-## Lance lancée contrée : plus courte, ou cassée (jusqu'à la prochaine vie perdue) au bout de SPEAR_MAX_COUNTERS.
-func spear_countered() -> void:
-	spear_counters += 1
+## La lourde de notre arme a été contrée : l'arme rapetisse, ou casse au WEAPON_MAX_COUNTERS-ième
+## contre (mains nues jusqu'à la prochaine vie perdue). Renvoie true si elle vient de casser.
+## À mains nues (ou lance lancée et pas en main) : rien ne s'use.
+func weapon_countered() -> bool:
+	if weapon.is_bare_hands() or is_weapon_broken():
+		return false
+	weapon_counters += 1
+	if not is_weapon_broken():
+		return false
+	weapon_away = true
+	return true
 
 
 func is_weapon_broken() -> bool:
-	return spear_counters >= SPEAR_MAX_COUNTERS
+	return weapon_counters >= WEAPON_MAX_COUNTERS
 
 
 ## Un contre : la recharge des attaques (légère et lourde) repart de zéro.
@@ -1171,7 +1180,7 @@ func _lose_life() -> void:
 	_invincible_timer = INVINCIBLE_TIME
 	show_lives()
 	if is_weapon_broken():
-		spear_counters = 0  # lance cassée : une neuve revient à la vie suivante
+		weapon_counters = 0  # arme cassée : une neuve revient à la vie suivante
 		weapon_away = false
 	if lives <= 0:
 		_leave_vine()
@@ -1366,7 +1375,8 @@ func _draw() -> void:
 		var end := hand + Vector2(facing * 0.4, -1.0).normalized() * weapon.held_length * weapon_length()
 		draw_line(hand, end, weapon_color, 3.0)
 		if weapon.held_head > 0.0:
-			draw_rect(Rect2(end - Vector2.ONE * weapon.held_head / 2.0, Vector2.ONE * weapon.held_head), weapon_color)
+			var head := weapon.held_head * weapon_length()
+			draw_rect(Rect2(end - Vector2.ONE * head / 2.0, Vector2.ONE * head), weapon_color)
 
 	_draw_item(body)
 
