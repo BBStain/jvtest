@@ -91,6 +91,7 @@ const GRENADE_FULL_HOLD := 1.0          ## RT gardé ce temps : la grenade part 
 const ITEM_SHIELD_TIME := 5.0           ## le bouclier ramassé reste levé 5 s
 const ITEM_SHIELD_PUSH := 1300.0        ## qui frappe le bouclier ramassé est projeté très loin...
 const ITEM_SHIELD_COOLDOWN := 0.5       ## ... et ne peut plus frapper un instant
+const ITEM_FLASH_TIME := 0.4            ## objet ramassé : un anneau de sa couleur apparaît ce temps
 
 # --- Blocage (B) : un bouclier qui craque peu à peu (ses points sont dans les stats du perso) ---
 const SHIELD_REGEN_TIME := 2.0          ## 1 point regagné toutes les 2 s quand on ne bloque pas
@@ -141,7 +142,7 @@ const NET_VARS := [
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
 	"_stun_timer", "_block_hold_time", "weapon_away", "spear_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
-	"_swinging", "_swing_anchor",
+	"_swinging", "_swing_anchor", "_item_flash_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -150,6 +151,8 @@ var weapon: WeaponStats = WeaponStats.new()       ## l'arme choisie (choisie par
 ## Lance lancée et pas encore ramassée : on se bat à mains nues en attendant.
 var weapon_away := false:
 	set(value):
+		if value == weapon_away:
+			return  # en ligne, l'hôte la renvoie à chaque frame : rien à refaire si elle ne change pas
 		weapon_away = value
 		if _armed_stats != null:
 			stats = _bare_stats if value else _armed_stats
@@ -158,6 +161,8 @@ var weapon_away := false:
 ## où une lance neuve revient.
 var spear_counters := 0:
 	set(value):
+		if value == spear_counters:
+			return  # pareil : on ne recalcule l'arme que si elle change
 		spear_counters = value
 		if _armed_stats != null:
 			_update_armed_stats()
@@ -230,6 +235,7 @@ var item_shield_timer := 0.0            ## bouclier ramassé levé encore ce tem
 var _item_cooldown := 0.0
 var _grenade_fuse := -1.0               ## grenade dégoupillée en main : temps avant l'explosion (-1 = non)
 var _grenade_hold := 0.0                ## depuis combien de temps RT est gardé (distance du lancer)
+var _item_flash_timer := 0.0            ## > 0 juste après avoir ramassé un objet
 
 var gauge := CounterGauge.new()         ## la jauge de contre de la partie (partagée, donnée par game.gd)
 
@@ -303,6 +309,7 @@ func physics_tick(input: InputState, delta: float) -> void:
 		_blocking = false
 		_sprinting = false
 		_tick_ladder(input)
+		_tick_item(input, delta)  # une grenade dégoupillée continue de compter sur l'échelle
 		move_and_slide()
 		queue_redraw()
 		return
@@ -385,6 +392,7 @@ func _tick_timers(delta: float) -> void:
 	_ladder_fling_timer -= delta
 	_vine_regrab_timer -= delta
 	_item_cooldown -= delta
+	_item_flash_timer -= delta
 	item_shield_timer -= delta
 	_blink_clock += delta
 
@@ -489,6 +497,7 @@ func take_item(kind: String) -> bool:
 		return false
 	item = kind
 	item_ammo = PISTOL_AMMO if kind == "pistolet" else 0
+	_item_flash_timer = ITEM_FLASH_TIME
 	return true
 
 
@@ -999,6 +1008,11 @@ func can_be_hit() -> bool:
 	return not eliminated and not is_dashing() and not is_katana_dashing() and not is_invincible()
 
 
+## En train d'esquiver (dash, dash du katana) : ce qui vole (balle, lance) passe au travers.
+func is_dodging() -> bool:
+	return is_dashing() or is_katana_dashing()
+
+
 func body_rect() -> Rect2:
 	return Rect2(global_position - stats.body_size / 2.0, stats.body_size)
 
@@ -1237,12 +1251,18 @@ func _draw() -> void:
 		var ring := lerpf(stats.body_size.y * 0.5, stats.body_size.y * 1.3, t)
 		draw_arc(Vector2.ZERO, ring, 0.0, TAU, 32, Color(gauge.color(), 1.0 - t), 4.0)
 
+	# Au-dessus de la tête, empilés sans se chevaucher (du bas vers le haut) : les étoiles quand on
+	# est sonné, la croix du bouclier cassé, puis les vies.
+	var head_y := -stats.body_size.y / 2.0 - 4.0
+
 	# Sonné : des étoiles tournent au-dessus de la tête
 	if is_stunned():
 		var fade := clampf(_stun_timer / 0.3, 0.0, 1.0)
+		var ring_y := head_y - 12.0
+		head_y -= 24.0
 		for i in 3:
 			var angle := _blink_clock * 6.0 + i * TAU / 3.0
-			var star := Vector2(cos(angle) * 18.0, -stats.body_size.y / 2.0 - 10.0 + sin(angle) * 5.0)
+			var star := Vector2(cos(angle) * 18.0, ring_y + sin(angle) * 4.0)
 			var star_color := Color(1.0, 0.9, 0.3, fade * (0.6 + 0.4 * (sin(angle) * 0.5 + 0.5)))
 			draw_line(star + Vector2(-6, 0), star + Vector2(6, 0), star_color, 3.0)
 			draw_line(star + Vector2(0, -6), star + Vector2(0, 6), star_color, 3.0)
@@ -1264,7 +1284,8 @@ func _draw() -> void:
 	# Bouclier cassé : une croix grise tant qu'on ne peut pas attaquer
 	if _shield_broken_timer > 0.0:
 		var a := clampf(_shield_broken_timer / 0.3, 0.0, 1.0) * 0.8
-		var c := Vector2(0, -stats.body_size.y / 2.0 - 16.0)
+		var c := Vector2(0, head_y - 9.0)
+		head_y -= 18.0
 		draw_line(c + Vector2(-7, -7), c + Vector2(7, 7), Color(0.75, 0.75, 0.8, a), 3.0)
 		draw_line(c + Vector2(-7, 7), c + Vector2(7, -7), Color(0.75, 0.75, 0.8, a), 3.0)
 
@@ -1353,13 +1374,13 @@ func _draw() -> void:
 	if _stamina_show_timer > 0.0:
 		_draw_stamina_gauge()
 
-	# Les vies au-dessus de la tête (plus haut si la croix du bouclier cassé est affichée)
+	# Les vies au-dessus de la tête (au-dessus des étoiles et de la croix s'il y en a)
 	if _lives_show_timer > 0.0:
 		var alpha := clampf(_lives_show_timer / 0.4, 0.0, 1.0)
 		var size := 10.0
 		var gap := 5.0
 		var total := max_lives * size + (max_lives - 1) * gap
-		var y := -stats.body_size.y / 2.0 - (32.0 if _shield_broken_timer > 0.0 else 22.0)
+		var y := head_y - 18.0
 		for i in max_lives:
 			var pip := Rect2(-total / 2.0 + i * (size + gap), y, size, size)
 			if i < lives:
@@ -1376,12 +1397,24 @@ func _draw_item(body: Rect2) -> void:
 		var plate := Rect2(Vector2(facing * (body.size.x / 2.0 + 6.0) - 5.0, -body.size.y / 2.0 - 6.0), Vector2(10.0, body.size.y + 12.0))
 		draw_rect(plate, Color(ItemPickup.color_of("bouclier"), 0.85 * fade))
 		draw_rect(plate.grow(2.0), Color(1, 1, 1, 0.6 * fade), false, 2.0)
+	if _item_flash_timer > 0.0:
+		# Un objet vient d'être ramassé : un anneau de sa couleur, pour qu'on le remarque.
+		var t := 1.0 - _item_flash_timer / ITEM_FLASH_TIME
+		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.4, body.size.y * 1.1, t), 0.0, TAU, 32,
+			Color(ItemPickup.color_of(item), 1.0 - t), 3.0)
 	var hand := Vector2(facing * (body.size.x / 2.0 + 6.0), 6.0)
 	match item:
 		"pistolet":
-			draw_rect(Rect2(hand + Vector2(-5.0 if facing < 0.0 else 0.0, -3.0), Vector2(14.0 * facing, 6.0)).abs(), ItemPickup.color_of("pistolet"))
+			# Le pistolet pointe là où la balle partira ; les balles qui restent sont des points sur le canon.
+			var aim := _item_direction()
+			var side := signf(aim.x) if absf(aim.x) > 0.01 else facing
+			draw_set_transform(Vector2(side * body.size.x / 2.0, 2.0), aim.angle(), Vector2(1.0, side))
+			var gun_color := ItemPickup.color_of("pistolet")
+			draw_rect(Rect2(2.0, -3.0, 18.0, 6.0), gun_color)   # le canon
+			draw_rect(Rect2(2.0, 3.0, 6.0, 7.0), gun_color)     # la poignée
 			for i in item_ammo:
-				draw_rect(Rect2(Vector2(-body.size.x / 2.0 + i * 5.0, body.size.y / 2.0 + 4.0), Vector2(3.0, 5.0)), Color(1, 0.9, 0.5, 0.8))
+				draw_circle(Vector2(5.0 + i * 3.5, -5.5), 1.5, Color(1.0, 0.9, 0.5))
+			draw_set_transform(Vector2.ZERO, 0.0)
 		"grenade":
 			var grenade_color := ItemPickup.color_of("grenade")
 			if _grenade_fuse >= 0.0 and int(_blink_clock / lerpf(0.05, 0.25, _grenade_fuse / GRENADE_FUSE)) % 2 == 0:

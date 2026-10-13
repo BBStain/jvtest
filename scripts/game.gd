@@ -157,6 +157,11 @@ func _physics_process(delta: float) -> void:
 					Online.back_to_lobby()
 				else:
 					get_tree().change_scene_to_file(MENU_SCENE)
+		# Partie finie : plus personne n'est touché, mais une balle arrivée dans un mur (ou une grenade
+		# à la fin de sa mèche) ne doit pas rester figée à l'écran.
+		for projectile: Projectile in projectiles.duplicate():
+			if projectile.finished:
+				_remove_projectile(projectile)
 		if online:
 			Online.send_state(online_state())
 		return
@@ -797,8 +802,8 @@ func _resolve_spear(projectile: Projectile) -> void:
 	if victim.is_parrying():
 		_counter_spear(projectile, victim)
 		return
-	if victim.is_item_shielded():
-		projectile.drop()
+	if victim.is_item_shielded() or not victim.can_be_hit():
+		projectile.drop()  # bouclier ramassé, ou joueur invincible : la lance retombe sans rien faire
 		return
 	_projectile_hits(projectile, victim, Fighter.HEAVY_SHIELD_DAMAGE)
 	projectile.drop()
@@ -840,7 +845,11 @@ func _resolve_bullet(bullet: Projectile) -> void:
 		return
 	if victim.is_item_shielded():
 		bullet.velocity = -bullet.velocity  # le bouclier ramassé renvoie la balle
+		bullet.rotation = bullet.velocity.angle()
 		bullet.owner_index = victim.player_index
+		return
+	if not victim.can_be_hit():
+		_remove_projectile(bullet)  # joueur invincible (il clignote) : la balle s'arrête sur lui, sans effet
 		return
 	_projectile_hits(bullet, victim, 1)
 	_remove_projectile(bullet)
@@ -908,12 +917,16 @@ func _explode(where: Vector2) -> void:
 				fighter.shield_burst(push, true)
 			continue
 		fighter.take_hit(dir.normalized(), GRENADE_KNOCKBACK)
+		if fighter.is_stunned() and _alive_count() == 2:
+			_stun_focus = [fighter, _closest_opponent(fighter)]  # sonné par la grenade : zoom et ralenti aussi
 
 
-## Le joueur qu'un objet en vol touche (pas son lanceur), ou null.
+## Le joueur qu'un objet en vol touche (pas son lanceur), ou null. Celui qui esquive (dash) le
+## laisse passer ; un joueur invincible l'arrête, mais sans effet (voir _resolve_bullet) : avant,
+## la balle le traversait lentement pendant les ralentis et semblait coincée dans le perso.
 func _projectile_victim(projectile: Projectile) -> Fighter:
 	for victim in fighters:
-		if victim.player_index != projectile.owner_index and victim.can_be_hit() and _segment_hits_rect(
+		if victim.player_index != projectile.owner_index and not victim.eliminated and not victim.is_dodging() and _segment_hits_rect(
 				projectile.tail(), projectile.tip(), Projectile.RADIUS, victim.body_rect()):
 			return victim
 	return null
@@ -965,6 +978,15 @@ func _on_item_used(fighter: Fighter, kind: String, direction: Vector2, power: fl
 	projectile.position = fighter.global_position
 	match kind:
 		"balle":
+			# Canon collé à un mur : la balle s'y arrête tout de suite (sinon elle partirait de
+			# l'intérieur du mur et le traverserait).
+			var wall := get_world_2d().direct_space_state.intersect_ray(PhysicsRayQueryParameters2D.create(
+				fighter.global_position, fighter.global_position + direction * (24.0 + 8.0), 1))
+			if not wall.is_empty():
+				if wall.collider is BreakableWindow:
+					(wall.collider as BreakableWindow).smash()
+				projectile.free()
+				return
 			projectile.position += direction * 24.0
 			projectile.velocity = direction * BULLET_SPEED
 			projectile.rotation = direction.angle()
