@@ -2,7 +2,7 @@ class_name GameMap
 extends Node2D
 ## Une map : le décor (sols, murs, plateformes), les points d'apparition et la zone de jeu.
 ##
-## L'Arène (scenes/maps/arene.tscn) est le labo : chaque nouveauté de décor (échelle, ascenseur...)
+## L'Arène (scenes/maps/arene.tscn) est le labo : chaque nouveauté de décor (échelle, ascenseur, lianes...)
 ## y est essayée en premier.
 ##
 ## Pour créer une nouvelle map : duplique scenes/maps/arene.tscn (clic droit > Dupliquer),

@@ -1934,6 +1934,73 @@ func _ready() -> void:
 	check(p2.is_on_floor() and absf(p2.position.y + 30 - roof_top) < 3 and p2.position.x < roof.position.x + 2250,
 		"Ascenseur : J2 descend sur le toit (%s)" % p2.position)
 
+	# 18) La jungle sur le toit : on s'accroche tout seul à une liane en la touchant en l'air,
+	# gauche / droite donne de l'élan, sauter lâche en gardant l'élan, un coup fait lâcher
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	var vine := game.map.get_node("Toit/Jungle/Arche3/Liane") as Vine
+	var anchor := vine.global_position
+	p1.position = anchor + Vector2(-20, 160); p1.velocity = Vector2(500, -100)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(3)
+	check(p1.is_swinging(), "Liane : on s'y accroche en la touchant en l'air")
+	await step(1)
+	check(vine._holder == p1, "Liane : elle suit le joueur qui s'y balance")
+	# Pousser dans le sens du balancement : il grandit
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = signf(p1._swing_speed) if p1._swing_speed != 0.0 else 1.0)
+	var widest := 0.0
+	for i in 150:
+		await step(1)
+		widest = maxf(widest, absf(p1._swing_angle))
+	check(p1.is_swinging() and widest > 1.0, "Liane : gauche / droite donne de l'élan (angle max %.2f rad)" % widest)
+	check(p1.position.distance_to(anchor) <= vine.length + 1.0, "Liane : on reste au bout de la liane")
+	# Lâcher en sautant quand on part vers la droite : on garde l'élan
+	var waited := 0
+	while not (p1._swing_speed > 0.0 and absf(p1._swing_angle) < 0.3) and waited < 240:
+		await step(1)
+		waited += 1
+	p1.input_source = Scripted.new(func(s, f): s.jump_pressed = f == 0; s.jump_held = true)
+	await step(1)
+	var release_speed := p1.velocity.x
+	check(not p1.is_swinging() and release_speed > 500 and p1.velocity.y < 0, "Liane : on la lâche en sautant, avec l'élan (v = %s)" % p1.velocity)
+	await step(10)
+	check(p1.velocity.x > release_speed * 0.8, "Liane : l'élan est gardé après avoir lâché (vx = %.0f)" % p1.velocity.x)
+	await step(30)
+	check(not p1.is_swinging() or p1._vine != vine, "Liane : on ne se raccroche pas tout de suite à la même")
+	# Un coup reçu fait lâcher
+	p1.position = anchor + Vector2(0, 150); p1.velocity = Vector2.ZERO
+	p1._vine_regrab_timer = 0.0; p1._knockback_timer = 0.0; p1._ladder_fling_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(3)
+	check(p1.is_swinging(), "Liane : accroché de nouveau")
+	p1.take_hit(Vector2.RIGHT)
+	await step(1)
+	check(not p1.is_swinging(), "Liane : un coup reçu fait lâcher")
+	# Bas : on se laisse tomber
+	p1._stun_timer = 0.0; p1._invincible_timer = 0.0
+	p1.position = anchor + Vector2(0, 150); p1.velocity = Vector2.ZERO
+	p1._vine_regrab_timer = 0.0; p1._knockback_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f): s.down_pressed = f == 2)
+	await step(4)
+	check(not p1.is_swinging(), "Liane : bas pour la lâcher")
+	# Arbre : on se pose sur une grosse branche
+	var tree := game.map.get_node("Toit/Jungle/Arbre") as JungleTree
+	var branch: Rect2 = tree.branches[0]
+	p1.position = tree.global_position + Vector2(branch.get_center().x, branch.position.y - 100); p1.velocity = Vector2.ZERO
+	p1._vine_regrab_timer = 0.0
+	await step(40)
+	check(p1.is_on_floor() and absf(p1.position.y + 30 - (tree.global_position.y + branch.position.y)) < 3,
+		"Arbre : on se pose sur une branche (%s)" % p1.position)
+	# En ligne : la liane suit aussi le joueur chez les copains
+	p1.position = anchor + Vector2(0, 150); p1.velocity = Vector2.ZERO; p1._vine_regrab_timer = 0.0
+	await step(3)
+	var copy := p2.net_state()
+	p2.apply_net_state(p1.net_state())
+	check(p2.is_swinging_on(vine), "Liane en ligne : le copain sait qui s'y balance")
+	p2.apply_net_state(copy)
+	await shot("18_jungle")
+
 	# 15) Jeu en ligne (sans réseau ici : on joue l'hôte puis un copain, et on passe les messages à la main)
 	# 15a) Les touches d'un copain arrivent par le réseau : un appui n'est jamais perdu
 	var net := NetworkInputSource.new()
