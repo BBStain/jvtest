@@ -64,6 +64,8 @@ const KATANA_DASH_REACH := 0.8          ## la lame dépasse du perso de 0,8 fois
 const SLAM_WAVE_TIME := 0.12            ## marteau : durée de l'onde de choc après l'arc
 const SLAM_WAVE_REACH := 150.0          ## ... jusqu'où elle va de chaque côté (x1,6 à pleine charge)
 const SLAM_WAVE_RADIUS := 14.0          ## ... sa hauteur (de chaque côté du sol)
+const SPEAR_MAX_COUNTERS := 3          ## lance lancée contrée 3 fois : cassée pour toute la partie
+const SPEAR_SHORTEN := 0.2              ## chaque contre raccourcit la lance de 20 % (100 %, 80 %, 60 %)
 const THROW_CHARGE_SPEED := 1.5         ## lance / dash du katana : à pleine charge, 1,5 fois plus vite
 
 # --- Objets ramassés sur la map (un seul à la fois, utilisé avec RT ; voir item_pickup.gd) ---
@@ -122,7 +124,7 @@ const NET_VARS := [
 	"stamina", "_exhausted", "_sprinting", "_stamina_show_timer",
 	"shield", "shield_broken", "_blocking", "_shield_broken_timer", "_shield_flash_timer",
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
-	"_stun_timer", "_block_hold_time", "weapon_away",
+	"_stun_timer", "_block_hold_time", "weapon_away", "spear_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
@@ -135,6 +137,14 @@ var weapon_away := false:
 		weapon_away = value
 		if _armed_stats != null:
 			stats = _bare_stats if value else _armed_stats
+## Lance : combien de fois sa lance lancée a été contrée. Chaque contre la raccourcit ;
+## au bout de SPEAR_MAX_COUNTERS elle est cassée pour toute la partie (on finit à mains nues).
+var spear_counters := 0:
+	set(value):
+		spear_counters = value
+		if _armed_stats != null:
+			_update_armed_stats()
+			stats = _bare_stats if weapon_away else _armed_stats
 var _bare_stats: CharacterStats                   ## le perso sans arme
 var _armed_stats: CharacterStats                  ## le perso avec son arme
 var player_index := 0
@@ -209,7 +219,7 @@ var _blink_clock := 0.0
 ## Le corps est créé à l'entrée dans la partie, une fois le personnage (stats) choisi.
 func _ready() -> void:
 	_bare_stats = stats
-	_armed_stats = weapon.apply_to(stats)
+	_update_armed_stats()
 	stats = _bare_stats if weapon_away else _armed_stats
 	_air_jumps_left = stats.air_jumps
 	_air_dashes_left = stats.air_dashes
@@ -624,9 +634,35 @@ func _throw_weapon() -> void:
 	weapon_thrown.emit(self, _attack_dir, speed)
 
 
-## On ramasse sa lance (ou elle revient quand on réapparaît).
+## On ramasse sa lance (ou elle revient quand on réapparaît). Cassée : elle ne revient plus.
 func get_weapon_back() -> void:
-	weapon_away = false
+	weapon_away = is_weapon_broken()
+
+
+## Le perso avec son arme en main ; une lance contrée est plus courte (coup léger et lourde).
+func _update_armed_stats() -> void:
+	_armed_stats = weapon.apply_to(_bare_stats)
+	_armed_stats.attack_reach *= weapon_length()
+	_armed_stats.heavy_arc_radius *= weapon_length()
+
+
+## Longueur de l'arme : 1 = neuve ; chaque contre de la lance lancée la raccourcit.
+func weapon_length() -> float:
+	return 1.0 - SPEAR_SHORTEN * mini(spear_counters, SPEAR_MAX_COUNTERS - 1)
+
+
+## Lance lancée contrée : plus courte, ou cassée pour toute la partie au bout de SPEAR_MAX_COUNTERS.
+func spear_countered() -> void:
+	spear_counters += 1
+
+
+func is_weapon_broken() -> bool:
+	return spear_counters >= SPEAR_MAX_COUNTERS
+
+
+## Un contre : la recharge des attaques (légère et lourde) repart de zéro.
+func reset_cooldown() -> void:
+	_attack_cooldown_timer = 0.0
 
 
 ## Ce que fait l'attaque lourde avec l'arme en main (l'arc habituel à mains nues).
@@ -1153,7 +1189,7 @@ func _draw() -> void:
 	# L'arme dans la main quand on n'attaque pas (dessin très simple, à remplacer par un graphiste)
 	elif not weapon_away and weapon.held_length > 0.0:
 		var hand := Vector2(facing * stats.body_size.x / 2.0, 4.0)
-		var end := hand + Vector2(facing * 0.4, -1.0).normalized() * weapon.held_length
+		var end := hand + Vector2(facing * 0.4, -1.0).normalized() * weapon.held_length * weapon_length()
 		draw_line(hand, end, weapon_color, 3.0)
 		if weapon.held_head > 0.0:
 			draw_rect(Rect2(end - Vector2.ONE * weapon.held_head / 2.0, Vector2.ONE * weapon.held_head), weapon_color)

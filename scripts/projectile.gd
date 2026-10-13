@@ -18,13 +18,14 @@ const GRENADE_GRAVITY := 1600.0
 const GRENADE_BOUNCE := 0.4             ## la grenade rebondit (garde 40 % de sa vitesse)
 const BULLET_LIFETIME := 2.5            ## une balle qui ne touche rien disparaît au bout de ce temps
 const RADIUS := 6.0                     ## épaisseur de la zone qui touche
+const SPEAR_LENGTH := 70.0              ## lance neuve (plus courte à chaque fois qu'elle est contrée)
 
 var kind := "lance"
 var owner_index := 0                    ## le joueur qui l'a lancé (ou qui a renvoyé la balle)
 var velocity := Vector2.ZERO
 var state := State.FLYING
 var knockback := 940.0
-var length := 70.0
+var length := SPEAR_LENGTH
 var color := Color(1, 1, 1)
 var fuse := -1.0                        ## grenade : temps avant l'explosion
 var age := 0.0
@@ -116,7 +117,7 @@ func drop() -> void:
 
 
 func net_state() -> Array:
-	return [kind, owner_index, position, rotation, state, color, fuse]
+	return [kind, owner_index, position, rotation, state, color, fuse, length]
 
 
 func apply_net_state(data: Array) -> void:
@@ -127,7 +128,7 @@ func apply_net_state(data: Array) -> void:
 	state = data[4]
 	color = data[5]
 	fuse = data[6] if data.size() > 6 else -1.0
-	length = 16.0 if kind == "balle" else 18.0 if kind == "grenade" else 70.0
+	length = data[7] if data.size() > 7 else 16.0 if kind == "balle" else 18.0 if kind == "grenade" else SPEAR_LENGTH
 	queue_redraw()
 
 

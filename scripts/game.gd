@@ -741,6 +741,7 @@ func _on_weapon_thrown(fighter: Fighter, direction: Vector2, speed: float) -> vo
 	spear.rotation = direction.angle()
 	spear.knockback = fighter.attack_knockback()
 	spear.color = fighter.weapon.color
+	spear.length = Projectile.SPEAR_LENGTH * fighter.weapon_length()
 	_add_projectile(spear)
 
 
@@ -780,14 +781,42 @@ func _resolve_spear(projectile: Projectile) -> void:
 		if not thrower.eliminated and thrower.body_rect().grow(12.0).has_point(projectile.position):
 			_return_weapon(thrower)
 		return
+	for fighter in fighters:
+		if fighter != thrower and fighter.is_attack_active() and _projectile_in_attack(projectile, fighter):
+			_counter_spear(projectile, fighter)
+			return
 	var victim := _projectile_victim(projectile)
 	if victim == null:
+		return
+	if victim.is_parrying():
+		_counter_spear(projectile, victim)
 		return
 	if victim.is_item_shielded():
 		projectile.drop()
 		return
 	_projectile_hits(projectile, victim, Fighter.HEAVY_SHIELD_DAMAGE)
 	projectile.drop()
+
+
+## Lance lancée contrée (frappée en vol, ou blocage parfait) : c'est un contre de lourde (compte
+## triple), celui qui contre peut refrapper tout de suite. La lance retombe, plus courte ;
+## contrée pour la SPEAR_MAX_COUNTERS-ième fois, elle se casse pour toute la partie.
+func _counter_spear(spear: Projectile, counterer: Fighter) -> void:
+	var thrower: Fighter = fighters[spear.owner_index]
+	if counterer.is_attack_active():
+		counterer.mark_attack_hit()
+	counterer.recover()
+	counterer.reset_cooldown()
+	gauge.add_counter(true)
+	_spawn_clash_mark(spear.tip(), true, PARRY_COLOR if counterer.is_parrying() else Color.WHITE)
+	_renew_slowmo(counterer, thrower)
+	thrower.spear_countered()
+	if thrower.is_weapon_broken():
+		_spawn_explosion(spear.position, spear.color)
+		_remove_projectile(spear)
+		return
+	spear.length = Projectile.SPEAR_LENGTH * thrower.weapon_length()
+	spear.drop()
 
 
 ## Une balle : renvoyée par un coup bien placé, sinon elle touche le premier joueur sur son chemin.
@@ -834,6 +863,7 @@ func _deflect_bullet(bullet: Projectile, deflector: Fighter) -> void:
 	if perfect:
 		gauge.add_counter(false)
 		deflector.recover()
+		deflector.reset_cooldown()
 
 
 ## Une grenade : un coup la repousse ; au bout de sa mèche, elle explose.
@@ -895,6 +925,7 @@ func _projectile_hits(projectile: Projectile, victim: Fighter, shield_damage: in
 	var dir := projectile.velocity.normalized()
 	if victim.is_parrying():
 		victim.recover()
+		victim.reset_cooldown()
 		gauge.add_counter(false)
 		_spawn_clash_mark(projectile.tip(), false, PARRY_COLOR)
 	elif victim.is_blocking() and not victim.is_stunned():
