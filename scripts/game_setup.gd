@@ -1,7 +1,7 @@
 class_name GameSetup
 extends RefCounted
 ## Ce que le menu transmet à la partie :
-## quels appareils, quel personnage pour quel joueur, et sur quelle map.
+## quels appareils, quel personnage et quelle arme pour quel joueur, et sur quelle map.
 ## (Les "static var" gardent leur valeur quand on change de scène.)
 
 ## Toutes les maps du jeu. Pour en ajouter une : crée sa scène dans scenes/maps/ et ajoute-la ici.
@@ -14,11 +14,21 @@ const CHARACTERS := [
 	"res://characters/jumb.tres",
 	"res://characters/jib.tres",
 ]
+## Toutes les armes (choisies avec le perso). Pour en ajouter une : crée son fichier dans weapons/
+## et ajoute-le ici. La première est celle par défaut.
+const WEAPONS := [
+	"res://weapons/mains_nues.tres",
+	"res://weapons/katana.tres",
+	"res://weapons/marteau.tres",
+	"res://weapons/lance.tres",
+]
 
 ## Un élément par joueur ; chaque élément est la liste de ses appareils (voir InputBindings).
 static var player_devices: Array = []
 ## Le personnage de chaque joueur (chemin d'un fichier de CHARACTERS). Vide = le premier de la liste.
 static var player_characters: Array = []
+## L'arme de chaque joueur (chemin d'un fichier de WEAPONS). Vide = mains nues.
+static var player_weapons: Array = []
 ## La map de la partie (chemin d'une scène de MAPS).
 static var map_path: String = MAPS[0]
 ## Le nombre de vies de chaque joueur (réglable dans OPTIONS).
@@ -42,3 +52,11 @@ static func character_for(player_index: int) -> CharacterStats:
 	if player_index < player_characters.size() and player_characters[player_index] != "":
 		path = player_characters[player_index]
 	return load(path) as CharacterStats
+
+
+## L'arme du joueur n°player_index (mains nues si rien n'a été choisi).
+static func weapon_for(player_index: int) -> WeaponStats:
+	var path: String = WEAPONS[0]
+	if player_index < player_weapons.size() and player_weapons[player_index] != "":
+		path = player_weapons[player_index]
+	return load(path) as WeaponStats

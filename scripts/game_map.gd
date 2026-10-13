@@ -2,11 +2,15 @@ class_name GameMap
 extends Node2D
 ## Une map : le décor (sols, murs, plateformes), les points d'apparition et la zone de jeu.
 ##
+## L'Arène (scenes/maps/arene.tscn) est le labo : chaque nouveauté de décor (échelle, ascenseur...)
+## y est essayée en premier.
+##
 ## Pour créer une nouvelle map : duplique scenes/maps/arene.tscn (clic droit > Dupliquer),
 ## change le décor, puis ajoute-la dans MAPS de scripts/game_setup.gd.
 ## Une map doit garder ces deux nœuds :
 ##   SpawnPoints   -> 4 Marker2D : où apparaissent les joueurs 1 à 4 au début (le marqueur = les pieds)
 ##   RespawnPoint  -> un Marker2D : où l'on réapparaît après une chute (le marqueur = les pieds)
+## Et si on veut, ItemSpawns -> des Marker2D : où apparaissent (puis tombent) les objets à ramasser.
 ## Les tests automatiques vérifient chaque map de MAPS (points présents, dans la zone de jeu,
 ## joueurs qui atterrissent bien) : s'il manque quelque chose, la mise en ligne s'arrête.
 
@@ -22,3 +26,44 @@ func spawn_position(player_index: int) -> Vector2:
 
 func respawn_position() -> Vector2:
 	return ($RespawnPoint as Node2D).position
+
+
+## Où les objets apparaissent (les Marker2D du nœud ItemSpawns : l'objet apparaît là et tombe
+## jusqu'à ce qu'il y a dessous). Sans ce nœud, ils apparaissent au-dessus du point de réapparition.
+func item_spawn_points() -> Array[Vector2]:
+	var points: Array[Vector2] = []
+	if has_node("ItemSpawns"):
+		for marker in $ItemSpawns.get_children():
+			points.append((marker as Node2D).position)
+	if points.is_empty():
+		points.append(respawn_position() - Vector2(0.0, 200.0))
+	return points
+
+
+## Les plateformes qui bougent (navettes, ascenseurs) de la map.
+func moving_platforms() -> Array[MovingPlatform]:
+	var found: Array[MovingPlatform] = []
+	_find_moving(self, found)
+	return found
+
+
+func _find_moving(node: Node, found: Array[MovingPlatform]) -> void:
+	for child in node.get_children():
+		if child is MovingPlatform:
+			found.append(child)
+		_find_moving(child, found)
+
+
+## Jeu en ligne (hôte) : où en sont les plateformes qui bougent.
+func moving_state() -> Array:
+	var times := []
+	for platform in moving_platforms():
+		times.append(platform.get_time())
+	return times
+
+
+## Jeu en ligne (copain) : on cale les plateformes sur celles de l'hôte.
+func apply_moving_state(times: Array) -> void:
+	var platforms := moving_platforms()
+	for i in mini(times.size(), platforms.size()):
+		platforms[i].set_time(times[i])

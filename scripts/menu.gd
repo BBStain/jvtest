@@ -3,7 +3,8 @@ extends Control
 ##   1. Écran titre : « Appuie sur une touche ». Le premier qui appuie devient le joueur 1.
 ##   2. Menu principal : JOUER, EN LIGNE, COMMANDES, OPTIONS. Tant qu'on est dans le menu, chaque
 ##      nouvelle manette ou côté de clavier qui appuie sur une touche devient le joueur suivant.
-##   3. Choix du personnage : chaque joueur fait défiler les persos (gauche / droite) et valide.
+##   3. Choix du personnage : chaque joueur fait défiler les persos (gauche / droite) et les armes
+##      (haut / bas), puis valide.
 ##   4. Choix de la map, puis la partie se lance.
 ## EN LIGNE : créer un salon (on reçoit un code de 4 lettres à donner aux copains) ou en
 ## rejoindre un avec son code. Dans le salon, chacun choisit son perso et se dit prêt, puis
@@ -26,7 +27,7 @@ const MAIN_BUTTONS := ["JOUER", "EN LIGNE", "COMMANDES", "OPTIONS"]
 const ONLINE_BUTTONS := ["CRÉER UN SALON", "REJOINDRE UN SALON"]
 const MIN_LIVES := 1
 const MAX_LIVES := 5
-const SLOT_SIZE := Vector2(230, 480)    ## taille fixe des cases du choix de perso (rien ne bouge)
+const SLOT_SIZE := Vector2(230, 540)    ## taille fixe des cases du choix de perso (rien ne bouge)
 const PREVIEW_SIZE := Vector2(120, 130) ## la zone où le perso est dessiné
 
 var screen := Screen.TITLE
@@ -34,6 +35,7 @@ var change_scene_on_start := true        ## false dans les tests : on ne quitte 
 var players: Array[Dictionary] = []      ## l'appareil de chaque joueur, dans l'ordre J1, J2...
 var _choice := 0                         ## bouton sélectionné (menu principal, options)
 var _character_choice: Array[int] = []   ## perso sélectionné par chaque joueur
+var _weapon_choice: Array[int] = []      ## arme sélectionnée par chaque joueur
 var _locked: Array[bool] = []            ## le joueur a validé son perso
 var _map_choice := 0
 var _input_reader := MenuInput.new()
@@ -73,6 +75,8 @@ func _ready() -> void:
 		_add_player(device)
 		if i < GameSetup.player_characters.size():
 			_character_choice[-1] = maxi(GameSetup.CHARACTERS.find(GameSetup.player_characters[i]), 0)
+		if i < GameSetup.player_weapons.size():
+			_weapon_choice[-1] = maxi(GameSetup.WEAPONS.find(GameSetup.player_weapons[i]), 0)
 	screen = Screen.MAIN if not players.is_empty() else Screen.TITLE
 	# Retour d'une partie en ligne : dans le salon, ou sur l'écran EN LIGNE si la session est finie.
 	if Online.is_online() and not Online.local_device.is_empty():
@@ -88,6 +92,7 @@ func _restore_online_player() -> void:
 	if not Online.local_device in players:
 		players.clear()
 		_character_choice.clear()
+		_weapon_choice.clear()
 		_locked.clear()
 		_add_player(Online.local_device)
 
@@ -205,6 +210,10 @@ func _handle_characters(player: int, action: String) -> void:
 			if not _locked[player]:
 				_character_choice[player] = posmod(_character_choice[player] + (1 if action == "right" else -1), count)
 				_show()
+		"up", "down":
+			if not _locked[player]:
+				_weapon_choice[player] = posmod(_weapon_choice[player] + (1 if action == "down" else -1), GameSetup.WEAPONS.size())
+				_show()
 		"confirm":
 			_locked[player] = true
 			if _all_locked():
@@ -242,9 +251,11 @@ func _handle_maps(action: String) -> void:
 func _start_game() -> void:
 	GameSetup.player_devices = []
 	GameSetup.player_characters = []
+	GameSetup.player_weapons = []
 	for i in players.size():
 		GameSetup.player_devices.append([players[i]])
 		GameSetup.player_characters.append(GameSetup.CHARACTERS[_character_choice[i]])
+		GameSetup.player_weapons.append(GameSetup.WEAPONS[_weapon_choice[i]])
 	GameSetup.map_path = GameSetup.MAPS[_map_choice]
 	if change_scene_on_start:
 		get_tree().change_scene_to_file(GAME_SCENE)
@@ -255,12 +266,14 @@ func _add_player(device: Dictionary) -> void:
 		return
 	players.append(device)
 	_character_choice.append(0)
+	_weapon_choice.append(0)
 	_locked.append(false)
 
 
 func _remove_player(index: int) -> void:
 	players.remove_at(index)
 	_character_choice.remove_at(index)
+	_weapon_choice.remove_at(index)
 	_locked.remove_at(index)
 	if players.is_empty():
 		_go(Screen.TITLE)
@@ -316,7 +329,7 @@ func _show() -> void:
 			for i in MAX_PLAYERS:
 				slots.add_child(_character_slot(i))
 			_content.add_child(slots)
-			var hint := "gauche / droite pour choisir, A pour valider, B pour revenir"
+			var hint := "gauche / droite : perso, haut / bas : arme, A pour valider, B pour revenir"
 			if players.size() < MIN_PLAYERS:
 				hint = "Il faut au moins 2 joueurs : appuie sur une touche d'une autre manette ou de l'autre côté du clavier"
 			_content.add_child(UiKit.label(hint, 18, UiKit.TEXT_DIM))
@@ -390,12 +403,32 @@ func _character_slot(index: int) -> PanelContainer:
 	description.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	description_box.add_child(description)
 	box.add_child(description_box)
+	box.add_child(_weapon_rows(load(GameSetup.WEAPONS[_weapon_choice[index]]) as WeaponStats, not _locked[index]))
 	if _locked[index]:
 		box.add_child(_fixed_row(UiKit.label("PRÊT !", 24, UiKit.HIGHLIGHT), 34))
 	else:
 		box.add_child(_fixed_row(UiKit.label("%s pour valider" % _confirm_key(players[index]), 16, UiKit.TEXT_DIM), 34))
 	box.add_child(_fixed_row(UiKit.label("%s : se retirer" % _quit_key(players[index]), 14, UiKit.TEXT_DIM), 22))
 	return panel
+
+
+## L'arme choisie : son nom (avec des flèches haut / bas tant qu'on peut en changer) et ce qu'elle fait.
+## Hauteur fixe, comme le reste de la case.
+func _weapon_rows(weapon: WeaponStats, can_change: bool) -> VBoxContainer:
+	var rows := VBoxContainer.new()
+	rows.add_theme_constant_override("separation", 2)
+	var name_text := ("▲  %s  ▼" if can_change else "%s") % weapon.display_name
+	rows.add_child(_fixed_row(UiKit.label(name_text, 18, weapon.color), 26))
+	var description_box := Control.new()
+	description_box.custom_minimum_size = Vector2(200, 36)
+	description_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var description := UiKit.label(weapon.description, 12, UiKit.TEXT_DIM)
+	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	description.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	description.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	description_box.add_child(description)
+	rows.add_child(description_box)
+	return rows
 
 
 ## Donne une hauteur fixe à une ligne de texte (centrée dedans), pour que rien ne bouge :
@@ -511,6 +544,7 @@ func _controls_table() -> GridContainer:
 		["Dash", "LB", "G", "J"],
 		["Courir (garder)", "LT", "Shift gauche", "Shift droit"],
 		["Bloquer (garder)", "B", "C", "U"],
+		["Objet", "RT", "E", "O"],
 		["Pause", "Start", "Échap ou P", "Échap ou P"],
 	]
 	for r in rows.size():
@@ -624,6 +658,10 @@ func _handle_lobby(action: String) -> void:
 			if not mine.ready:
 				var count := GameSetup.CHARACTERS.size()
 				Online.choose(posmod(mine.character + (1 if action == "right" else -1), count), false)
+		"up", "down":
+			if not mine.ready:
+				var weapons := GameSetup.WEAPONS.size()
+				Online.choose(mine.character, false, posmod(mine.get("weapon", 0) + (1 if action == "down" else -1), weapons))
 		"confirm":
 			if not mine.ready:
 				Online.choose(mine.character, true)
@@ -690,7 +728,7 @@ func _show_online() -> void:
 			for i in Online.MAX_PLAYERS:
 				slots.add_child(_online_slot(i))
 			_content.add_child(slots)
-			var hint := "gauche / droite : perso      A : prêt      B : quitter le salon"
+			var hint := "gauche / droite : perso      haut / bas : arme      A : prêt      B : quitter le salon"
 			var me := Online.my_index()
 			if me != -1 and Online.players[me].ready:
 				hint = "B : je ne suis plus prêt"
@@ -751,6 +789,7 @@ func _online_slot(index: int) -> PanelContainer:
 	description.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	description_box.add_child(description)
 	box.add_child(description_box)
+	box.add_child(_weapon_rows(load(GameSetup.WEAPONS[player.get("weapon", 0)]) as WeaponStats, mine and not player.ready))
 	if player.ready:
 		box.add_child(_fixed_row(UiKit.label("PRÊT !", 24, UiKit.HIGHLIGHT), 34))
 	else:

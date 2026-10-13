@@ -1,0 +1,19 @@
+[gd_resource type="Resource" script_class="WeaponStats" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/weapon_stats.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+display_name = "Katana"
+description = "Rapide, pousse à peine. Lourde : un dash tranchant."
+color = Color(0.7, 0.9, 1, 1)
+held_length = 36.0
+held_head = 3.0
+light_startup_mult = 0.8
+light_cooldown_mult = 0.45
+light_radius_mult = 0.75
+light_knockback_mult = 0.25
+heavy = 1
+heavy_radius_mult = 0.9
+heavy_knockback_mult = 0.9
+heavy_speed = 1800.0

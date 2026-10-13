@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="WeaponStats" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/weapon_stats.gd" id="1_weapon"]
+
+[resource]
+script = ExtResource("1_weapon")
+display_name = "Lance"
+description = "Très longue portée. Lourde : on la lance."
+color = Color(0.95, 0.85, 0.45, 1)
+held_length = 64.0
+held_head = 6.0
+light_startup_mult = 1.15
+light_cooldown_mult = 1.1
+light_reach_mult = 1.7
+light_radius_mult = 0.7
+light_knockback_mult = 1.05
+heavy = 3
+heavy_speed = 1300.0

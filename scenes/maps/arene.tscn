@@ -1,8 +1,10 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=18 format=3]
 
 [ext_resource type="Script" path="res://scripts/game_map.gd" id="0_map"]
 
 [ext_resource type="Script" path="res://scripts/moving_platform.gd" id="2_moving"]
+
+[ext_resource type="Script" path="res://scripts/ladder.gd" id="3_ladder"]
 
 [sub_resource type="RectangleShape2D" id="Shape_Sol"]
 size = Vector2(1100, 60)
@@ -42,6 +44,9 @@ size = Vector2(160, 16)
 
 [sub_resource type="RectangleShape2D" id="Shape_Sommet"]
 size = Vector2(260, 16)
+
+[sub_resource type="RectangleShape2D" id="Shape_Toit"]
+size = Vector2(4500, 40)
 
 [node name="Arene" type="Node2D"]
 script = ExtResource("0_map")
@@ -715,6 +720,68 @@ script = ExtResource("2_moving")
 size = Vector2(140, 16)
 travel = Vector2(860, 0)
 period = 9.0
+
+[node name="Toit" type="Node2D" parent="."]
+
+[node name="Plafond" type="StaticBody2D" parent="Toit"]
+position = Vector2(390, -680)
+
+[node name="Collision" type="CollisionShape2D" parent="Toit/Plafond"]
+shape = SubResource("Shape_Toit")
+
+[node name="Visuel" type="ColorRect" parent="Toit/Plafond"]
+offset_left = -2250.0
+offset_top = -20.0
+offset_right = 2250.0
+offset_bottom = 20.0
+mouse_filter = 2
+color = Color(0.36, 0.4, 0.5, 1)
+
+[node name="Echelle" type="Node2D" parent="Toit"]
+position = Vector2(-1905, -125)
+script = ExtResource("3_ladder")
+size = Vector2(40, 1150)
+
+[node name="AscenseurToit" type="AnimatableBody2D" parent="Toit"]
+position = Vector2(2725, 578)
+script = ExtResource("2_moving")
+size = Vector2(140, 16)
+travel = Vector2(0, -1270)
+period = 8.0
+pause = 1.5
+color = Color(0.85, 0.7, 0.4, 1)
+
+[node name="ItemSpawns" type="Node2D" parent="."]
+
+[node name="SolGauche" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(400, 100)
+
+[node name="SolDroite" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(880, 100)
+
+[node name="Sommet" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(640, -400)
+
+[node name="Duel1" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(1900, 200)
+
+[node name="Duel2" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(2350, 200)
+
+[node name="SommetDuel" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(2130, -400)
+
+[node name="Pylones" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(-640, -500)
+
+[node name="Corniche" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(-1215, 0)
+
+[node name="Toit1" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(300, -900)
+
+[node name="Toit2" type="Marker2D" parent="ItemSpawns"]
+position = Vector2(1500, -900)
 
 [node name="SpawnPoints" type="Node2D" parent="."]
 
