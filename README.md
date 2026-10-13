@@ -9,7 +9,7 @@ Après une mise à jour, le navigateur peut garder l'ancienne version jusqu'à 1
 ## Avant la partie : le menu
 
 1. **Appuie sur une touche** : le premier qui appuie (manette ou clavier) devient le **joueur 1** et ouvre le menu.
-2. **Le menu** a 3 boutons : **JOUER**, **COMMANDES** (le tableau des touches) et **OPTIONS** (le nombre de vies, de 1 à 5).
+2. **Le menu** a 3 boutons : **JOUER**, **COMMANDES** (le tableau des touches ; appuie sur un bouton de ta manette pour voir sa ligne s'allumer et savoir si la manette est reconnue) et **OPTIONS** (le nombre de vies, de 1 à 5).
    Tant qu'on est dans le menu, chaque nouvelle manette ou côté du clavier qui appuie sur une touche devient le joueur suivant (J2, J3, J4).
    Deux joueurs peuvent partager un clavier : côté gauche (Z Q S D) et côté droit (flèches).
 3. **JOUER** ouvre le choix du personnage : une case par joueur, avec sa manette ou son clavier. Gauche / droite pour faire défiler les persos, valider pour être prêt. Un joueur qui veut **se retirer** de la partie appuie sur **Y** (manette), **R** (clavier gauche) ou **I** (clavier droit) : les joueurs suivants remontent d'une place.

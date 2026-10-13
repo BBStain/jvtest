@@ -707,6 +707,9 @@ func _ready() -> void:
 	check(menu.screen == menu.Screen.MAIN and menu._choice == 2, "Menu : retour, COMMANDES sélectionné")
 	menu.handle(pad, "confirm")
 	check(menu.screen == menu.Screen.CONTROLS, "Menu : COMMANDES s'ouvre")
+	menu.handle(pad, "confirm")
+	check(menu.screen == menu.Screen.CONTROLS and menu._pad_test_cells.size() == 10,
+		"COMMANDES : A ne fait pas revenir (on y teste ses boutons, une case manette par commande)")
 	menu.handle(pad, "back")
 	menu.handle(pad, "up")
 	menu.handle(pad, "up")
@@ -1760,6 +1763,47 @@ func _ready() -> void:
 	p1.input_source = Scripted.new(func(s, f): s.item_pressed = f % 15 == 1)
 	await step(70)
 	check(p1.item == "", "Pistolet : vide après 5 balles, le slot se libère")
+	# 19b2) Une balle sur un joueur invincible (il clignote) s'arrête sur lui sans effet (avant, elle le
+	# traversait lentement pendant les ralentis et semblait coincée dans le perso) ; un dash la laisse passer.
+	await step(60)
+	for p in game.projectiles.duplicate():
+		game._remove_projectile(p)
+	p2.position = Vector2(900, 540); p2.velocity = Vector2.ZERO
+	p2._stun_timer = 0.0; p2._invincible_timer = 5.0
+	var lives_bullet := p2.lives
+	game._on_item_used(p1, "balle", Vector2.RIGHT, 1.0, 0.0)
+	var stopped := false
+	for i in 30:
+		await step(1)
+		if game.projectiles.is_empty():
+			stopped = true
+			break
+	check(stopped and not p2.is_stunned() and p2.lives == lives_bullet and game.projectiles.is_empty(),
+		"Pistolet : la balle s'arrête sur un joueur invincible, sans effet (pas coincée dedans)")
+	p2._invincible_timer = 0.0
+	p2.position = Vector2(560, 540)
+	game._on_item_used(p1, "balle", Vector2.RIGHT, 1.0, 0.0)
+	var lives_dash := p2.lives
+	for i in 10:  # J2 dashe sur place pendant que la balle arrive
+		p2.position = Vector2(560, 540)
+		p2._dash_timer = 1.0; p2._dash_dir = Vector2.UP
+		await step(1)
+	var passed: bool = not game.projectiles.is_empty() and game.projectiles[0].position.x > p2.position.x + 20.0
+	p2._dash_timer = 0.0
+	check(passed and not p2.is_stunned() and p2.lives == lives_dash, "Pistolet : un dash esquive la balle (elle passe au travers)")
+	for p in game.projectiles.duplicate():
+		game._remove_projectile(p)
+	# 19b3) Canon collé à un mur : la balle s'arrête dans le mur au lieu de partir de l'intérieur et de le traverser
+	p1.position = Vector2(-59, 330)
+	game._on_item_used(p1, "balle", Vector2.LEFT, 1.0, 0.0)
+	check(game.projectiles.is_empty(), "Pistolet : tiré collé à un mur, la balle ne traverse pas le mur")
+	# 19b4) Partie finie : une balle arrivée dans un mur ne reste pas figée à l'écran
+	var frozen := Projectile.new()
+	frozen.kind = "balle"; frozen.finished = true; frozen.simulate = false
+	game._add_projectile(frozen)
+	game._match_over = true
+	await step(2)
+	check(game.projectiles.is_empty(), "Partie finie : les balles arrêtées sont retirées")
 	# 19c) Renvoi de balle au bon moment (timing parfait) : droit sur le tireur, et c'est un contre
 	await new_game()
 	p1 = game.fighters[0]; p2 = game.fighters[1]
@@ -1832,6 +1876,9 @@ func _ready() -> void:
 	check(grenade.velocity.x > 500, "Grenade : un coup la repousse (vx %.0f)" % grenade.velocity.x)
 	game._remove_projectile(grenade)
 	# 19h) Gardée trop longtemps : elle explose en main
+	p2.recover()  # J2 sonné par la grenade d'avant : on arrête le ralenti, pour compter la mèche en vraies frames
+	await step(1)
+	game._time_engine.stop(true)
 	p1.position = Vector2(500, 540); p1._invincible_timer = 0.0; p1._stun_timer = 0.0
 	var lives_before := p1.lives
 	p1.take_item("grenade")

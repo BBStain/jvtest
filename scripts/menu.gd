@@ -42,6 +42,8 @@ var _input_reader := MenuInput.new()
 var _blink_label: Label
 var _blink_time := 0.0
 var _content: VBoxContainer
+var _pad_test_cells: Array = []          ## COMMANDES : [case "Manette", bouton/axe] allumée quand on appuie
+var _pad_test_info: Label                ## COMMANDES : les manettes branchées (reconnues ou non)
 var _code_letters: Array[String] = []    ## le code tapé pour rejoindre un salon
 var _code_cursor := 0
 
@@ -101,6 +103,8 @@ func _process(delta: float) -> void:
 	if _blink_label != null and is_instance_valid(_blink_label):
 		_blink_time += delta
 		_blink_label.modulate.a = 0.45 + 0.55 * absf(sin(_blink_time * 2.5))
+	if screen == Screen.CONTROLS:
+		_update_pad_test()
 
 
 # --- Lecture des manettes et du clavier ---
@@ -140,7 +144,7 @@ func handle(device: Dictionary, action: String) -> void:
 		Screen.MAIN:
 			_handle_main(action)
 		Screen.CONTROLS:
-			if action in ["back", "confirm"]:
+			if action == "back":  # A ne fait pas revenir : on peut tester ses boutons sur cet écran
 				_go(Screen.MAIN, 2)
 		Screen.OPTIONS:
 			_handle_options(action)
@@ -299,6 +303,8 @@ func _show() -> void:
 		_content.remove_child(child)
 		child.queue_free()
 	_blink_label = null
+	_pad_test_cells = []
+	_pad_test_info = null
 	match screen:
 		Screen.TITLE:
 			_add_title(72)
@@ -316,7 +322,9 @@ func _show() -> void:
 		Screen.CONTROLS:
 			_content.add_child(UiKit.label("COMMANDES", 44))
 			_content.add_child(_controls_table())
-			_content.add_child(UiKit.label("B / Échap : retour", 18, UiKit.TEXT_DIM))
+			_pad_test_info = UiKit.label("", 18, UiKit.TEXT_DIM)
+			_content.add_child(_pad_test_info)
+			_content.add_child(UiKit.label("Appuie sur un bouton de ta manette : sa ligne s'allume.   B / Échap : retour", 18, UiKit.TEXT_DIM))
 		Screen.OPTIONS:
 			_content.add_child(UiKit.label("OPTIONS", 44))
 			_content.add_child(UiKit.label("Vies par joueur :   <   %d   >" % GameSetup.lives, 30, UiKit.HIGHLIGHT))
@@ -547,12 +555,43 @@ func _controls_table() -> GridContainer:
 		["Objet", "RT", "E", "O"],
 		["Pause", "Start", "Échap ou P", "Échap ou P"],
 	]
+	# Ce qui allume la case "Manette" de chaque ligne (test des boutons) : [boutons, axes]
+	var pad_inputs := [
+		[], [[JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT], [JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y]],
+		[[JOY_BUTTON_A], []], [[JOY_BUTTON_X], []], [[], [JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y]], [[JOY_BUTTON_Y], []],
+		[[JOY_BUTTON_LEFT_SHOULDER], []], [[], [JOY_AXIS_TRIGGER_LEFT]], [[JOY_BUTTON_B], []],
+		[[JOY_BUTTON_RIGHT_SHOULDER], [JOY_AXIS_TRIGGER_RIGHT]], [[JOY_BUTTON_START], []],
+	]
 	for r in rows.size():
-		for cell in rows[r]:
-			var label := UiKit.label(cell, 20, UiKit.HIGHLIGHT if r == 0 else Color.WHITE)
+		for c in rows[r].size():
+			var label := UiKit.label(rows[r][c], 20, UiKit.HIGHLIGHT if r == 0 else Color.WHITE)
 			label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 			grid.add_child(label)
+			if c == 1 and r > 0:
+				_pad_test_cells.append([label, pad_inputs[r]])
 	return grid
+
+
+## COMMANDES : allume la case "Manette" de ce qu'on appuie, et dit si chaque manette est reconnue.
+## Une manette pas reconnue par le navigateur peut avoir ses boutons mélangés.
+func _update_pad_test() -> void:
+	var pads := Input.get_connected_joypads()
+	for cell in _pad_test_cells:
+		var on := false
+		for pad in pads:
+			for button in cell[1][0]:
+				on = on or Input.is_joy_button_pressed(pad, button)
+			for axis in cell[1][1]:
+				on = on or absf(Input.get_joy_axis(pad, axis)) > 0.5
+		(cell[0] as Label).add_theme_color_override("font_color", UiKit.HIGHLIGHT if on else Color.WHITE)
+	if _pad_test_info != null:
+		var lines := []
+		for pad in pads:
+			if Input.is_joy_known(pad):
+				lines.append("Manette %d : reconnue" % (pad + 1))
+			else:
+				lines.append("Manette %d (%s) : pas reconnue, ses boutons peuvent être mélangés" % [pad + 1, Input.get_joy_name(pad)])
+		_pad_test_info.text = "\n".join(lines) if not lines.is_empty() else "Aucune manette détectée (appuie sur un bouton)"
 
 
 # --- Jeu en ligne ---
