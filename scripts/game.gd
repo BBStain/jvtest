@@ -20,7 +20,7 @@ const MENU_SCENE := "res://scenes/menu.tscn"
 
 # --- Caméra : elle suit le milieu des joueurs et dézoome quand ils s'éloignent ---
 const CAMERA_MARGIN := Vector2(700, 450)   ## espace gardé autour des joueurs (en pixels)
-const CAMERA_ZOOM_MIN := 0.3               ## zoom le plus éloigné (plus petit = voit plus loin)
+const CAMERA_ZOOM_MIN := 0.25             ## zoom le plus éloigné (plus petit = voit plus loin)
 const CAMERA_ZOOM_MAX := 1.2               ## zoom le plus proche
 const CAMERA_SMOOTHING := 6.0              ## plus grand = la caméra réagit plus vite
 

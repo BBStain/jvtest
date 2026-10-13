@@ -2000,6 +2000,34 @@ func _ready() -> void:
 	check(p2.is_swinging_on(vine), "Liane en ligne : le copain sait qui s'y balance")
 	p2.apply_net_state(copy)
 	await shot("18_jungle")
+	# 18b) Les hauteurs au-dessus du toit : chaque échelle mène à un étage où l'on atterrit
+	for node in get_tree().get_nodes_in_group("echelles"):
+		var lad := node as Ladder
+		p1._stun_timer = 0.0; p1._invincible_timer = 0.0; p1._knockback_timer = 0.0
+		p1._ladder_regrab_timer = 0.0; p1._vine_regrab_timer = 0.0; p1._leave_vine()
+		p1.position = Vector2(lad.position.x, lad.position.y + lad.size.y / 2.0 - 40.0); p1.velocity = Vector2.ZERO
+		p1.input_source = Scripted.new(func(s, f): s.stick.y = -1.0 if f < 3 else 0.0)
+		await step(3)
+		var grabbed := p1.is_climbing()
+		var t := 0
+		while not (t > 20 and p1.is_on_floor() and not p1.is_climbing()) and t < 240:
+			await step(1)
+			t += 1
+		check(grabbed and p1.is_on_floor() and p1.position.y + 30 < lad.top() + 120,
+			"%s : on monte et on atterrit en haut (pieds à %.0f, haut %.0f)" % [lad.name, p1.position.y + 30, lad.top()])
+	# L'ascenseur des cimes monte du toit jusqu'aux cimes de droite
+	var lift2 := game.map.get_node("Toit/Hauteurs/AscenseurCimes") as MovingPlatform
+	var top_right := game.map.get_node("Toit/Hauteurs/CimesDroite") as Node2D
+	lift2.set_time(0.0)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.position = Vector2(lift2.position.x, roof_top - 100); p1.velocity = Vector2.ZERO
+	await step(int(lift2.period * 30) + 40)
+	check(p1.is_on_floor() and absf(p1.position.y + 30 - (top_right.position.y - 8)) < 4,
+		"Ascenseur des cimes : on arrive en haut (pieds à %.0f)" % (p1.position.y + 30))
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = 1.0 if f < 30 else 0.0)
+	await step(60)
+	check(p1.is_on_floor() and absf(p1.position.y + 30 - (top_right.position.y - 8)) < 3, "Ascenseur des cimes : on passe sur les cimes de droite")
+	await shot("18_hauteurs")
 
 	# 15) Jeu en ligne (sans réseau ici : on joue l'hôte puis un copain, et on passe les messages à la main)
 	# 15a) Les touches d'un copain arrivent par le réseau : un appui n'est jamais perdu
