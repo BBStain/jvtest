@@ -2285,6 +2285,96 @@ func _ready() -> void:
 	check(seen == ["+2", "-2"] and guest_peer.get_connection_status() == MultiplayerPeer.CONNECTION_DISCONNECTED,
 		"Relais : le copain parti est signalé, le copain sans hôte est déconnecté")
 
+	# 14) Éditeur de map : format JSON, construction de la map, outils de l'éditeur, partie sur la map
+	var fresh := MapData.new_map("Test")
+	var built := MapBuilder.build(fresh)
+	var built_problems: Array[String] = []
+	_check_visuals(built, built_problems)
+	check(built.get_node("SpawnPoints").get_child_count() == 2 and built.has_node("RespawnPoint")
+		and built.blast_zone.has_point(built.respawn_position()) and built_problems.is_empty(),
+		"Éditeur : une map neuve donne une vraie map (2 départs, une réapparition) %s" % [built_problems])
+	built.free()
+	check(MapData.from_json(MapData.to_json(fresh)) == MapData.normalized(fresh), "Éditeur : sauver puis relire le JSON redonne la même map")
+	var odd := MapData.normalized({"name": "X", "elements": [{"type": "inconnu", "pos": [0, 0]}, {"type": "mobile", "pos": [5, 6]}]})
+	check(odd.elements.size() == 1 and odd.elements[0].has("travel") and odd.elements[0].has("period"),
+		"Éditeur : un fichier incomplet est complété (réglages par défaut), un type inconnu est ignoré")
+
+	var editor: MapEditor = (load("res://scenes/editor.tscn") as PackedScene).instantiate()
+	editor.change_scene = false
+	GameSetup.editor_map = {}
+	add_child(editor)
+	editor.new_map()
+	await step(1)
+	var count: int = editor.data.elements.size()
+	var mobile := editor.add_from_catalog("mobile", Vector2(1013, 207))
+	check(editor.selected_id == mobile.id and editor.data.elements.size() == count + 1
+		and MapData.vec(mobile, "pos") == Vector2(1000, 208), "Éditeur : poser une plateforme mobile la colle à la grille (%s)" % [mobile.pos])
+	editor.snap_on = false
+	editor.move_selected(Vector2(1013, 207))
+	check(MapData.vec(mobile, "pos") == Vector2(1013, 207), "Éditeur : sans l'aimant, placement libre au pixel près")
+	editor.snap_on = true
+	editor.undo()
+	check(editor.data.elements.size() == count, "Éditeur : Ctrl+Z annule la pose")
+	editor.redo()
+	check(editor.data.elements.size() == count + 1, "Éditeur : Ctrl+Y la refait")
+	var block := editor.add_from_catalog("sol", Vector2(0, 800))
+	var block_corner := MapData.vec(block, "pos") - MapData.vec(block, "size") / 2.0
+	editor._start_handle_drag(block, "resize")
+	editor._resize(block, Vector2(200, 840))
+	var block_rect := Rect2(MapData.vec(block, "pos") - MapData.vec(block, "size") / 2.0, MapData.vec(block, "size"))
+	check(block_rect.end == Vector2(200, 840) and block_rect.position == block_corner,
+		"Éditeur : tirer le coin agrandit le bloc, le coin opposé ne bouge pas (%s)" % [block_rect])
+	editor.rotate_selected(15.0)
+	check(is_equal_approx(float(block.rot), 15.0), "Éditeur : R tourne le bloc de 15°")
+	editor.copy_selected()
+	var pasted := editor.paste(Vector2(400, 1000))
+	check(pasted.id != block.id and pasted.size == block.size and editor.data.elements.size() == count + 3,
+		"Éditeur : copier / coller fait un deuxième bloc pareil")
+	editor.delete_selected()
+	check(editor.data.elements.size() == count + 2 and editor.selected_id == -1, "Éditeur : Suppr efface l'élément choisi")
+	var p3 := editor.add_from_catalog("spawn_joueur", Vector2(700, 580))
+	check(int(p3.player) == 3, "Éditeur : un nouveau départ prend le numéro libre suivant (J3)")
+	editor.add_from_catalog("echelle", Vector2(160, 400))
+	editor.add_from_catalog("liane", Vector2(1100, 100))
+	editor.add_from_catalog("fenetre", Vector2(900, 300))
+	editor.add_from_catalog("spawn_objet", Vector2(640, 200))
+	var resp_count: int = editor.data.elements.filter(func(e): return e.type == "reapparition").size()
+	editor.add_from_catalog("reapparition", Vector2(600, 100))
+	check(editor.data.elements.filter(func(e): return e.type == "reapparition").size() == resp_count,
+		"Éditeur : une seule réapparition (la poser à nouveau la déplace)")
+	check(editor._nodes.size() == editor.data.elements.filter(func(e): return not e.type in MapData.POINT_TYPES).size(),
+		"Éditeur : chaque élément a son aperçu")
+	editor._name_edit.text = "_test_editeur"
+	check(editor.save_map() and "_test_editeur" in MapData.list_saved(), "Éditeur : la map est sauvée et listée")
+	check(MapData.load_saved("_test_editeur") == MapData.normalized(editor.data), "Éditeur : la map sauvée se relit pareil")
+	check("carte:_test_editeur" in GameSetup.all_maps(), "Éditeur : la map sauvée est dans le choix des maps")
+	check(editor.test_map() and GameSetup.map_path == GameSetup.EDITOR_MAP and GameSetup.exit_scene() == MapEditor.EDITOR_SCENE,
+		"Éditeur : TESTER prépare une partie sur la map, et QUITTER y ramènera")
+	editor.queue_free()
+	# La partie sur la map de l'éditeur : 3 joueurs posés, la navette, l'échelle, la liane et la fenêtre marchent
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}]]
+	await new_game()
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(90)
+	var landed_custom: int = game.fighters.filter(func(fi): return fi.is_on_floor() and fi.lives == GameSetup.lives).size()
+	check(landed_custom == 3, "Éditeur : sur la map de l'éditeur, les 3 joueurs atterrissent (%d/3)" % landed_custom)
+	var moving: Array = game.map.moving_platforms()
+	var start_x: float = moving[0].position.x if moving.size() == 1 else 0.0
+	await step(30)
+	check(moving.size() == 1 and moving[0].position.x != start_x and game.map.windows().size() == 1
+		and get_tree().get_nodes_in_group("echelles").size() == 1 and get_tree().get_nodes_in_group("lianes").size() == 1,
+		"Éditeur : la navette roule, l'échelle, la liane et la fenêtre sont là")
+	check(game.map.item_spawn_points().size() == 1, "Éditeur : les objets tombent depuis le point posé")
+	var saved_map := GameSetup.make_map("carte:_test_editeur")
+	check(saved_map.map_name == "_test_editeur", "Éditeur : une map sauvée se charge par son nom")
+	saved_map.free()
+	MapData.delete_saved("_test_editeur")
+	GameSetup.map_path = GameSetup.MAPS[0]
+	GameSetup.editor_map = {}
+	GameSetup.return_scene = ""
+	GameSetup.player_devices = []
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 
