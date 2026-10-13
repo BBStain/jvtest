@@ -784,6 +784,78 @@ func _ready() -> void:
 	check(menu.players.is_empty() and menu.screen == menu.Screen.TITLE, "Perso : le dernier joueur se retire, retour à l'écran titre")
 	menu.queue_free()
 
+	# 10b2) TOURNOI : le code, puis la préparation en 3 étapes
+	TournamentSetup.reset()
+	TournamentSetup.unlocked = false
+	GameSetup.player_devices = []
+	menu = load("res://scenes/menu.tscn").instantiate()
+	menu.change_scene_on_start = false
+	add_child(menu)
+	await get_tree().process_frame
+	menu.handle(pad, "confirm")
+	for i in 4:
+		menu.handle(pad, "down")
+	await shot("10_menu_tournoi")
+	menu.handle(pad, "confirm")
+	check(menu.screen == menu.Screen.TOURNAMENT and menu._tournament.page == TournamentMenu.Page.CODE,
+		"Tournoi : le bouton TOURNOI demande le code")
+	for letter in "swat":
+		var key := InputEventKey.new()
+		key.pressed = true
+		key.unicode = letter.unicode_at(0)
+		menu._input(key)
+	menu.handle(pad, "confirm")
+	check(menu._tournament.page == TournamentMenu.Page.CODE and menu._tournament._wrong_code, "Tournoi : un code faux ne fait pas entrer")
+	for letter in "swag":
+		var key := InputEventKey.new()
+		key.pressed = true
+		key.unicode = letter.unicode_at(0)
+		menu._input(key)
+	await shot("11_tournoi_code")
+	menu.handle(pad, "confirm")
+	check(menu._tournament.page == TournamentMenu.Page.HOME, "Tournoi : le code « swag » ouvre la préparation")
+	await shot("12_tournoi_preparation")
+	var lines := TournamentSetup.summary()
+	check(lines[-1].ends_with("1 champion") and lines.size() == 5,
+		"Tournoi : par défaut, 16 joueurs mènent juste à une finale en duel (%s)" % " / ".join(lines))
+	menu.handle(pad, "confirm")
+	check(menu._tournament.page == TournamentMenu.Page.MODE, "Tournoi : étape 1, mode de jeu")
+	menu.handle(pad, "confirm")
+	check(TournamentSetup.registered == 24, "Tournoi : A change le nombre d'inscrits")
+	menu.handle(pad, "down")
+	menu.handle(pad, "down")
+	menu.handle(pad, "right")
+	menu.handle(pad, "right")
+	menu.handle(pad, "right")
+	menu.handle(pad, "right")
+	menu.handle(pad, "confirm")
+	check(TournamentSetup.phases.elimination.qualified == 3, "Tournoi : A change les qualifiés de l'élimination")
+	menu.handle(pad, "left")
+	menu.handle(pad, "left")
+	menu.handle(pad, "left")
+	menu.handle(pad, "confirm")
+	check(TournamentSetup.phases.elimination.players == 2 and TournamentSetup.phases.elimination.qualified == 1,
+		"Tournoi : moins de joueurs par match, les qualifiés suivent")
+	TournamentSetup.reset()
+	menu._show()
+	await shot("13_tournoi_mode")
+	menu.handle(pad, "back")
+	menu.handle(pad, "down")
+	menu.handle(pad, "confirm")
+	check(menu._tournament.page == TournamentMenu.Page.MAPS, "Tournoi : étape 2, maps")
+	await shot("14_tournoi_maps")
+	menu.handle(pad, "back")
+	menu.handle(pad, "down")
+	menu.handle(pad, "confirm")
+	check(menu._tournament.page == TournamentMenu.Page.STEP3, "Tournoi : étape 3, encore à venir")
+	menu.handle(pad, "back")
+	menu.handle(pad, "back")
+	check(menu.screen == menu.Screen.MAIN and menu._choice == 4, "Tournoi : B revient au menu principal")
+	menu.handle(pad, "confirm")
+	check(menu._tournament.page == TournamentMenu.Page.HOME, "Tournoi : le code n'est plus demandé ensuite")
+	menu.queue_free()
+	TournamentSetup.reset()
+
 	# 10c) Une partie avec 5 vies les affiche bien
 	GameSetup.player_devices = []
 	await new_game()

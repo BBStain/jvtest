@@ -1,7 +1,7 @@
 extends Control
 ## Le menu du jeu, du premier écran jusqu'au lancement de la partie :
 ##   1. Écran titre : « Appuie sur une touche ». Le premier qui appuie devient le joueur 1.
-##   2. Menu principal : JOUER, EN LIGNE, COMMANDES, OPTIONS. Tant qu'on est dans le menu, chaque
+##   2. Menu principal : JOUER, EN LIGNE, COMMANDES, OPTIONS, TOURNOI. Tant qu'on est dans le menu, chaque
 ##      nouvelle manette ou côté de clavier qui appuie sur une touche devient le joueur suivant.
 ##   3. Choix du personnage : chaque joueur fait défiler les persos (gauche / droite) et les armes
 ##      (haut / bas), puis valide.
@@ -9,6 +9,7 @@ extends Control
 ## EN LIGNE : créer un salon (on reçoit un code de 4 lettres à donner aux copains) ou en
 ## rejoindre un avec son code. Dans le salon, chacun choisit son perso et se dit prêt, puis
 ## l'hôte choisit la map et lance la partie (voir Online). Seul le joueur 1 joue en ligne.
+## TOURNOI : la préparation du tournoi, derrière un code (voir TournamentMenu et TournamentSetup).
 ##
 ## Commandes du menu, pour chaque joueur :
 ##   manette : stick ou croix pour choisir, A (ou Start) pour valider, B pour revenir
@@ -18,12 +19,12 @@ extends Control
 ## gauche) ou I (clavier droit).
 ## (voir MenuInput pour la lecture des touches et UiKit pour les morceaux d'affichage communs)
 
-enum Screen { TITLE, MAIN, CONTROLS, OPTIONS, CHARACTERS, MAPS, ONLINE, ONLINE_CODE, ONLINE_LOBBY, ONLINE_MAP }
+enum Screen { TITLE, MAIN, CONTROLS, OPTIONS, CHARACTERS, MAPS, ONLINE, ONLINE_CODE, ONLINE_LOBBY, ONLINE_MAP, TOURNAMENT }
 
 const MIN_PLAYERS := 2
 const MAX_PLAYERS := 4
 const GAME_SCENE := "res://scenes/main.tscn"
-const MAIN_BUTTONS := ["JOUER", "EN LIGNE", "COMMANDES", "OPTIONS"]
+const MAIN_BUTTONS := ["JOUER", "EN LIGNE", "COMMANDES", "OPTIONS", "TOURNOI"]
 const ONLINE_BUTTONS := ["CRÉER UN SALON", "REJOINDRE UN SALON"]
 const MIN_LIVES := 1
 const MAX_LIVES := 5
@@ -46,10 +47,12 @@ var _pad_test_cells: Array = []          ## COMMANDES : [case "Manette", bouton/
 var _pad_test_info: Label                ## COMMANDES : les manettes branchées (reconnues ou non)
 var _code_letters: Array[String] = []    ## le code tapé pour rejoindre un salon
 var _code_cursor := 0
+var _tournament: TournamentMenu          ## les écrans du bouton TOURNOI
 
 
 func _ready() -> void:
 	InputBindings.fix_web_triggers()
+	_tournament = TournamentMenu.new(_show)
 	var background := ColorRect.new()
 	background.color = UiKit.BG_COLOR
 	background.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -112,6 +115,9 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if screen == Screen.ONLINE_CODE and _type_code_key(event):
 		return
+	if screen == Screen.TOURNAMENT and _tournament.type_key(event):
+		_show()
+		return
 	var press := _input_reader.read(event)
 	if press.is_empty():
 		if event is InputEventMouseButton and event.pressed and screen == Screen.TITLE:
@@ -152,6 +158,12 @@ func handle(device: Dictionary, action: String) -> void:
 			_handle_characters(player, action)
 		Screen.MAPS:
 			_handle_maps(action)
+		Screen.TOURNAMENT:
+			_tournament.handle(action)
+			if _tournament.exited:
+				_go(Screen.MAIN, 4)
+			else:
+				_show()
 
 
 func _on_joy_connection_changed(id: int, connected: bool) -> void:
@@ -193,6 +205,9 @@ func _open_main_button(index: int) -> void:
 			_go(Screen.CONTROLS)
 		3:
 			_go(Screen.OPTIONS)
+		4:
+			_tournament.open()
+			_go(Screen.TOURNAMENT, 4)
 
 
 func _handle_options(action: String) -> void:
@@ -345,6 +360,8 @@ func _show() -> void:
 			_content.add_child(UiKit.label("CHOISIS LA MAP", 40))
 			_content.add_child(_map_card())
 			_content.add_child(UiKit.label("gauche / droite pour choisir, A pour lancer la partie, B pour revenir", 18, UiKit.TEXT_DIM))
+		Screen.TOURNAMENT:
+			_tournament.build(_content)
 		_:
 			_show_online()
 
@@ -738,18 +755,7 @@ func _show_online() -> void:
 			_content.add_child(UiKit.label("B / Échap : retour", 18, UiKit.TEXT_DIM))
 		Screen.ONLINE_CODE:
 			_content.add_child(UiKit.label("CODE DU SALON", 44))
-			var row := HBoxContainer.new()
-			row.alignment = BoxContainer.ALIGNMENT_CENTER
-			row.add_theme_constant_override("separation", 14)
-			for i in 4:
-				var box := PanelContainer.new()
-				box.custom_minimum_size = Vector2(80, 96)
-				box.add_theme_stylebox_override("panel", UiKit.slot_style(UiKit.HIGHLIGHT if i == _code_cursor else Color(1, 1, 1, 0.4), i == _code_cursor))
-				var letter := UiKit.label(_code_letters[i] if i < _code_letters.size() else "", 56)
-				letter.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-				box.add_child(letter)
-				row.add_child(box)
-			_content.add_child(row)
+			_content.add_child(UiKit.code_boxes(_code_letters, _code_cursor))
 			_content.add_child(UiKit.label("Clavier : tape les lettres (Retour arrière pour effacer)", 18, UiKit.TEXT_DIM))
 			_content.add_child(UiKit.label("Manette : haut / bas change la lettre, gauche / droite change de case", 18, UiKit.TEXT_DIM))
 			_content.add_child(UiKit.label("A / Entrée : rejoindre      B / Échap : retour", 18, UiKit.TEXT_DIM))
