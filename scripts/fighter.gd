@@ -64,7 +64,7 @@ const KATANA_DASH_REACH := 0.8          ## la lame dépasse du perso de 0,8 fois
 const SLAM_WAVE_TIME := 0.12            ## marteau : durée de l'onde de choc après l'arc
 const SLAM_WAVE_REACH := 150.0          ## ... jusqu'où elle va de chaque côté (x1,6 à pleine charge)
 const SLAM_WAVE_RADIUS := 14.0          ## ... sa hauteur (de chaque côté du sol)
-const SPEAR_MAX_COUNTERS := 3          ## lance lancée contrée 3 fois : cassée pour toute la partie
+const SPEAR_MAX_COUNTERS := 3          ## lance lancée contrée 3 fois : cassée jusqu'à la prochaine vie perdue
 const SPEAR_SHORTEN := 0.2              ## chaque contre raccourcit la lance de 20 % (100 %, 80 %, 60 %)
 const THROW_CHARGE_SPEED := 1.5         ## lance / dash du katana : à pleine charge, 1,5 fois plus vite
 
@@ -138,7 +138,8 @@ var weapon_away := false:
 		if _armed_stats != null:
 			stats = _bare_stats if value else _armed_stats
 ## Lance : combien de fois sa lance lancée a été contrée. Chaque contre la raccourcit ;
-## au bout de SPEAR_MAX_COUNTERS elle est cassée pour toute la partie (on finit à mains nues).
+## au bout de SPEAR_MAX_COUNTERS elle est cassée : mains nues jusqu'à la prochaine vie perdue,
+## où une lance neuve revient.
 var spear_counters := 0:
 	set(value):
 		spear_counters = value
@@ -634,7 +635,7 @@ func _throw_weapon() -> void:
 	weapon_thrown.emit(self, _attack_dir, speed)
 
 
-## On ramasse sa lance (ou elle revient quand on réapparaît). Cassée : elle ne revient plus.
+## On ramasse sa lance (ou elle revient quand on réapparaît). Cassée : elle revient à la vie suivante.
 func get_weapon_back() -> void:
 	weapon_away = is_weapon_broken()
 
@@ -651,7 +652,7 @@ func weapon_length() -> float:
 	return 1.0 - SPEAR_SHORTEN * mini(spear_counters, SPEAR_MAX_COUNTERS - 1)
 
 
-## Lance lancée contrée : plus courte, ou cassée pour toute la partie au bout de SPEAR_MAX_COUNTERS.
+## Lance lancée contrée : plus courte, ou cassée (jusqu'à la prochaine vie perdue) au bout de SPEAR_MAX_COUNTERS.
 func spear_countered() -> void:
 	spear_counters += 1
 
@@ -1007,6 +1008,9 @@ func _lose_life() -> void:
 	_stun_timer = 0.0
 	_invincible_timer = INVINCIBLE_TIME
 	show_lives()
+	if is_weapon_broken():
+		spear_counters = 0  # lance cassée : une neuve revient à la vie suivante
+		weapon_away = false
 	if lives <= 0:
 		eliminated = true
 		visible = false
