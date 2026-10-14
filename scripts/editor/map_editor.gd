@@ -73,6 +73,7 @@ var _message_left := 0.0
 var _help: Label
 var _ui: CanvasLayer
 var _pad: EditorPad
+var _juice: EditorJuice
 var _catalog_buttons: Array[Button] = []
 var _catalog_types: Array[String] = []
 var _prop_rows: Array[Dictionary] = []
@@ -95,6 +96,9 @@ func _ready() -> void:
 	_overlay.draw.connect(_draw_overlay)
 	add_child(_overlay)
 	_build_ui()
+	_juice = EditorJuice.new()
+	_juice.editor = self
+	add_child(_juice)
 	_pad = EditorPad.new()
 	_pad.editor = self
 	add_child(_pad)
@@ -134,6 +138,7 @@ func add_from_catalog(type: String, where: Variant = null) -> Dictionary:
 				_snap(element)
 				_refresh(element)
 				select(element.id)
+				_juice.pop(element)
 				return element
 	var element := MapData.add_element(data, type, pos)
 	if type == "spawn_joueur":
@@ -141,6 +146,7 @@ func add_from_catalog(type: String, where: Variant = null) -> Dictionary:
 	_snap(element)
 	_refresh(element)
 	select(element.id)
+	_juice.pop(element)
 	_say("%s ajouté" % MapData.CATALOG[type].label)
 	return element
 
@@ -163,6 +169,7 @@ func delete_selected() -> void:
 	if element.is_empty():
 		return
 	_push_undo()
+	_juice.puff(element)
 	data.elements.erase(element)
 	if _nodes.has(element.id):
 		_nodes[element.id].queue_free()
@@ -192,6 +199,7 @@ func paste(where: Variant = null) -> Dictionary:
 	_snap(element)
 	_refresh(element)
 	select(element.id)
+	_juice.pop(element)
 	return element
 
 
@@ -216,6 +224,7 @@ func rotate_selected(degrees: float) -> void:
 	_push_undo()
 	element.rot = fposmod(float(element.get("rot", 0.0)) + degrees, 360.0)
 	_refresh(element)
+	_juice.bump(element)
 	_show_props()
 
 
@@ -244,6 +253,7 @@ func grow_selected(dx: int, dy: int) -> void:
 	else:
 		return
 	_refresh(element)
+	_juice.bump(element)
 	_show_props()
 
 
@@ -259,6 +269,7 @@ func turn_selected(direction: int) -> void:
 		var travel := MapData.vec(element, "travel").rotated(deg_to_rad(30.0 * direction))
 		element.travel = [snappedf(travel.x, 0.01), snappedf(travel.y, 0.01)]
 		_refresh(element)
+		_juice.bump(element)
 		_show_props()
 
 
@@ -319,6 +330,8 @@ func save_map() -> bool:
 	var ok := MapData.save(data)
 	_save_draft()
 	_say("Sauvée : %s (on la retrouve dans JOUER > choix de la map)" % data.name if ok else "Impossible de sauver")
+	if ok:
+		_juice.toast("Sauvée !")
 	return ok
 
 
@@ -387,6 +400,8 @@ func _mouse_button(event: InputEventMouseButton) -> void:
 	if not event.pressed:
 		if _drag != "" and _drag_changed:
 			_show_props()
+		if _drag == "move":
+			_juice.land(selected(), _drag_changed)
 		_drag = ""
 		return
 	get_viewport().gui_release_focus()
@@ -404,6 +419,7 @@ func _mouse_button(event: InputEventMouseButton) -> void:
 	select(picked.id)
 	_drag = "move"
 	_drag_offset = world - MapData.vec(picked, "pos")
+	_juice.lift(picked.id)
 
 
 func _mouse_motion(event: InputEventMouseMotion) -> void:
@@ -583,6 +599,8 @@ func _free_player_number() -> int:
 # --- Aperçu de la map ---
 
 func _rebuild_all() -> void:
+	if _juice != null:
+		_juice.reset()
 	for node in _nodes.values():
 		_preview.remove_child(node)
 		node.queue_free()
@@ -596,9 +614,11 @@ func _rebuild_all() -> void:
 
 ## Refait l'aperçu d'un élément après un changement.
 func _refresh(element: Dictionary, changed := true) -> void:
+	var old: Node2D = null
 	if _nodes.has(element.id):
-		_preview.remove_child(_nodes[element.id])
-		_nodes[element.id].queue_free()
+		old = _nodes[element.id]
+		_preview.remove_child(old)
+		old.queue_free()
 		_nodes.erase(element.id)
 	if not element.type in MapData.POINT_TYPES:
 		var node := MapBuilder.build_element(element)
@@ -612,6 +632,8 @@ func _refresh(element: Dictionary, changed := true) -> void:
 				index += 1
 		_preview.move_child(node, index)
 		_nodes[element.id] = node
+		if old != null and _juice != null:
+			_juice.glide(element.id, old)  # il glisse de l'ancienne place à la nouvelle
 	if changed:
 		_dirty = true
 	_overlay.queue_redraw()
@@ -697,7 +719,7 @@ func _draw_overlay() -> void:
 			_overlay.draw_rect(Rect2(-hover_half, hover_half * 2.0).grow(3.0 * px), Color(1, 1, 1, 0.6), false, 2.0 * px)
 			_overlay.draw_set_transform(Vector2.ZERO)
 		var c := _pad.cursor
-		var arm := 14.0 * px
+		var arm := (14.0 + (4.0 if not hover.is_empty() else 0.0) + 1.5 * sin(_juice.time * 6.0)) * px
 		for offset in [Vector2(arm, 0), Vector2(0, arm)]:
 			_overlay.draw_line(c - offset, c + offset, Color.BLACK, 6.0 * px)
 			_overlay.draw_line(c - offset, c + offset, UiKit.HIGHLIGHT, 3.0 * px)

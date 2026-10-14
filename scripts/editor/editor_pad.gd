@@ -172,6 +172,7 @@ func press(button: int) -> void:
 func release(button: int) -> void:
 	if button == JOY_BUTTON_A and dragging:
 		dragging = false
+		editor._juice.land(editor.selected(), _drag_moved)
 		if _drag_moved:
 			editor._show_props()
 
@@ -187,9 +188,11 @@ func _press_map(button: int) -> void:
 			dragging = true
 			_drag_moved = false
 			_drag_offset = cursor - MapData.vec(picked, "pos")
+			editor._juice.lift(picked.id)
 		JOY_BUTTON_B:
 			if dragging:
 				dragging = false
+				editor._juice.land({}, false)
 				if _drag_moved:
 					editor.undo()  # l'élément revient où il était
 			else:
