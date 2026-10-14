@@ -102,6 +102,7 @@ func _ready() -> void:
 			else "L'hôte peut relancer une partie"
 	add_child(_time_engine)
 	map = GameSetup.make_map(GameSetup.map_path)
+	Music.play_playlist(Music.playlist_for_map(GameSetup.map_path))
 	add_child(map)
 	move_child(map, 0)  # le décor est dessiné derrière les joueurs
 	InputBindings.register_menu_actions()

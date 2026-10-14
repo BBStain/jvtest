@@ -54,6 +54,7 @@ var _code_cursor := 0
 func _ready() -> void:
 	InputBindings.fix_web_triggers()
 	GameSetup.return_scene = ""  # une partie lancée d'ici revient ici
+	Music.play_playlist(Music.MENU)
 	var background := ColorRect.new()
 	background.color = UiKit.BG_COLOR
 	background.set_anchors_preset(Control.PRESET_FULL_RECT)
