@@ -176,13 +176,20 @@ Tu peux jouer au clavier ou brancher une manette. Ferme la fenêtre pour revenir
 
 ## Créer une map dans le jeu (ÉDITEUR)
 
-Dans le menu principal, **ÉDITEUR** ouvre l'éditeur de map (à la souris et au clavier) :
+Dans le menu principal, **ÉDITEUR** ouvre l'éditeur de map, à la manette ou à la souris et au clavier :
 - **à gauche, le catalogue** : un clic pose un bloc plein, une plateforme traversable, une fenêtre cassable, une plateforme mobile,
   une échelle, une liane, le départ d'un joueur, la réapparition ou un point d'apparition d'objet ;
 - **au milieu, la map** : clic pour choisir et déplacer, carré jaune pour changer la taille, rond violet pour le trajet d'une
   plateforme mobile, R pour tourner, clic droit pour bouger la vue, molette pour zoomer ;
 - **à droite, les réglages** de l'élément choisi (position, taille, rotation, direction parmi 12, durée…) ;
 - **en haut** : la grille (oui / non, sa taille), l'aimant (coller à la grille ou placement libre), Sauver, Ouvrir, **TESTER**.
+
+**À la manette**, tout se fait avec la croix jaune (le curseur) : stick gauche pour la bouger (la croix : d'un cran),
+**A maintenu** pour prendre un élément et le déplacer, **X** le catalogue (A pose l'élément au curseur), **Y** les réglages
+(haut / bas pour choisir, gauche / droite pour changer), **stick droit** la taille (droite = plus large, haut = plus haut ;
+sans rien de choisi, il bouge la vue), **LB / RB** tourner, **LT / RT** zoom, **R3** dupliquer, **B** annuler / lâcher,
+**Start** le menu (tester, sauver, nom avec un clavier à l'écran, ouvrir, nouvelle map, annuler, grille, aimant, quitter),
+**Select** tester tout de suite. Le bas de l'écran rappelle toujours les boutons.
 
 TESTER lance une partie à 2 sur la map ; QUITTER dans le menu pause ramène dans l'éditeur. Les maps sauvées restent dans le
 navigateur et apparaissent dans le choix de la map (après l'Arène). Elles sont rangées en JSON (voir `scripts/editor/map_data.gd`).
