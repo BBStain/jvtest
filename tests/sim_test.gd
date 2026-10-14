@@ -2344,6 +2344,84 @@ func _ready() -> void:
 		"Éditeur : une seule réapparition (la poser à nouveau la déplace)")
 	check(editor._nodes.size() == editor.data.elements.filter(func(e): return not e.type in MapData.POINT_TYPES).size(),
 		"Éditeur : chaque élément a son aperçu")
+	# 14b) L'éditeur à la manette
+	var epad: EditorPad = editor._pad
+	editor.select(-1)
+	editor._camera.zoom = Vector2.ONE
+	epad.press(JOY_BUTTON_A)
+	check(epad.active and epad.cursor == editor._camera.position, "Éditeur manette : la manette fait apparaître le curseur au milieu de la vue")
+	var target := editor.add_from_catalog("sol", Vector2(-600, 1400))
+	var target_pos := MapData.vec(target, "pos")
+	editor.select(-1)
+	epad.cursor = target_pos
+	epad.press(JOY_BUTTON_A)
+	check(editor.selected_id == target.id and epad.dragging, "Éditeur manette : A sur un élément le prend")
+	epad.tick(0.1, Vector2(1, 0), Vector2.ZERO, 0.0, Vector2i.ZERO)
+	check(MapData.vec(target, "pos").x > target_pos.x, "Éditeur manette : le stick gauche déplace l'élément pris")
+	epad.release(JOY_BUTTON_A)
+	epad.press(JOY_BUTTON_A)
+	epad.tick(0.1, Vector2(0, 1), Vector2.ZERO, 0.0, Vector2i.ZERO)
+	var moved_pos := MapData.vec(editor.selected(), "pos")
+	epad.press(JOY_BUTTON_B)
+	target = editor.selected()
+	check(not epad.dragging and MapData.vec(target, "pos").y < moved_pos.y, "Éditeur manette : B annule le déplacement en cours")
+	var before_cursor := epad.cursor
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i(1, 0))
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	check(is_equal_approx(epad.cursor.x, before_cursor.snapped(Vector2(40, 40)).x + 40.0), "Éditeur manette : la croix avance le curseur d'un cran de grille")
+	var size_before := MapData.vec(target, "size")
+	var bottom_left := MapData.vec(target, "pos") + Vector2(-size_before.x, size_before.y) / 2.0
+	epad.tick(0.016, Vector2.ZERO, Vector2(1, 0), 0.0, Vector2i.ZERO)
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	epad.tick(0.016, Vector2.ZERO, Vector2(0, -1), 0.0, Vector2i.ZERO)
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	var size_after := MapData.vec(target, "size")
+	var bottom_left_after := MapData.vec(target, "pos") + Vector2(-size_after.x, size_after.y) / 2.0
+	check(size_after == size_before + Vector2(40, 40) and bottom_left_after == bottom_left,
+		"Éditeur manette : le stick droit agrandit (plus large, plus haut), le coin en bas à gauche reste (%s)" % [size_after])
+	epad.press(JOY_BUTTON_RIGHT_SHOULDER)
+	check(is_equal_approx(float(target.rot), 15.0), "Éditeur manette : RB tourne de 15°")
+	epad.press(JOY_BUTTON_Y)
+	var prop_x_before: float = MapData.vec(target, "pos").x
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i(1, 0))
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i(1, 0))
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	check(epad.focus == EditorPad.Focus.PROPS and is_equal_approx(MapData.vec(target, "pos").x, prop_x_before + 80.0),
+		"Éditeur manette : Y ouvre les réglages, droite change la valeur (X + un cran, deux fois)")
+	epad.press(JOY_BUTTON_B)
+	var count_pad: int = editor.data.elements.size()
+	epad.press(JOY_BUTTON_X)
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i(0, 1))
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	epad.press(JOY_BUTTON_A)
+	check(epad.focus == EditorPad.Focus.MAP and editor.data.elements.size() == count_pad + 1 and editor.selected().type == editor.catalog_types()[1],
+		"Éditeur manette : X ouvre le catalogue, bas puis A pose le 2e élément au curseur")
+	epad.press(JOY_BUTTON_RIGHT_STICK)
+	check(editor.data.elements.size() == count_pad + 2, "Éditeur manette : R3 duplique")
+	editor.delete_selected()
+	editor.delete_selected()
+	epad.press(JOY_BUTTON_START)
+	for i in 8:
+		epad.nav(Vector2i(0, 1))
+	epad.nav(Vector2i(1, 0))
+	check(epad.focus == EditorPad.Focus.MENU and not editor.grid_on, "Éditeur manette : Start ouvre le menu, la grille s'y éteint")
+	epad.nav(Vector2i(-1, 0))
+	editor.set_map_name("")
+	epad.index = 3
+	epad.press(JOY_BUTTON_A)
+	epad.press(JOY_BUTTON_A)
+	epad.nav(Vector2i(1, 0))
+	epad.press(JOY_BUTTON_A)
+	epad.press(JOY_BUTTON_START)
+	check(editor.grid_on and editor.map_name() == "AB" and epad.focus == EditorPad.Focus.MENU,
+		"Éditeur manette : le clavier à l'écran écrit le nom de la map (%s)" % editor.map_name())
+	epad.press(JOY_BUTTON_B)
+	check(epad.focus == EditorPad.Focus.MAP and not epad._panel.visible, "Éditeur manette : B ferme le menu")
+	editor.delete_selected()
+	epad.set_active(false)
+	editor.select(target.id)
+	editor.delete_selected()
 	editor._name_edit.text = "_test_editeur"
 	check(editor.save_map() and "_test_editeur" in MapData.list_saved(), "Éditeur : la map est sauvée et listée")
 	check(MapData.load_saved("_test_editeur") == MapData.normalized(editor.data), "Éditeur : la map sauvée se relit pareil")

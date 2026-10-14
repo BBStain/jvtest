@@ -1,6 +1,7 @@
 class_name MapEditor
 extends Node2D
-## L'éditeur de map, dans le jeu (menu principal > ÉDITEUR). Il se joue à la souris et au clavier.
+## L'éditeur de map, dans le jeu (menu principal > ÉDITEUR). Il se joue à la manette (voir EditorPad,
+## editor_pad.gd) ou à la souris et au clavier ; on passe de l'un à l'autre quand on veut.
 ##
 ## L'écran :
 ##   en haut     : Nouvelle, Ouvrir, Sauver, le nom de la map, la grille (oui / non, sa taille),
@@ -30,6 +31,9 @@ const HANDLE := 9.0                ## demi-taille du carré pour agrandir (à l'
 const DIRECTION_NAMES := ["→ droite", "↗ 30°", "↗ 60°", "↑ haut", "↖ 120°", "↖ 150°",
 	"← gauche", "↙ 210°", "↙ 240°", "↓ bas", "↘ 300°", "↘ 330°"]
 const PLAYER_COLORS := [Color(0.95, 0.3, 0.3), Color(0.3, 0.6, 1.0), Color(0.35, 0.85, 0.4), Color(1.0, 0.8, 0.2)]
+## Les couleurs qu'on fait défiler à la manette (gauche / droite sur « Couleur »).
+const COLOR_PRESETS := ["#525973", "#808aa8", "#9e8cd9", "#8cc7e6", "#59b34d", "#d9b366", "#d9735e", "#e6e6e6"]
+const MOUSE_HELP := "Clic : choisir / déplacer   ·   carré jaune : taille   ·   R : tourner   ·   Suppr : effacer   ·   Ctrl+C / Ctrl+V : copier / coller   ·   Ctrl+Z : annuler   ·   clic droit : bouger la vue   ·   molette : zoom   ·   (ou prends une manette)"
 
 ## Gardés entre deux visites (quand on part tester la map et qu'on revient).
 static var _last_camera := Vector2(640, 360)
@@ -66,6 +70,15 @@ var _open_button: MenuButton
 var _props: VBoxContainer
 var _message: Label
 var _message_left := 0.0
+var _help: Label
+var _ui: CanvasLayer
+var _pad: EditorPad
+var _juice: EditorJuice
+var _catalog_buttons: Array[Button] = []
+var _catalog_types: Array[String] = []
+var _prop_rows: Array[Dictionary] = []
+var _prop_boxes: Array[PanelContainer] = []
+var _prop_highlight := -1
 
 
 func _ready() -> void:
@@ -83,6 +96,12 @@ func _ready() -> void:
 	_overlay.draw.connect(_draw_overlay)
 	add_child(_overlay)
 	_build_ui()
+	_juice = EditorJuice.new()
+	_juice.editor = self
+	add_child(_juice)
+	_pad = EditorPad.new()
+	_pad.editor = self
+	add_child(_pad)
 	if not GameSetup.editor_map.is_empty():
 		data = MapData.normalized(GameSetup.editor_map)
 	else:
@@ -119,6 +138,7 @@ func add_from_catalog(type: String, where: Variant = null) -> Dictionary:
 				_snap(element)
 				_refresh(element)
 				select(element.id)
+				_juice.pop(element)
 				return element
 	var element := MapData.add_element(data, type, pos)
 	if type == "spawn_joueur":
@@ -126,6 +146,7 @@ func add_from_catalog(type: String, where: Variant = null) -> Dictionary:
 	_snap(element)
 	_refresh(element)
 	select(element.id)
+	_juice.pop(element)
 	_say("%s ajouté" % MapData.CATALOG[type].label)
 	return element
 
@@ -148,6 +169,7 @@ func delete_selected() -> void:
 	if element.is_empty():
 		return
 	_push_undo()
+	_juice.puff(element)
 	data.elements.erase(element)
 	if _nodes.has(element.id):
 		_nodes[element.id].queue_free()
@@ -177,6 +199,7 @@ func paste(where: Variant = null) -> Dictionary:
 	_snap(element)
 	_refresh(element)
 	select(element.id)
+	_juice.pop(element)
 	return element
 
 
@@ -201,7 +224,83 @@ func rotate_selected(degrees: float) -> void:
 	_push_undo()
 	element.rot = fposmod(float(element.get("rot", 0.0)) + degrees, 360.0)
 	_refresh(element)
+	_juice.bump(element)
 	_show_props()
+
+
+## Manette : stick droit. Agrandit (+1) ou rétrécit (-1) d'un cran : à droite plus large, en haut
+## plus haut (le coin en bas à gauche ne bouge pas). Une liane : vers le bas, plus longue.
+func grow_selected(dx: int, dy: int) -> void:
+	var element := selected()
+	if element.is_empty() or (dx == 0 and dy == 0):
+		return
+	var step := float(grid_size) if snap_on else 4.0
+	var smallest := step if snap_on else MIN_SIZE
+	if element.type == "liane":
+		if dy == 0:
+			return
+		_push_undo()
+		element.length = maxf(float(element.length) - dy * step, 40.0)
+	elif element.has("size"):
+		_push_undo()
+		var angle := MapData.rotation(element)
+		var size := MapData.vec(element, "size")
+		var new_size := Vector2(maxf(size.x + dx * step, smallest), maxf(size.y + dy * step, smallest))
+		var corner := Vector2(-size.x / 2.0, size.y / 2.0)
+		var middle := corner + Vector2(new_size.x / 2.0, -new_size.y / 2.0)
+		MapData.set_vec(element, "pos", MapData.vec(element, "pos") + middle.rotated(angle))
+		MapData.set_vec(element, "size", new_size)
+	else:
+		return
+	_refresh(element)
+	_juice.bump(element)
+	_show_props()
+
+
+## Manette : LB / RB. Tourne l'élément de 15°, ou change la direction d'une plateforme mobile de 30°.
+func turn_selected(direction: int) -> void:
+	var element := selected()
+	if element.is_empty():
+		return
+	if MapData.CATALOG[element.type].rotatable:
+		rotate_selected(ROTATE_STEP * direction)
+	elif element.type == "mobile":
+		_push_undo()
+		var travel := MapData.vec(element, "travel").rotated(deg_to_rad(30.0 * direction))
+		element.travel = [snappedf(travel.x, 0.01), snappedf(travel.y, 0.01)]
+		_refresh(element)
+		_juice.bump(element)
+		_show_props()
+
+
+func set_grid(on: bool) -> void:
+	_grid_check.button_pressed = on
+
+
+func set_grid_size(value: int) -> void:
+	_grid_spin.value = value
+
+
+func set_snap(on: bool) -> void:
+	_snap_check.button_pressed = on
+
+
+func map_name() -> String:
+	return _name_edit.text.strip_edges()
+
+
+func set_map_name(value: String) -> void:
+	_name_edit.text = value
+	data.name = value if value.strip_edges() != "" else "Ma map"
+
+
+func set_help(text: String) -> void:
+	if _help != null:
+		_help.text = text
+
+
+func say(text: String) -> void:
+	_say(text)
 
 
 func undo() -> void:
@@ -231,6 +330,8 @@ func save_map() -> bool:
 	var ok := MapData.save(data)
 	_save_draft()
 	_say("Sauvée : %s (on la retrouve dans JOUER > choix de la map)" % data.name if ok else "Impossible de sauver")
+	if ok:
+		_juice.toast("Sauvée !")
 	return ok
 
 
@@ -276,6 +377,8 @@ func quit_editor() -> void:
 # --- Souris et clavier sur la map ---
 
 func _unhandled_input(event: InputEvent) -> void:
+	if (event is InputEventMouseButton or event is InputEventKey) and _pad.active:
+		_pad.set_active(false)  # retour à la souris et au clavier
 	if event is InputEventMouseButton:
 		_mouse_button(event)
 	elif event is InputEventMouseMotion:
@@ -297,6 +400,8 @@ func _mouse_button(event: InputEventMouseButton) -> void:
 	if not event.pressed:
 		if _drag != "" and _drag_changed:
 			_show_props()
+		if _drag == "move":
+			_juice.land(selected(), _drag_changed)
 		_drag = ""
 		return
 	get_viewport().gui_release_focus()
@@ -314,6 +419,7 @@ func _mouse_button(event: InputEventMouseButton) -> void:
 	select(picked.id)
 	_drag = "move"
 	_drag_offset = world - MapData.vec(picked, "pos")
+	_juice.lift(picked.id)
 
 
 func _mouse_motion(event: InputEventMouseMotion) -> void:
@@ -493,6 +599,8 @@ func _free_player_number() -> int:
 # --- Aperçu de la map ---
 
 func _rebuild_all() -> void:
+	if _juice != null:
+		_juice.reset()
 	for node in _nodes.values():
 		_preview.remove_child(node)
 		node.queue_free()
@@ -506,9 +614,11 @@ func _rebuild_all() -> void:
 
 ## Refait l'aperçu d'un élément après un changement.
 func _refresh(element: Dictionary, changed := true) -> void:
+	var old: Node2D = null
 	if _nodes.has(element.id):
-		_preview.remove_child(_nodes[element.id])
-		_nodes[element.id].queue_free()
+		old = _nodes[element.id]
+		_preview.remove_child(old)
+		old.queue_free()
 		_nodes.erase(element.id)
 	if not element.type in MapData.POINT_TYPES:
 		var node := MapBuilder.build_element(element)
@@ -522,6 +632,8 @@ func _refresh(element: Dictionary, changed := true) -> void:
 				index += 1
 		_preview.move_child(node, index)
 		_nodes[element.id] = node
+		if old != null and _juice != null:
+			_juice.glide(element.id, old)  # il glisse de l'ancienne place à la nouvelle
 	if changed:
 		_dirty = true
 	_overlay.queue_redraw()
@@ -599,6 +711,19 @@ func _draw_overlay() -> void:
 				var size := MapData.vec(element, "size")
 				_overlay.draw_dashed_line(pos, pos + travel, Color(0.62, 0.55, 0.85, 0.8), 2.0 * px, 12.0 * px)
 				_overlay.draw_rect(Rect2(pos + travel - size / 2.0, size), Color(0.62, 0.55, 0.85, 0.5), false, 2.0 * px)
+	if _pad != null and _pad.active:
+		var hover := _pick(_pad.cursor)
+		if not hover.is_empty() and hover.id != selected_id:
+			_overlay.draw_set_transform(MapData.center_of(hover), MapData.rotation(hover))
+			var hover_half := MapData.size_of(hover) / 2.0
+			_overlay.draw_rect(Rect2(-hover_half, hover_half * 2.0).grow(3.0 * px), Color(1, 1, 1, 0.6), false, 2.0 * px)
+			_overlay.draw_set_transform(Vector2.ZERO)
+		var c := _pad.cursor
+		var arm := (14.0 + (4.0 if not hover.is_empty() else 0.0) + 1.5 * sin(_juice.time * 6.0)) * px
+		for offset in [Vector2(arm, 0), Vector2(0, arm)]:
+			_overlay.draw_line(c - offset, c + offset, Color.BLACK, 6.0 * px)
+			_overlay.draw_line(c - offset, c + offset, UiKit.HIGHLIGHT, 3.0 * px)
+		_overlay.draw_arc(c, 5.0 * px, 0.0, TAU, 16, UiKit.HIGHLIGHT, 2.0 * px)
 	var chosen := selected()
 	if chosen.is_empty():
 		return
@@ -618,6 +743,7 @@ func _draw_overlay() -> void:
 
 func _build_ui() -> void:
 	var layer := CanvasLayer.new()
+	_ui = layer
 	add_child(layer)
 	var root := VBoxContainer.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -647,12 +773,12 @@ func _build_ui() -> void:
 	_message = Label.new()
 	_message.add_theme_color_override("font_color", UiKit.HIGHLIGHT)
 	lines.add_child(_message)
-	var help := Label.new()
-	help.text = "Clic : choisir / déplacer   ·   carré jaune : taille   ·   R : tourner   ·   Suppr : effacer   ·   Ctrl+C / Ctrl+V : copier / coller   ·   Ctrl+Z : annuler   ·   clic droit : bouger la vue   ·   molette : zoom"
-	help.add_theme_font_size_override("font_size", 13)
-	help.add_theme_color_override("font_color", UiKit.TEXT_DIM)
-	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	lines.add_child(help)
+	_help = Label.new()
+	_help.text = MOUSE_HELP
+	_help.add_theme_font_size_override("font_size", 13)
+	_help.add_theme_color_override("font_color", UiKit.TEXT_DIM)
+	_help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lines.add_child(_help)
 	root.add_child(bottom)
 
 
@@ -745,7 +871,115 @@ func _catalog_panel() -> PanelContainer:
 				var button := _button(MapData.CATALOG[type].label, add_from_catalog.bind(type))
 				button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 				list.add_child(button)
+				_catalog_buttons.append(button)
+				_catalog_types.append(type)
 	return panel
+
+
+## Les types du catalogue, dans l'ordre affiché (pour la manette).
+func catalog_types() -> Array[String]:
+	return _catalog_types
+
+
+## Manette : allume un bouton du catalogue (-1 : aucun).
+func highlight_catalog(index: int) -> void:
+	for i in _catalog_buttons.size():
+		if i == index:
+			var style := StyleBoxFlat.new()
+			style.bg_color = Color(UiKit.HIGHLIGHT, 0.25)
+			style.border_color = UiKit.HIGHLIGHT
+			style.set_border_width_all(2)
+			style.set_corner_radius_all(4)
+			style.set_content_margin_all(6)
+			_catalog_buttons[i].add_theme_stylebox_override("normal", style)
+			_catalog_buttons[i].add_theme_color_override("font_color", UiKit.HIGHLIGHT)
+		else:
+			_catalog_buttons[i].remove_theme_stylebox_override("normal")
+			_catalog_buttons[i].remove_theme_color_override("font_color")
+
+
+## Les réglages de l'élément choisi, en lignes : la souris les voit en cases à chiffres, la manette
+## les parcourt (haut / bas) et les change (gauche / droite). Une ligne :
+##   kind "number" : value, min, max, step (souris), pad_step (manette), wrap (tourne en rond), set(valeur)
+##   kind "choice" : options, index, set(numéro)
+##   kind "color"  : value (Color), set(Color)
+##   kind "button" : press()
+func prop_rows() -> Array[Dictionary]:
+	return _prop_rows
+
+
+func _make_prop_rows(element: Dictionary) -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	var g := float(grid_size) if snap_on else 4.0
+	var pos := MapData.vec(element, "pos")
+	rows.append(_num("X", pos.x, -20000, 20000, 1, g, func(v: float) -> void: _set_vec_part(element, "pos", 0, v)))
+	rows.append(_num("Y", pos.y, -20000, 20000, 1, g, func(v: float) -> void: _set_vec_part(element, "pos", 1, v)))
+	if element.has("size"):
+		var size := MapData.vec(element, "size")
+		rows.append(_num("Largeur", size.x, MIN_SIZE, 20000, 1, g, func(v: float) -> void: _set_vec_part(element, "size", 0, v)))
+		rows.append(_num("Hauteur", size.y, MIN_SIZE, 20000, 1, g, func(v: float) -> void: _set_vec_part(element, "size", 1, v)))
+	if MapData.CATALOG[element.type].rotatable:
+		var rot := _num("Rotation (°)", float(element.get("rot", 0.0)), 0, 359, 1, ROTATE_STEP,
+			func(v: float) -> void: _set_field(element, "rot", v))
+		rot.wrap = true
+		rows.append(rot)
+	match element.type:
+		"mobile":
+			var travel := MapData.vec(element, "travel")
+			var angle := fposmod(rad_to_deg(atan2(-travel.y, travel.x)), 360.0)
+			rows.append({"label": "Direction", "kind": "choice", "options": DIRECTION_NAMES, "index": roundi(angle / 30.0) % 12,
+				"set": func(i: int) -> void:
+					var length := MapData.vec(element, "travel").length()
+					var dir := Vector2(cos(deg_to_rad(i * 30.0)), -sin(deg_to_rad(i * 30.0)))
+					_set_field(element, "travel", [snappedf(dir.x * length, 0.01), snappedf(dir.y * length, 0.01)])})
+			rows.append(_num("Distance", travel.length(), 0, 20000, 1, g, func(v: float) -> void:
+				var dir := MapData.vec(element, "travel").normalized()
+				if dir == Vector2.ZERO:
+					dir = Vector2.RIGHT
+				_set_field(element, "travel", [snappedf(dir.x * v, 0.01), snappedf(dir.y * v, 0.01)])))
+			rows.append(_num("Aller-retour (s)", float(element.period), 0.2, 120, 0.1, 0.5,
+				func(v: float) -> void: _set_field(element, "period", v)))
+			rows.append(_num("Arrêt aux bouts (s)", float(element.pause), 0, 30, 0.1, 0.5,
+				func(v: float) -> void: _set_field(element, "pause", v)))
+		"liane":
+			rows.append(_num("Longueur", float(element.length), 40, 3000, 1, g, func(v: float) -> void: _set_field(element, "length", v)))
+		"spawn_joueur":
+			rows.append(_num("Joueur", int(element.player), 1, 4, 1, 1, func(v: float) -> void: _set_field(element, "player", int(v))))
+	if element.has("color"):
+		rows.append({"label": "Couleur", "kind": "color", "value": MapData.color(element),
+			"set": func(c: Color) -> void: _set_field(element, "color", "#" + c.to_html(false))})
+	rows.append({"label": "Dupliquer", "kind": "button", "press": duplicate_selected})
+	rows.append({"label": "Supprimer", "kind": "button", "press": delete_selected})
+	return rows
+
+
+func _num(label: String, value: float, min_value: float, max_value: float, step: float, pad_step: float, on_set: Callable) -> Dictionary:
+	return {"label": label, "kind": "number", "value": value, "min": min_value, "max": max_value,
+		"step": step, "pad_step": pad_step, "wrap": false, "set": on_set}
+
+
+## Manette : gauche (-1) / droite (+1) sur une ligne de réglage.
+static func change_row(row: Dictionary, direction: int) -> void:
+	match row.kind:
+		"number":
+			var value: float = row.value + direction * row.pad_step
+			if row.wrap:
+				value = fposmod(value, row.max + 1.0)
+			row.set.call(clampf(value, row.min, row.max))
+		"choice":
+			row.set.call(posmod(int(row.index) + direction, row.options.size()))
+		"color":
+			var i := COLOR_PRESETS.find("#" + (row.value as Color).to_html(false))
+			row.set.call(Color.from_string(COLOR_PRESETS[posmod(i + direction, COLOR_PRESETS.size())], Color.WHITE))
+
+
+## Manette : A sur une ligne de réglage (un bouton : on appuie ; un choix, une couleur : la suivante).
+static func activate_row(row: Dictionary) -> void:
+	match row.kind:
+		"button":
+			row.press.call()
+		"choice", "color":
+			change_row(row, 1)
 
 
 ## Les réglages de l'élément choisi.
@@ -755,86 +989,69 @@ func _show_props() -> void:
 	for child in _props.get_children():
 		_props.remove_child(child)
 		child.queue_free()
+	_prop_boxes.clear()
 	var element := selected()
 	if element.is_empty():
+		_prop_rows = []
 		_props.add_child(_text("RÉGLAGES"))
-		var hint := _text("Clique sur un élément de la map pour le régler, ou pose-en un depuis le catalogue (à gauche).")
+		var hint := _text("Choisis un élément de la map pour le régler, ou pose-en un depuis le catalogue (à gauche).")
 		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		hint.add_theme_color_override("font_color", UiKit.TEXT_DIM)
 		_props.add_child(hint)
 		_props.add_child(_text("%d éléments" % data.elements.size()))
 		return
 	_props.add_child(_text(str(MapData.CATALOG[element.type].label).to_upper()))
-	var pos := MapData.vec(element, "pos")
-	_field("X", -20000, 20000, 1, pos.x, func(v: float) -> void: _set_vec_part(element, "pos", 0, v))
-	_field("Y", -20000, 20000, 1, pos.y, func(v: float) -> void: _set_vec_part(element, "pos", 1, v))
-	if element.has("size"):
-		var size := MapData.vec(element, "size")
-		_field("Largeur", MIN_SIZE, 20000, 1, size.x, func(v: float) -> void: _set_vec_part(element, "size", 0, v))
-		_field("Hauteur", MIN_SIZE, 20000, 1, size.y, func(v: float) -> void: _set_vec_part(element, "size", 1, v))
-	if MapData.CATALOG[element.type].rotatable:
-		_field("Rotation (°)", 0, 359, 1, float(element.get("rot", 0.0)), func(v: float) -> void: _set_field(element, "rot", v))
-		var turn := HBoxContainer.new()
-		turn.add_child(_button("⟲ %d°" % ROTATE_STEP, rotate_selected.bind(-ROTATE_STEP)))
-		turn.add_child(_button("⟳ %d°" % ROTATE_STEP, rotate_selected.bind(ROTATE_STEP)))
-		_props.add_child(turn)
-	match element.type:
-		"mobile":
-			_mobile_fields(element)
-		"liane":
-			_field("Longueur", 40, 3000, 1, float(element.length), func(v: float) -> void: _set_field(element, "length", v))
-		"spawn_joueur":
-			_field("Joueur", 1, 4, 1, int(element.player), func(v: float) -> void: _set_field(element, "player", int(v)))
-	if element.has("color"):
-		var row := HBoxContainer.new()
-		row.add_child(_text("Couleur"))
-		var picker := ColorPickerButton.new()
-		picker.color = MapData.color(element)
-		picker.edit_alpha = false
-		picker.custom_minimum_size = Vector2(80, 28)
-		picker.color_changed.connect(func(c: Color) -> void: _set_field(element, "color", "#" + c.to_html(false)))
-		row.add_child(picker)
-		_props.add_child(row)
-	_props.add_child(HSeparator.new())
-	_props.add_child(_button("Dupliquer (Ctrl+D)", duplicate_selected))
-	_props.add_child(_button("Supprimer (Suppr)", delete_selected))
+	_prop_rows = _make_prop_rows(element)
+	for row in _prop_rows:
+		var box := PanelContainer.new()
+		var line := HBoxContainer.new()
+		box.add_child(line)
+		if row.kind != "button":
+			var label := _text(row.label)
+			label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			line.add_child(label)
+		match row.kind:
+			"number":
+				line.add_child(_spin(row.min, row.max, row.step, row.value, row.set))
+			"choice":
+				var options := OptionButton.new()
+				options.focus_mode = Control.FOCUS_NONE
+				for option in row.options:
+					options.add_item(option)
+				options.select(row.index)
+				options.item_selected.connect(row.set)
+				line.add_child(options)
+			"color":
+				var picker := ColorPickerButton.new()
+				picker.color = row.value
+				picker.edit_alpha = false
+				picker.focus_mode = Control.FOCUS_NONE
+				picker.custom_minimum_size = Vector2(80, 28)
+				picker.color_changed.connect(row.set)
+				line.add_child(picker)
+			"button":
+				var button := _button(row.label, row.press)
+				button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+				line.add_child(button)
+		_props.add_child(box)
+		_prop_boxes.append(box)
+	if element.type == "mobile":
+		var hint := _text("Ou tire le rond violet sur la map.")
+		hint.add_theme_color_override("font_color", UiKit.TEXT_DIM)
+		_props.add_child(hint)
+	highlight_prop(_prop_highlight)
 
 
-## Plateforme mobile : une des 12 directions, la distance, la durée d'un aller-retour, l'arrêt aux bouts.
-func _mobile_fields(element: Dictionary) -> void:
-	var travel := MapData.vec(element, "travel")
-	var row := HBoxContainer.new()
-	row.add_child(_text("Direction"))
-	var directions := OptionButton.new()
-	for direction in DIRECTION_NAMES:
-		directions.add_item(direction)
-	var angle := fposmod(rad_to_deg(atan2(-travel.y, travel.x)), 360.0)
-	directions.select(roundi(angle / 30.0) % 12)
-	directions.item_selected.connect(func(i: int) -> void:
-		var length := MapData.vec(element, "travel").length()
-		var dir := Vector2(cos(deg_to_rad(i * 30.0)), -sin(deg_to_rad(i * 30.0)))
-		_set_field(element, "travel", [snappedf(dir.x * length, 0.01), snappedf(dir.y * length, 0.01)]))
-	row.add_child(directions)
-	_props.add_child(row)
-	_field("Distance", 0, 20000, 1, travel.length(), func(v: float) -> void:
-		var dir := MapData.vec(element, "travel").normalized()
-		if dir == Vector2.ZERO:
-			dir = Vector2.RIGHT
-		_set_field(element, "travel", [snappedf(dir.x * v, 0.01), snappedf(dir.y * v, 0.01)]))
-	_field("Aller-retour (s)", 0.2, 120, 0.1, float(element.period), func(v: float) -> void: _set_field(element, "period", v))
-	_field("Arrêt aux bouts (s)", 0, 30, 0.1, float(element.pause), func(v: float) -> void: _set_field(element, "pause", v))
-	var hint := _text("Ou tire le rond violet sur la map.")
-	hint.add_theme_color_override("font_color", UiKit.TEXT_DIM)
-	_props.add_child(hint)
-
-
-func _field(title: String, min_value: float, max_value: float, step: float, value: float, on_change: Callable) -> void:
-	var row := HBoxContainer.new()
-	var label := _text(title)
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(label)
-	row.add_child(_spin(min_value, max_value, step, value, on_change))
-	_props.add_child(row)
+## Manette : allume une ligne des réglages (-1 : aucune).
+func highlight_prop(index: int) -> void:
+	_prop_highlight = index
+	for i in _prop_boxes.size():
+		var style := StyleBoxFlat.new()
+		style.set_content_margin_all(2)
+		style.bg_color = Color(UiKit.HIGHLIGHT, 0.22) if i == index else Color(0, 0, 0, 0)
+		style.border_color = UiKit.HIGHLIGHT
+		style.set_border_width_all(2 if i == index else 0)
+		_prop_boxes[i].add_theme_stylebox_override("panel", style)
 
 
 func _set_field(element: Dictionary, key: String, value: Variant) -> void:
