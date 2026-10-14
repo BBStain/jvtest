@@ -23,11 +23,11 @@ static func spacer(height: float) -> Control:
 	return spacer
 
 
-static func menu_button(text: String, selected: bool, on_click: Callable) -> Button:
+static func menu_button(text: String, selected: bool, on_click: Callable, height := 70.0) -> Button:
 	var button := Button.new()
 	button.text = text
 	button.focus_mode = Control.FOCUS_NONE
-	button.custom_minimum_size = Vector2(380, 70)
+	button.custom_minimum_size = Vector2(380, height)
 	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	button.add_theme_font_size_override("font_size", 30)
 	var style := StyleBoxFlat.new()

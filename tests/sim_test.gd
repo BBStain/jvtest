@@ -784,77 +784,94 @@ func _ready() -> void:
 	check(menu.players.is_empty() and menu.screen == menu.Screen.TITLE, "Perso : le dernier joueur se retire, retour à l'écran titre")
 	menu.queue_free()
 
-	# 10b2) TOURNOI : le code, puis la préparation en 3 étapes
-	TournamentSetup.reset()
-	TournamentSetup.unlocked = false
+	# 10b2) TOURNOI : le code, créer un tournoi, ses joueurs et son arbre
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TournamentData.SAVE_PATH))
+	TournamentData.unlocked = false
 	GameSetup.player_devices = []
 	menu = load("res://scenes/menu.tscn").instantiate()
 	menu.change_scene_on_start = false
 	add_child(menu)
 	await get_tree().process_frame
 	menu.handle(pad, "confirm")
-	for i in 4:
+	for i in 5:
 		menu.handle(pad, "down")
 	await shot("10_menu_tournoi")
 	menu.handle(pad, "confirm")
-	check(menu.screen == menu.Screen.TOURNAMENT and menu._tournament.page == TournamentMenu.Page.CODE,
-		"Tournoi : le bouton TOURNOI demande le code")
-	for letter in "swat":
-		var key := InputEventKey.new()
-		key.pressed = true
-		key.unicode = letter.unicode_at(0)
-		menu._input(key)
+	var tm: TournamentMenu = menu._tournament
+	check(menu.screen == menu.Screen.TOURNAMENT and tm.page == TournamentMenu.Page.CODE, "Tournoi : le bouton TOURNOI demande le code")
+	var type_text := func(text: String) -> void:
+		for letter in text:
+			var key := InputEventKey.new()
+			key.pressed = true
+			key.unicode = letter.unicode_at(0)
+			menu._input(key)
+	type_text.call("swat")
 	menu.handle(pad, "confirm")
-	check(menu._tournament.page == TournamentMenu.Page.CODE and menu._tournament._wrong_code, "Tournoi : un code faux ne fait pas entrer")
-	for letter in "swag":
-		var key := InputEventKey.new()
-		key.pressed = true
-		key.unicode = letter.unicode_at(0)
-		menu._input(key)
-	await shot("11_tournoi_code")
+	check(tm.page == TournamentMenu.Page.CODE and tm._wrong_code, "Tournoi : un code faux ne fait pas entrer")
+	type_text.call("swag")
 	menu.handle(pad, "confirm")
-	check(menu._tournament.page == TournamentMenu.Page.HOME, "Tournoi : le code « swag » ouvre la préparation")
-	await shot("12_tournoi_preparation")
-	var lines := TournamentSetup.summary()
-	check(lines[-1].ends_with("1 champion") and lines.size() == 5,
-		"Tournoi : par défaut, 16 joueurs mènent juste à une finale en duel (%s)" % " / ".join(lines))
+	check(tm.page == TournamentMenu.Page.HOME and tm._home_buttons() == ["NOUVEAU TOURNOI"], "Tournoi : le code ouvre l'accueil du tournoi")
 	menu.handle(pad, "confirm")
-	check(menu._tournament.page == TournamentMenu.Page.MODE, "Tournoi : étape 1, mode de jeu")
-	menu.handle(pad, "confirm")
-	check(TournamentSetup.registered == 24, "Tournoi : A change le nombre d'inscrits")
+	check(tm.page == TournamentMenu.Page.EDIT, "Tournoi : NOUVEAU TOURNOI ouvre la création")
 	menu.handle(pad, "down")
 	menu.handle(pad, "down")
-	menu.handle(pad, "right")
-	menu.handle(pad, "right")
-	menu.handle(pad, "right")
+	menu.handle(pad, "confirm")
+	check(tm.page == TournamentMenu.Page.KEYBOARD, "Tournoi : AJOUTER UN JOUEUR ouvre le clavier")
+	var enter := InputEventKey.new()
+	enter.pressed = true
+	enter.keycode = KEY_ENTER
+	for player_name in ["Stain", "Bob", "Zoé", "Lulu", "Max"]:
+		type_text.call(player_name)
+		menu._input(enter)
+	check(tm.page == TournamentMenu.Page.KEYBOARD and tm.tournament.players == ["Stain", "Bob", "Zoé", "Lulu", "Max"],
+		"Tournoi : au clavier, on enchaîne les joueurs (Entrée)")
 	menu.handle(pad, "right")
 	menu.handle(pad, "confirm")
-	check(TournamentSetup.phases.elimination.qualified == 3, "Tournoi : A change les qualifiés de l'élimination")
+	for i in 4:
+		menu.handle(pad, "down")
+	menu.handle(pad, "right")
+	menu.handle(pad, "confirm")
+	check(tm.tournament.players.size() == 6 and tm.tournament.players[5] == "B", "Tournoi : à la manette, le clavier à l'écran tape une lettre")
+	menu.handle(pad, "back")
+	check(tm.page == TournamentMenu.Page.EDIT, "Tournoi : B ferme le clavier")
+	menu.handle(pad, "up")
 	menu.handle(pad, "left")
-	menu.handle(pad, "left")
-	menu.handle(pad, "left")
 	menu.handle(pad, "confirm")
-	check(TournamentSetup.phases.elimination.players == 2 and TournamentSetup.phases.elimination.qualified == 1,
-		"Tournoi : moins de joueurs par match, les qualifiés suivent")
-	TournamentSetup.reset()
-	menu._show()
-	await shot("13_tournoi_mode")
+	check(tm.tournament.players.size() == 6, "Tournoi : retirer un joueur demande un 2e appui")
+	menu.handle(pad, "confirm")
+	check(tm.tournament.players == ["Stain", "Bob", "Zoé", "Lulu", "Max"], "Tournoi : le 2e appui retire le joueur")
+	await shot("11_tournoi_creation")
+	var rounds := tm.tournament.bracket()
+	check(rounds.size() == 3 and rounds[0].size() == 3 and rounds[-1].size() == 1 and rounds[-1][0].qualified == 0,
+		"Tournoi : 5 joueurs en duels = 3 tours (un passe d'office), une finale")
+	tm.tournament.format = 1
+	for extra in ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11"]:
+		tm.tournament.add_player(extra)
+	rounds = tm.tournament.bracket()
+	check(rounds.size() == 3 and rounds[0].size() == 4 and rounds[1].size() == 2 and rounds[1][0].slots[0] == "1er M1",
+		"Tournoi : 16 joueurs en mêlées à 4 = 4 matchs, puis 2, puis la finale")
+	for i in 16:
+		tm.tournament.add_player("B%d" % i)
+	tm.tournament.format = 0
+	rounds = tm.tournament.bracket()
+	check(tm.tournament.players.size() == 32 and rounds.size() == 5 and rounds[0].size() == 16, "Tournoi : 32 joueurs max, 5 tours en duels")
+	tm.tournament.save()
+	tm._choice = TournamentMenu.Row.BRACKET
+	menu.handle(pad, "confirm")
+	check(tm.page == TournamentMenu.Page.BRACKET, "Tournoi : VOIR L'ARBRE")
+	await shot("12_tournoi_arbre_32")
 	menu.handle(pad, "back")
+	menu.handle(pad, "back")
+	check(tm.page == TournamentMenu.Page.HOME and tm._home_buttons().size() == 2, "Tournoi : le tournoi est enregistré (CONTINUER)")
 	menu.handle(pad, "down")
 	menu.handle(pad, "confirm")
-	check(menu._tournament.page == TournamentMenu.Page.MAPS, "Tournoi : étape 2, maps")
-	await shot("14_tournoi_maps")
+	check(tm.page == TournamentMenu.Page.HOME and tm._confirm, "Tournoi : NOUVEAU demande confirmation s'il y en a déjà un")
 	menu.handle(pad, "back")
-	menu.handle(pad, "down")
+	check(menu.screen == menu.Screen.MAIN and menu._choice == 5, "Tournoi : B revient au menu principal")
 	menu.handle(pad, "confirm")
-	check(menu._tournament.page == TournamentMenu.Page.STEP3, "Tournoi : étape 3, encore à venir")
-	menu.handle(pad, "back")
-	menu.handle(pad, "back")
-	check(menu.screen == menu.Screen.MAIN and menu._choice == 4, "Tournoi : B revient au menu principal")
-	menu.handle(pad, "confirm")
-	check(menu._tournament.page == TournamentMenu.Page.HOME, "Tournoi : le code n'est plus demandé ensuite")
+	check(tm.page == TournamentMenu.Page.HOME, "Tournoi : le code n'est plus demandé ensuite")
 	menu.queue_free()
-	TournamentSetup.reset()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TournamentData.SAVE_PATH))
 
 	# 10c) Une partie avec 5 vies les affiche bien
 	GameSetup.player_devices = []
@@ -2356,6 +2373,174 @@ func _ready() -> void:
 	guest_peer.drop(1)
 	check(seen == ["+2", "-2"] and guest_peer.get_connection_status() == MultiplayerPeer.CONNECTION_DISCONNECTED,
 		"Relais : le copain parti est signalé, le copain sans hôte est déconnecté")
+
+	# 14) Éditeur de map : format JSON, construction de la map, outils de l'éditeur, partie sur la map
+	var fresh := MapData.new_map("Test")
+	var built := MapBuilder.build(fresh)
+	var built_problems: Array[String] = []
+	_check_visuals(built, built_problems)
+	check(built.get_node("SpawnPoints").get_child_count() == 2 and built.has_node("RespawnPoint")
+		and built.blast_zone.has_point(built.respawn_position()) and built_problems.is_empty(),
+		"Éditeur : une map neuve donne une vraie map (2 départs, une réapparition) %s" % [built_problems])
+	built.free()
+	check(MapData.from_json(MapData.to_json(fresh)) == MapData.normalized(fresh), "Éditeur : sauver puis relire le JSON redonne la même map")
+	var odd := MapData.normalized({"name": "X", "elements": [{"type": "inconnu", "pos": [0, 0]}, {"type": "mobile", "pos": [5, 6]}]})
+	check(odd.elements.size() == 1 and odd.elements[0].has("travel") and odd.elements[0].has("period"),
+		"Éditeur : un fichier incomplet est complété (réglages par défaut), un type inconnu est ignoré")
+
+	var editor: MapEditor = (load("res://scenes/editor.tscn") as PackedScene).instantiate()
+	editor.change_scene = false
+	GameSetup.editor_map = {}
+	add_child(editor)
+	editor.new_map()
+	await step(1)
+	var count: int = editor.data.elements.size()
+	var mobile := editor.add_from_catalog("mobile", Vector2(1013, 207))
+	check(editor.selected_id == mobile.id and editor.data.elements.size() == count + 1
+		and MapData.vec(mobile, "pos") == Vector2(1000, 208), "Éditeur : poser une plateforme mobile la colle à la grille (%s)" % [mobile.pos])
+	editor.snap_on = false
+	editor.move_selected(Vector2(1013, 207))
+	check(MapData.vec(mobile, "pos") == Vector2(1013, 207), "Éditeur : sans l'aimant, placement libre au pixel près")
+	editor.snap_on = true
+	editor.undo()
+	check(editor.data.elements.size() == count, "Éditeur : Ctrl+Z annule la pose")
+	editor.redo()
+	check(editor.data.elements.size() == count + 1, "Éditeur : Ctrl+Y la refait")
+	var block := editor.add_from_catalog("sol", Vector2(0, 800))
+	var block_corner := MapData.vec(block, "pos") - MapData.vec(block, "size") / 2.0
+	editor._start_handle_drag(block, "resize")
+	editor._resize(block, Vector2(200, 840))
+	var block_rect := Rect2(MapData.vec(block, "pos") - MapData.vec(block, "size") / 2.0, MapData.vec(block, "size"))
+	check(block_rect.end == Vector2(200, 840) and block_rect.position == block_corner,
+		"Éditeur : tirer le coin agrandit le bloc, le coin opposé ne bouge pas (%s)" % [block_rect])
+	editor.rotate_selected(15.0)
+	check(is_equal_approx(float(block.rot), 15.0), "Éditeur : R tourne le bloc de 15°")
+	editor.copy_selected()
+	var pasted := editor.paste(Vector2(400, 1000))
+	check(pasted.id != block.id and pasted.size == block.size and editor.data.elements.size() == count + 3,
+		"Éditeur : copier / coller fait un deuxième bloc pareil")
+	editor.delete_selected()
+	check(editor.data.elements.size() == count + 2 and editor.selected_id == -1, "Éditeur : Suppr efface l'élément choisi")
+	var p3 := editor.add_from_catalog("spawn_joueur", Vector2(700, 580))
+	check(int(p3.player) == 3, "Éditeur : un nouveau départ prend le numéro libre suivant (J3)")
+	editor.add_from_catalog("echelle", Vector2(160, 400))
+	editor.add_from_catalog("liane", Vector2(1100, 100))
+	editor.add_from_catalog("fenetre", Vector2(900, 300))
+	editor.add_from_catalog("spawn_objet", Vector2(640, 200))
+	var resp_count: int = editor.data.elements.filter(func(e): return e.type == "reapparition").size()
+	editor.add_from_catalog("reapparition", Vector2(600, 100))
+	check(editor.data.elements.filter(func(e): return e.type == "reapparition").size() == resp_count,
+		"Éditeur : une seule réapparition (la poser à nouveau la déplace)")
+	check(editor._nodes.size() == editor.data.elements.filter(func(e): return not e.type in MapData.POINT_TYPES).size(),
+		"Éditeur : chaque élément a son aperçu")
+	# 14b) L'éditeur à la manette
+	var epad: EditorPad = editor._pad
+	editor.select(-1)
+	editor._camera.zoom = Vector2.ONE
+	epad.press(JOY_BUTTON_A)
+	check(epad.active and epad.cursor == editor._camera.position, "Éditeur manette : la manette fait apparaître le curseur au milieu de la vue")
+	var target := editor.add_from_catalog("sol", Vector2(-600, 1400))
+	var target_pos := MapData.vec(target, "pos")
+	editor.select(-1)
+	epad.cursor = target_pos
+	epad.press(JOY_BUTTON_A)
+	check(editor.selected_id == target.id and epad.dragging, "Éditeur manette : A sur un élément le prend")
+	epad.tick(0.1, Vector2(1, 0), Vector2.ZERO, 0.0, Vector2i.ZERO)
+	check(MapData.vec(target, "pos").x > target_pos.x, "Éditeur manette : le stick gauche déplace l'élément pris")
+	epad.release(JOY_BUTTON_A)
+	epad.press(JOY_BUTTON_A)
+	epad.tick(0.1, Vector2(0, 1), Vector2.ZERO, 0.0, Vector2i.ZERO)
+	var moved_pos := MapData.vec(editor.selected(), "pos")
+	epad.press(JOY_BUTTON_B)
+	target = editor.selected()
+	check(not epad.dragging and MapData.vec(target, "pos").y < moved_pos.y, "Éditeur manette : B annule le déplacement en cours")
+	var before_cursor := epad.cursor
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i(1, 0))
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	check(is_equal_approx(epad.cursor.x, before_cursor.snapped(Vector2(40, 40)).x + 40.0), "Éditeur manette : la croix avance le curseur d'un cran de grille")
+	var size_before := MapData.vec(target, "size")
+	var bottom_left := MapData.vec(target, "pos") + Vector2(-size_before.x, size_before.y) / 2.0
+	epad.tick(0.016, Vector2.ZERO, Vector2(1, 0), 0.0, Vector2i.ZERO)
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	epad.tick(0.016, Vector2.ZERO, Vector2(0, -1), 0.0, Vector2i.ZERO)
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	var size_after := MapData.vec(target, "size")
+	var bottom_left_after := MapData.vec(target, "pos") + Vector2(-size_after.x, size_after.y) / 2.0
+	check(size_after == size_before + Vector2(40, 40) and bottom_left_after == bottom_left,
+		"Éditeur manette : le stick droit agrandit (plus large, plus haut), le coin en bas à gauche reste (%s)" % [size_after])
+	epad.press(JOY_BUTTON_RIGHT_SHOULDER)
+	check(is_equal_approx(float(target.rot), 15.0), "Éditeur manette : RB tourne de 15°")
+	epad.press(JOY_BUTTON_Y)
+	var prop_x_before: float = MapData.vec(target, "pos").x
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i(1, 0))
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i(1, 0))
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	check(epad.focus == EditorPad.Focus.PROPS and is_equal_approx(MapData.vec(target, "pos").x, prop_x_before + 80.0),
+		"Éditeur manette : Y ouvre les réglages, droite change la valeur (X + un cran, deux fois)")
+	epad.press(JOY_BUTTON_B)
+	var count_pad: int = editor.data.elements.size()
+	epad.press(JOY_BUTTON_X)
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i(0, 1))
+	epad.tick(0.016, Vector2.ZERO, Vector2.ZERO, 0.0, Vector2i.ZERO)
+	epad.press(JOY_BUTTON_A)
+	check(epad.focus == EditorPad.Focus.MAP and editor.data.elements.size() == count_pad + 1 and editor.selected().type == editor.catalog_types()[1],
+		"Éditeur manette : X ouvre le catalogue, bas puis A pose le 2e élément au curseur")
+	epad.press(JOY_BUTTON_RIGHT_STICK)
+	check(editor.data.elements.size() == count_pad + 2, "Éditeur manette : R3 duplique")
+	editor.delete_selected()
+	editor.delete_selected()
+	epad.press(JOY_BUTTON_START)
+	for i in 8:
+		epad.nav(Vector2i(0, 1))
+	epad.nav(Vector2i(1, 0))
+	check(epad.focus == EditorPad.Focus.MENU and not editor.grid_on, "Éditeur manette : Start ouvre le menu, la grille s'y éteint")
+	epad.nav(Vector2i(-1, 0))
+	editor.set_map_name("")
+	epad.index = 3
+	epad.press(JOY_BUTTON_A)
+	epad.press(JOY_BUTTON_A)
+	epad.nav(Vector2i(1, 0))
+	epad.press(JOY_BUTTON_A)
+	epad.press(JOY_BUTTON_START)
+	check(editor.grid_on and editor.map_name() == "AB" and epad.focus == EditorPad.Focus.MENU,
+		"Éditeur manette : le clavier à l'écran écrit le nom de la map (%s)" % editor.map_name())
+	epad.press(JOY_BUTTON_B)
+	check(epad.focus == EditorPad.Focus.MAP and not epad._panel.visible, "Éditeur manette : B ferme le menu")
+	editor.delete_selected()
+	epad.set_active(false)
+	editor.select(target.id)
+	editor.delete_selected()
+	editor._name_edit.text = "_test_editeur"
+	check(editor.save_map() and "_test_editeur" in MapData.list_saved(), "Éditeur : la map est sauvée et listée")
+	check(MapData.load_saved("_test_editeur") == MapData.normalized(editor.data), "Éditeur : la map sauvée se relit pareil")
+	check("carte:_test_editeur" in GameSetup.all_maps(), "Éditeur : la map sauvée est dans le choix des maps")
+	check(editor.test_map() and GameSetup.map_path == GameSetup.EDITOR_MAP and GameSetup.exit_scene() == MapEditor.EDITOR_SCENE,
+		"Éditeur : TESTER prépare une partie sur la map, et QUITTER y ramènera")
+	editor.queue_free()
+	# La partie sur la map de l'éditeur : 3 joueurs posés, la navette, l'échelle, la liane et la fenêtre marchent
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}]]
+	await new_game()
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(90)
+	var landed_custom: int = game.fighters.filter(func(fi): return fi.is_on_floor() and fi.lives == GameSetup.lives).size()
+	check(landed_custom == 3, "Éditeur : sur la map de l'éditeur, les 3 joueurs atterrissent (%d/3)" % landed_custom)
+	var moving: Array = game.map.moving_platforms()
+	var start_x: float = moving[0].position.x if moving.size() == 1 else 0.0
+	await step(30)
+	check(moving.size() == 1 and moving[0].position.x != start_x and game.map.windows().size() == 1
+		and get_tree().get_nodes_in_group("echelles").size() == 1 and get_tree().get_nodes_in_group("lianes").size() == 1,
+		"Éditeur : la navette roule, l'échelle, la liane et la fenêtre sont là")
+	check(game.map.item_spawn_points().size() == 1, "Éditeur : les objets tombent depuis le point posé")
+	var saved_map := GameSetup.make_map("carte:_test_editeur")
+	check(saved_map.map_name == "_test_editeur", "Éditeur : une map sauvée se charge par son nom")
+	saved_map.free()
+	MapData.delete_saved("_test_editeur")
+	GameSetup.map_path = GameSetup.MAPS[0]
+	GameSetup.editor_map = {}
+	GameSetup.return_scene = ""
+	GameSetup.player_devices = []
 
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)

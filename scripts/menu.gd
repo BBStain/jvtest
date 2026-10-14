@@ -1,15 +1,16 @@
 extends Control
 ## Le menu du jeu, du premier écran jusqu'au lancement de la partie :
 ##   1. Écran titre : « Appuie sur une touche ». Le premier qui appuie devient le joueur 1.
-##   2. Menu principal : JOUER, EN LIGNE, COMMANDES, OPTIONS, TOURNOI. Tant qu'on est dans le menu, chaque
+##   2. Menu principal : JOUER, EN LIGNE, COMMANDES, OPTIONS, ÉDITEUR, TOURNOI. Tant qu'on est dans le menu, chaque
 ##      nouvelle manette ou côté de clavier qui appuie sur une touche devient le joueur suivant.
 ##   3. Choix du personnage : chaque joueur fait défiler les persos (gauche / droite) et les armes
 ##      (haut / bas), puis valide.
-##   4. Choix de la map, puis la partie se lance.
+##   4. Choix de la map (celles du jeu, puis celles faites dans l'éditeur), puis la partie se lance.
+## ÉDITEUR : l'éditeur de map (à la souris et au clavier, voir scripts/editor/map_editor.gd).
+## TOURNOI : créer un tournoi et voir son arbre, derrière un code (voir scripts/tournament/).
 ## EN LIGNE : créer un salon (on reçoit un code de 4 lettres à donner aux copains) ou en
 ## rejoindre un avec son code. Dans le salon, chacun choisit son perso et se dit prêt, puis
 ## l'hôte choisit la map et lance la partie (voir Online). Seul le joueur 1 joue en ligne.
-## TOURNOI : la préparation du tournoi, derrière un code (voir TournamentMenu et TournamentSetup).
 ##
 ## Commandes du menu, pour chaque joueur :
 ##   manette : stick ou croix pour choisir, A (ou Start) pour valider, B pour revenir
@@ -24,7 +25,8 @@ enum Screen { TITLE, MAIN, CONTROLS, OPTIONS, CHARACTERS, MAPS, ONLINE, ONLINE_C
 const MIN_PLAYERS := 2
 const MAX_PLAYERS := 4
 const GAME_SCENE := "res://scenes/main.tscn"
-const MAIN_BUTTONS := ["JOUER", "EN LIGNE", "COMMANDES", "OPTIONS", "TOURNOI"]
+const EDITOR_SCENE := "res://scenes/editor.tscn"
+const MAIN_BUTTONS := ["JOUER", "EN LIGNE", "COMMANDES", "OPTIONS", "ÉDITEUR", "TOURNOI"]
 const ONLINE_BUTTONS := ["CRÉER UN SALON", "REJOINDRE UN SALON"]
 const MIN_LIVES := 1
 const MAX_LIVES := 5
@@ -39,6 +41,7 @@ var _character_choice: Array[int] = []   ## perso sélectionné par chaque joueu
 var _weapon_choice: Array[int] = []      ## arme sélectionnée par chaque joueur
 var _locked: Array[bool] = []            ## le joueur a validé son perso
 var _map_choice := 0
+var _maps: Array[String] = []            ## les maps qu'on peut choisir (voir GameSetup.all_maps())
 var _input_reader := MenuInput.new()
 var _blink_label: Label
 var _blink_time := 0.0
@@ -53,6 +56,7 @@ var _tournament: TournamentMenu          ## les écrans du bouton TOURNOI
 func _ready() -> void:
 	InputBindings.fix_web_triggers()
 	_tournament = TournamentMenu.new(_show)
+	GameSetup.return_scene = ""  # une partie lancée d'ici revient ici
 	var background := ColorRect.new()
 	background.color = UiKit.BG_COLOR
 	background.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -117,6 +121,7 @@ func _input(event: InputEvent) -> void:
 		return
 	if screen == Screen.TOURNAMENT and _tournament.type_key(event):
 		_show()
+		get_viewport().set_input_as_handled()
 		return
 	var press := _input_reader.read(event)
 	if press.is_empty():
@@ -161,7 +166,7 @@ func handle(device: Dictionary, action: String) -> void:
 		Screen.TOURNAMENT:
 			_tournament.handle(action)
 			if _tournament.exited:
-				_go(Screen.MAIN, 4)
+				_go(Screen.MAIN, 5)
 			else:
 				_show()
 
@@ -206,8 +211,11 @@ func _open_main_button(index: int) -> void:
 		3:
 			_go(Screen.OPTIONS)
 		4:
+			if change_scene_on_start:
+				get_tree().change_scene_to_file(EDITOR_SCENE)
+		5:
 			_tournament.open()
-			_go(Screen.TOURNAMENT, 4)
+			_go(Screen.TOURNAMENT, 5)
 
 
 func _handle_options(action: String) -> void:
@@ -254,7 +262,7 @@ func _all_locked() -> bool:
 
 
 func _handle_maps(action: String) -> void:
-	var count := GameSetup.MAPS.size()
+	var count := _maps.size()
 	match action:
 		"left", "right":
 			_map_choice = posmod(_map_choice + (1 if action == "right" else -1), count)
@@ -275,7 +283,7 @@ func _start_game() -> void:
 		GameSetup.player_devices.append([players[i]])
 		GameSetup.player_characters.append(GameSetup.CHARACTERS[_character_choice[i]])
 		GameSetup.player_weapons.append(GameSetup.WEAPONS[_weapon_choice[i]])
-	GameSetup.map_path = GameSetup.MAPS[_map_choice]
+	GameSetup.map_path = _maps[_map_choice]
 	if change_scene_on_start:
 		get_tree().change_scene_to_file(GAME_SCENE)
 
@@ -329,8 +337,11 @@ func _show() -> void:
 			_content.add_child(UiKit.label("manette ou clavier", 18, UiKit.TEXT_DIM))
 		Screen.MAIN:
 			_add_title(56)
+			var buttons := VBoxContainer.new()  # plus serrés que le reste : 6 boutons doivent tenir
+			buttons.add_theme_constant_override("separation", 10)
 			for i in MAIN_BUTTONS.size():
-				_content.add_child(UiKit.menu_button(MAIN_BUTTONS[i], i == _choice, _open_main_button.bind(i)))
+				buttons.add_child(UiKit.menu_button(MAIN_BUTTONS[i], i == _choice, _open_main_button.bind(i), 60))
+			_content.add_child(buttons)
 			_content.add_child(UiKit.spacer(10))
 			_content.add_child(_player_chips())
 			_content.add_child(_join_hint())
@@ -357,6 +368,8 @@ func _show() -> void:
 				hint = "Il faut au moins 2 joueurs : appuie sur une touche d'une autre manette ou de l'autre côté du clavier"
 			_content.add_child(UiKit.label(hint, 18, UiKit.TEXT_DIM))
 		Screen.MAPS:
+			_maps = GameSetup.all_maps()
+			_map_choice = clampi(_map_choice, 0, _maps.size() - 1)
 			_content.add_child(UiKit.label("CHOISIS LA MAP", 40))
 			_content.add_child(_map_card())
 			_content.add_child(UiKit.label("gauche / droite pour choisir, A pour lancer la partie, B pour revenir", 18, UiKit.TEXT_DIM))
@@ -511,7 +524,7 @@ func _preview_zoom() -> float:
 func _map_card() -> VBoxContainer:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 12)
-	var map := (load(GameSetup.MAPS[_map_choice]) as PackedScene).instantiate() as GameMap
+	var map := GameSetup.make_map(_maps[_map_choice])
 	var rects: Array[Rect2] = []
 	_collect_map_rects(map, Vector2.ZERO, rects)
 	var map_name := map.map_name
@@ -533,7 +546,7 @@ func _map_card() -> VBoxContainer:
 		preview.draw_rect(Rect2(Vector2.ZERO, preview.size), UiKit.HIGHLIGHT, false, 3.0)
 	)
 	box.add_child(preview)
-	var arrows := "<   %s   >" if GameSetup.MAPS.size() > 1 else "%s"
+	var arrows := "<   %s   >" if _maps.size() > 1 else "%s"
 	box.add_child(UiKit.label(arrows % map_name, 30, UiKit.HIGHLIGHT))
 	return box
 
@@ -784,6 +797,7 @@ func _show_online() -> void:
 			_content.add_child(UiKit.label(hint, 18, UiKit.TEXT_DIM))
 		Screen.ONLINE_MAP:
 			_content.add_child(UiKit.label("CHOISIS LA MAP", 40))
+			_maps.assign(GameSetup.MAPS)  # en ligne : seulement les maps du jeu (pour l'instant)
 			_map_choice = Online.map_index
 			_content.add_child(_map_card())
 			_content.add_child(UiKit.label("gauche / droite pour choisir, A pour lancer la partie, B pour revenir", 18, UiKit.TEXT_DIM))
