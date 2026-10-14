@@ -12,6 +12,7 @@ config/features=PackedStringArray("4.3", "GL Compatibility")
 [autoload]
 
 Online="*res://scripts/online/online.gd"
+Music="*res://scripts/music.gd"
 
 [display]
 

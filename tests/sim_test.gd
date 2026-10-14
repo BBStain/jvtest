@@ -2375,6 +2375,22 @@ func _ready() -> void:
 	GameSetup.return_scene = ""
 	GameSetup.player_devices = []
 
+	# Musique : une playlist par dossier, le menu et l'Arène existent et sont vides pour l'instant
+	check(Music.playlist_for_map("res://scenes/maps/arene.tscn") == "arene" and Music.playlist_for_map("carte:test") == "arene"
+		and Music.playlist_for_map(GameSetup.EDITOR_MAP) == "arene", "Musique : l'Arène et les maps de l'éditeur jouent la playlist arene")
+	check(DirAccess.dir_exists_absolute(Music.FOLDER + Music.MENU) and DirAccess.dir_exists_absolute(Music.FOLDER + "arene"),
+		"Musique : les dossiers des playlists menu et arene existent")
+	var test_tracks := Music.tracks_in("res://tests/musique_test")
+	check(test_tracks == ["res://tests/musique_test/01-a.wav", "res://tests/musique_test/02-b.wav"],
+		"Musique : les morceaux d'un dossier sont trouvés dans l'ordre de leur nom (%s)" % [test_tracks])
+	Music.playlist = ""
+	Music.play_playlist("../tests/musique_test")
+	check(Music.track_index == 0 and Music._player.playing, "Musique : le premier morceau se lance")
+	Music._next_track(); Music._next_track()
+	check(Music.track_index == 0, "Musique : après le dernier morceau, la playlist recommence")
+	Music.play_playlist("arene")
+	check(Music.tracks.is_empty() and not Music._player.playing, "Musique : playlist vide = silence")
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 

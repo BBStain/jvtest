@@ -69,6 +69,7 @@ var _message_left := 0.0
 
 
 func _ready() -> void:
+	Music.play_playlist(Music.MENU)
 	_camera = Camera2D.new()
 	_camera.position = _last_camera
 	_camera.zoom = Vector2.ONE * _last_zoom
