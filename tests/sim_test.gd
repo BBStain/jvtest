@@ -784,7 +784,7 @@ func _ready() -> void:
 	check(menu.players.is_empty() and menu.screen == menu.Screen.TITLE, "Perso : le dernier joueur se retire, retour à l'écran titre")
 	menu.queue_free()
 
-	# 10b2) TOURNOI : le code, créer un tournoi, ses joueurs et son arbre
+	# 10b2) TOURNOI : le code, l'inscription (nom + couleur), puis l'arbre, ALÉATOIRE et les réglages
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TournamentData.SAVE_PATH))
 	TournamentData.unlocked = false
 	GameSetup.player_devices = []
@@ -805,71 +805,76 @@ func _ready() -> void:
 			key.pressed = true
 			key.unicode = letter.unicode_at(0)
 			menu._input(key)
+	var enter := InputEventKey.new()
+	enter.pressed = true
+	enter.keycode = KEY_ENTER
 	type_text.call("swat")
 	menu.handle(pad, "confirm")
 	check(tm.page == TournamentMenu.Page.CODE and tm._wrong_code, "Tournoi : un code faux ne fait pas entrer")
 	type_text.call("swag")
 	menu.handle(pad, "confirm")
-	check(tm.page == TournamentMenu.Page.HOME and tm._home_buttons() == ["NOUVEAU TOURNOI"], "Tournoi : le code ouvre l'accueil du tournoi")
+	check(tm.page == TournamentMenu.Page.SIGNUP and tm.tournament.players.is_empty(), "Tournoi : le code ouvre l'inscription")
 	menu.handle(pad, "confirm")
-	check(tm.page == TournamentMenu.Page.EDIT, "Tournoi : NOUVEAU TOURNOI ouvre la création")
-	menu.handle(pad, "down")
-	menu.handle(pad, "down")
+	check(tm.page == TournamentMenu.Page.KEYBOARD, "Inscription : A sur le nom ouvre le clavier")
+	type_text.call("Stain")
+	menu._input(enter)
+	check(tm.page == TournamentMenu.Page.SIGNUP and tm._row == TournamentMenu.Row.COLOR, "Inscription : nom tapé, on passe à la couleur")
+	menu.handle(pad, "right")
+	menu.handle(pad, "right")
 	menu.handle(pad, "confirm")
-	check(tm.page == TournamentMenu.Page.KEYBOARD, "Tournoi : AJOUTER UN JOUEUR ouvre le clavier")
-	var enter := InputEventKey.new()
-	enter.pressed = true
-	enter.keycode = KEY_ENTER
-	for player_name in ["Stain", "Bob", "Zoé", "Lulu", "Max"]:
+	check(tm.tournament.players.size() == 1 and tm.tournament.players[0] == {"name": "Stain", "color": 2},
+		"Inscription : Stain s'inscrit avec la couleur choisie")
+	for player_name in ["Bob", "Zoé", "Lulu", "Max", "stain"]:
+		menu.handle(pad, "confirm")
 		type_text.call(player_name)
 		menu._input(enter)
-	check(tm.page == TournamentMenu.Page.KEYBOARD and tm.tournament.players == ["Stain", "Bob", "Zoé", "Lulu", "Max"],
-		"Tournoi : au clavier, on enchaîne les joueurs (Entrée)")
-	menu.handle(pad, "right")
+		menu.handle(pad, "confirm")
+	check(tm.tournament.players.size() == 5 and tm._message == "Ce nom est déjà pris", "Inscription : 5 inscrits, pas deux fois le même nom")
+	var colors := {}
+	for player in tm.tournament.players:
+		colors[player.color] = true
+	check(colors.size() == 5, "Inscription : chaque nouvel inscrit reçoit une couleur libre")
+	await shot("11_tournoi_inscription")
+	tm._row = TournamentMenu.Row.NEXT
 	menu.handle(pad, "confirm")
-	for i in 4:
-		menu.handle(pad, "down")
-	menu.handle(pad, "right")
+	check(tm.page == TournamentMenu.Page.BOARD and not tm.tournament.is_seeded(), "Arbre : on y arrive, personne n'est encore placé")
+	await shot("12_tournoi_arbre_vide")
 	menu.handle(pad, "confirm")
-	check(tm.tournament.players.size() == 6 and tm.tournament.players[5] == "B", "Tournoi : à la manette, le clavier à l'écran tape une lettre")
-	menu.handle(pad, "back")
-	check(tm.page == TournamentMenu.Page.EDIT, "Tournoi : B ferme le clavier")
-	menu.handle(pad, "up")
-	menu.handle(pad, "left")
-	menu.handle(pad, "confirm")
-	check(tm.tournament.players.size() == 6, "Tournoi : retirer un joueur demande un 2e appui")
-	menu.handle(pad, "confirm")
-	check(tm.tournament.players == ["Stain", "Bob", "Zoé", "Lulu", "Max"], "Tournoi : le 2e appui retire le joueur")
-	await shot("11_tournoi_creation")
+	check(tm.tournament.is_seeded() and tm._anim_start >= 0, "Arbre : ALÉATOIRE place tout le monde (avec l'animation)")
 	var rounds := tm.tournament.bracket()
-	check(rounds.size() == 3 and rounds[0].size() == 3 and rounds[-1].size() == 1 and rounds[-1][0].qualified == 0,
-		"Tournoi : 5 joueurs en duels = 3 tours (un passe d'office), une finale")
-	tm.tournament.format = 1
-	for extra in ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "A10", "A11"]:
-		tm.tournament.add_player(extra)
-	rounds = tm.tournament.bracket()
-	check(rounds.size() == 3 and rounds[0].size() == 4 and rounds[1].size() == 2 and rounds[1][0].slots[0] == "1er M1",
-		"Tournoi : 16 joueurs en mêlées à 4 = 4 matchs, puis 2, puis la finale")
-	for i in 16:
-		tm.tournament.add_player("B%d" % i)
-	tm.tournament.format = 0
-	rounds = tm.tournament.bracket()
-	check(tm.tournament.players.size() == 32 and rounds.size() == 5 and rounds[0].size() == 16, "Tournoi : 32 joueurs max, 5 tours en duels")
-	tm.tournament.save()
-	tm._choice = TournamentMenu.Row.BRACKET
-	menu.handle(pad, "confirm")
-	check(tm.page == TournamentMenu.Page.BRACKET, "Tournoi : VOIR L'ARBRE")
-	await shot("12_tournoi_arbre_32")
-	menu.handle(pad, "back")
-	menu.handle(pad, "back")
-	check(tm.page == TournamentMenu.Page.HOME and tm._home_buttons().size() == 2, "Tournoi : le tournoi est enregistré (CONTINUER)")
+	check(rounds.size() == 3 and rounds[0].size() == 3 and rounds[-1].size() == 1, "Arbre : 5 joueurs = 3 tours (un passe d'office)")
+	await get_tree().create_timer(0.35).timeout
+	await shot("13_tournoi_tirage")
+	await get_tree().create_timer(1.0).timeout
+	await shot("14_tournoi_arbre")
+	menu.handle(pad, "up")
+	menu.handle(pad, "up")
+	menu.handle(pad, "right")
 	menu.handle(pad, "down")
+	menu.handle(pad, "right")
+	check(tm._tab == TournamentMenu.Tab.RULES and tm.tournament.lives == 4, "Réglages : page RÈGLES, les vies passent à 4")
+	await shot("15_tournoi_regles")
+	menu.handle(pad, "back")
+	check(tm.page == TournamentMenu.Page.SIGNUP, "Arbre : B revient à l'inscription")
+	tm._row = TournamentMenu.Row.PLAYERS
+	tm._chip = 4
 	menu.handle(pad, "confirm")
-	check(tm.page == TournamentMenu.Page.HOME and tm._confirm, "Tournoi : NOUVEAU demande confirmation s'il y en a déjà un")
+	menu.handle(pad, "confirm")
+	check(tm.tournament.players.size() == 4 and not tm.tournament.is_seeded(), "Inscription : retirer un inscrit (2 appuis) refait le tirage")
 	menu.handle(pad, "back")
 	check(menu.screen == menu.Screen.MAIN and menu._choice == 5, "Tournoi : B revient au menu principal")
 	menu.handle(pad, "confirm")
-	check(tm.page == TournamentMenu.Page.HOME, "Tournoi : le code n'est plus demandé ensuite")
+	check(tm.page == TournamentMenu.Page.SIGNUP and tm.tournament.players.size() == 4 and tm.tournament.lives == 4,
+		"Tournoi : tout est enregistré, et le code n'est plus demandé")
+	for i in 28:
+		tm.tournament.add_player("Joueur %d" % (i + 1), i % TournamentData.COLORS.size())
+	tm._row = TournamentMenu.Row.NEXT
+	menu.handle(pad, "confirm")
+	menu.handle(pad, "confirm")
+	var rounds_32 := tm.tournament.bracket()
+	check(tm.tournament.players.size() == 32 and rounds_32.size() == 5 and rounds_32[0].size() == 16, "Arbre : 32 joueurs, 5 tours")
+	await get_tree().create_timer(TournamentBoard.animation_length(32) + 0.2).timeout
+	await shot("16_tournoi_arbre_32")
 	menu.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TournamentData.SAVE_PATH))
 

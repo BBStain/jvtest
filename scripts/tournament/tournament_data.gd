@@ -1,45 +1,55 @@
 class_name TournamentData
 extends RefCounted
-## Un tournoi : son nom, son format, ses joueurs (des pseudos), et l'arbre qu'on en tire.
-## Le tournoi en cours est gardé dans le navigateur (user://tournoi.json) : on le retrouve
-## en revenant sur le jeu.
+## Un tournoi en duels : les joueurs inscrits (un nom et une couleur chacun), leur place dans
+## le 1er tour (tirée au sort avec ALÉATOIRE), et les réglages (map, nombre de vies).
+## Le tournoi est gardé dans le navigateur (user://tournoi.json) : on le retrouve en revenant sur le jeu.
 ##
-## L'arbre est fait de tours ; chaque tour est une liste de matchs. Au 1er tour, les joueurs
-## sont répartis dans l'ordre de la liste (MÉLANGER change l'ordre). Les tours suivants
-## reçoivent les qualifiés des matchs d'avant, dans l'ordre, jusqu'à la finale (1 seul match,
-## 1 champion). Un match d'un seul joueur = il passe d'office.
+## L'arbre est fait de tours ; chaque tour est une liste de matchs (des duels). Les tours suivants
+## reçoivent les vainqueurs des matchs d'avant, jusqu'à la finale. Avec un nombre impair de
+## joueurs, un match n'a qu'un joueur : il passe d'office.
 
 const CODE := "SWAG"  ## le code pour entrer (juste une porte dans le jeu, pas une vraie sécurité)
 const CODE_LETTERS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 const SAVE_PATH := "user://tournoi.json"
 const MAX_PLAYERS := 32
-const MAX_NAME := 14
-## Les formats : joueurs par match, qualifiés par match (sauf en finale : 1 champion).
-const FORMATS := [
-	{"name": "Duels", "detail": "1 contre 1, le gagnant passe", "players": 2, "qualified": 1},
-	{"name": "Mêlées à 4", "detail": "4 par match, les 2 premiers passent", "players": 4, "qualified": 2},
+const MAX_NAME := 12
+const PER_MATCH := 2
+## Les couleurs qu'on peut choisir à l'inscription.
+const COLORS := [
+	Color(0.95, 0.3, 0.3), Color(0.3, 0.55, 1.0), Color(0.35, 0.85, 0.4), Color(1.0, 0.8, 0.25),
+	Color(0.75, 0.4, 0.95), Color(1.0, 0.55, 0.2), Color(0.25, 0.85, 0.85), Color(1.0, 0.45, 0.75),
+	Color(0.6, 0.85, 0.2), Color(0.55, 0.4, 0.25), Color(0.85, 0.85, 0.9), Color(0.4, 0.4, 0.5),
 ]
+const MIN_LIVES := 1
+const MAX_LIVES := 5
 
 static var unlocked := false     ## le code a été tapé (on ne le redemande pas avant de recharger la page)
 
-var name := "Tournoi du swag"
-var format := 0                  ## index dans FORMATS
-var players: Array[String] = []
+var players: Array[Dictionary] = []  ## {"name": String, "color": index dans COLORS}
+var seeding: Array[int] = []         ## les joueurs (leur index) dans l'ordre des places du 1er tour ; vide = pas encore tirés
+var lives := 3
+var map: String = GameSetup.MAPS[0]
 
 
-## Le tournoi enregistré, ou null s'il n'y en a pas.
+## Le tournoi enregistré (un tournoi vide s'il n'y en a pas).
 static func load_saved() -> TournamentData:
+	var tournament := TournamentData.new()
 	if not FileAccess.file_exists(SAVE_PATH):
-		return null
+		return tournament
 	var data = JSON.parse_string(FileAccess.get_file_as_string(SAVE_PATH))
 	if not data is Dictionary:
-		return null
-	var tournament := TournamentData.new()
-	tournament.name = str(data.get("name", tournament.name)).left(MAX_NAME * 2)
-	tournament.format = clampi(int(data.get("format", 0)), 0, FORMATS.size() - 1)
+		return tournament
 	for player in data.get("players", []):
-		if tournament.players.size() < MAX_PLAYERS:
-			tournament.players.append(str(player).left(MAX_NAME))
+		if player is Dictionary and tournament.players.size() < MAX_PLAYERS:
+			tournament.players.append({"name": str(player.get("name", "?")).left(MAX_NAME),
+				"color": clampi(int(player.get("color", 0)), 0, COLORS.size() - 1)})
+	for index in data.get("seeding", []):
+		tournament.seeding.append(int(index))
+	if not tournament.is_seeded():
+		tournament.seeding = []
+	tournament.lives = clampi(int(data.get("lives", 3)), MIN_LIVES, MAX_LIVES)
+	if str(data.get("map", "")) in GameSetup.MAPS:
+		tournament.map = data.map
 	return tournament
 
 
@@ -51,79 +61,109 @@ static func check_code(typed: String) -> bool:
 func save() -> void:
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file != null:
-		file.store_string(JSON.stringify({"name": name, "format": format, "players": players}))
+		file.store_string(JSON.stringify({"players": players, "seeding": seeding, "lives": lives, "map": map}))
 
 
-## Ajoute un joueur (pas de doublon, pas de nom vide). Renvoie false s'il n'a pas été ajouté.
-func add_player(player_name: String) -> bool:
+## Inscrit un joueur (pas de doublon, pas de nom vide). Renvoie false s'il n'a pas été inscrit.
+## Le tirage au sort est à refaire.
+func add_player(player_name: String, color: int) -> bool:
 	player_name = player_name.strip_edges().left(MAX_NAME)
-	if player_name == "" or player_name in players or players.size() >= MAX_PLAYERS:
+	if player_name == "" or players.size() >= MAX_PLAYERS:
 		return false
-	players.append(player_name)
+	for player in players:
+		if player.name.to_lower() == player_name.to_lower():
+			return false
+	players.append({"name": player_name, "color": color})
+	seeding = []
 	return true
 
 
+func remove_player(index: int) -> void:
+	players.remove_at(index)
+	seeding = []
+
+
+## La couleur proposée au prochain inscrit : la première pas encore prise (après "after").
+func next_free_color(after := -1) -> int:
+	for step in range(1, COLORS.size() + 1):
+		var color := posmod(after + step, COLORS.size())
+		if not players.any(func(p: Dictionary) -> bool: return p.color == color):
+			return color
+	return posmod(after + 1, COLORS.size())
+
+
+## Tire au sort la place de chaque joueur dans le 1er tour.
 func shuffle() -> void:
-	players.shuffle()
+	seeding = []
+	for i in players.size():
+		seeding.append(i)
+	seeding.shuffle()
 
 
-## L'arbre du tournoi : une liste de tours, chaque tour une liste de matchs.
+func is_seeded() -> bool:
+	if seeding.size() != players.size():
+		return false
+	var sorted := seeding.duplicate()
+	sorted.sort()
+	for i in sorted.size():
+		if sorted[i] != i:
+			return false
+	return true
+
+
+## La taille de chaque match du 1er tour (au plus juste : des duels, et au plus un joueur seul).
+func first_round_sizes() -> Array[int]:
+	var sizes: Array[int] = []
+	var count := ceili(players.size() / float(PER_MATCH))
+	for m in count:
+		sizes.append(players.size() / count + (1 if m < players.size() % count else 0))
+	return sizes
+
+
+## L'arbre : une liste de tours, chaque tour une liste de matchs.
 ## Un match = {"number": numéro (M1, M2... sur tout le tournoi),
-##             "slots": une case par joueur : son nom au 1er tour, sinon d'où il vient ("Vainqueur M1"),
-##             "sources": les numéros des matchs qui envoient leurs qualifiés ici,
-##             "qualified": combien passent au tour suivant (0 en finale)}.
+##             "slots": une case par joueur : au 1er tour l'index du joueur (-1 = pas encore tiré),
+##                      ensuite -1 (on ne sait pas encore qui gagne),
+##             "sources": les numéros des matchs dont les vainqueurs viennent ici}.
 func bracket() -> Array:
 	var rounds := []
 	if players.size() < 2:
 		return rounds
-	var per_match: int = FORMATS[format].players
-	var per_qualified: int = FORMATS[format].qualified
 	var number := 1
-	# Ce qui entre dans le tour : [texte de la case, numéro du match d'où il vient (0 = 1er tour)]
-	var entrants := []
-	for player in players:
-		entrants.append([player, 0])
-	while true:
-		var count := ceili(entrants.size() / float(per_match))
-		var final := count == 1
-		var matches := []
+	var first := []
+	var place := 0
+	for size in first_round_sizes():
+		var slots := []
+		for s in size:
+			slots.append(seeding[place] if is_seeded() else -1)
+			place += 1
+		first.append({"number": number, "slots": slots, "sources": []})
+		number += 1
+	rounds.append(first)
+	while rounds[-1].size() > 1:
+		var previous: Array = rounds[-1]
 		var next := []
-		var start := 0
-		for m in count:
-			# Répartit au plus juste : des matchs de tailles proches (pas de match à 4 puis un à 1).
-			var size := entrants.size() / count + (1 if m < entrants.size() % count else 0)
-			var game := {"number": number, "slots": [], "sources": [], "qualified": 0}
-			for e in entrants.slice(start, start + size):
-				game.slots.append(e[0])
-				if e[1] != 0 and not e[1] in game.sources:
-					game.sources.append(e[1])
-			start += size
-			if not final:
-				game.qualified = size if size == 1 else mini(per_qualified, size - 1)
-				for q in game.qualified:
-					next.append([_qualified_text(number, q, game.qualified), number])
-			matches.append(game)
+		for m in range(0, previous.size(), PER_MATCH):
+			var sources := []
+			for game in previous.slice(m, m + PER_MATCH):
+				sources.append(game.number)
+			var slots := []
+			slots.resize(sources.size())
+			slots.fill(-1)
+			next.append({"number": number, "slots": slots, "sources": sources})
 			number += 1
-		rounds.append(matches)
-		if final:
-			break
-		entrants = next
+		rounds.append(next)
 	return rounds
 
 
-## Le nom d'un tour, en partant de la fin : Finale, Demi-finales, Quarts...
-static func round_name(index: int, round_count: int) -> String:
-	match round_count - 1 - index:
-		0:
-			return "Finale"
-		1:
-			return "Demi-finales"
-		2:
-			return "Quarts"
-	return "Tour %d" % (index + 1)
-
-
-func _qualified_text(number: int, rank: int, total: int) -> String:
-	if total == 1:
-		return "Vainqueur M%d" % number
-	return "%s M%d" % ["1er" if rank == 0 else "%de" % (rank + 1), number]
+## Le nom d'un tour, d'après son nombre de matchs : Finale, Demies, Quarts, Huitièmes...
+static func round_name(match_count: int) -> String:
+	if match_count <= 1:
+		return "Finale"
+	if match_count == 2:
+		return "Demies"
+	if match_count <= 4:
+		return "Quarts"
+	if match_count <= 8:
+		return "Huitièmes"
+	return "Seizièmes"
