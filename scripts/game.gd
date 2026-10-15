@@ -767,13 +767,17 @@ func _check_end_of_match() -> void:
 	for fighter in fighters:
 		if not fighter.eliminated:
 			alive.append(fighter)
-	if alive.size() > 1:
+	# Match à 4 du tournoi : il s'arrête quand il ne reste que les 2 qualifiés.
+	var tournament_qualified: int = GameSetup.tournament_match.get("qualified", 1)
+	if alive.size() > tournament_qualified:
 		return
 	_match_over = true
 	_match_over_time = 0.0
 	_duel.clear()
 	_time_engine.stop(true)
-	if alive.size() == 1 and not GameSetup.tournament_match.is_empty():
+	if tournament_qualified > 1 and not alive.is_empty():
+		_record_tournament_qualified(alive)
+	elif alive.size() == 1 and not GameSetup.tournament_match.is_empty():
 		_record_tournament_winner(alive[0])
 	elif alive.size() == 1:
 		_show_end("Joueur %d gagne !" % (alive[0].player_index + 1), alive[0].color)
@@ -785,9 +789,24 @@ func _check_end_of_match() -> void:
 func _record_tournament_winner(fighter: Fighter) -> void:
 	var tournament_match := GameSetup.tournament_match
 	var tournament := TournamentData.load_saved()
-	tournament.set_result(tournament_match.number, tournament_match.players[fighter.player_index])
+	tournament.set_result(tournament_match.number, [tournament_match.players[fighter.player_index]])
 	tournament.save()
 	_show_end("%s gagne !" % tournament_match.names[fighter.player_index], fighter.color)
+	$UI/EndScreen/Restart.text = "Start, A ou Entrée : rejouer le match      B ou Échap : retour à l'arbre"
+
+
+## Match à 4 du tournoi : les derniers en vie passent au tour suivant.
+func _record_tournament_qualified(alive: Array[Fighter]) -> void:
+	var tournament_match := GameSetup.tournament_match
+	var tournament := TournamentData.load_saved()
+	var names := []
+	var qualified := []
+	for fighter in alive:
+		qualified.append(tournament_match.players[fighter.player_index])
+		names.append(tournament_match.names[fighter.player_index])
+	tournament.set_result(tournament_match.number, qualified)
+	tournament.save()
+	_show_end("%s passent !" % " et ".join(names), Color.WHITE)
 	$UI/EndScreen/Restart.text = "Start, A ou Entrée : rejouer le match      B ou Échap : retour à l'arbre"
 
 

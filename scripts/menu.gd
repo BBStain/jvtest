@@ -157,7 +157,7 @@ func handle(device: Dictionary, action: String) -> void:
 		# Match de tournoi : une manette qui appuie se lie au prochain nom appelé (B = retour à l'arbre).
 		if action == "back":
 			_back_to_tournament_board()
-		elif players.size() < 2:
+		elif players.size() < _match_players().size():
 			_add_player(device)
 			_show()
 		return
@@ -341,14 +341,19 @@ func _back_to_tournament_board() -> void:
 	_go(Screen.TOURNAMENT, 5)
 
 
+## Les joueurs du match de tournoi en cours (sans les cases « exempt »), dans l'ordre de l'arbre.
+func _match_players() -> Array:
+	return _tournament_game.slots.filter(func(p: int) -> bool: return p >= 0)
+
+
 func _start_tournament_match() -> void:
 	var tournament := _tournament.tournament
 	GameSetup.tournament_match = {
 		"number": _tournament_game.number,
-		"players": _tournament_game.slots.duplicate(),
-		"names": [tournament.players[_tournament_game.slots[0]].name, tournament.players[_tournament_game.slots[1]].name],
-		"colors": [TournamentData.COLORS[tournament.players[_tournament_game.slots[0]].color],
-			TournamentData.COLORS[tournament.players[_tournament_game.slots[1]].color]],
+		"players": _match_players(),
+		"names": _match_players().map(func(p: int) -> String: return tournament.players[p].name),
+		"colors": _match_players().map(func(p: int) -> Color: return TournamentData.COLORS[tournament.players[p].color]),
+		"qualified": TournamentData.qualified_count(_tournament_game),
 		"previous_lives": GameSetup.lives,
 	}
 	GameSetup.lives = tournament.lives
@@ -430,14 +435,14 @@ func _show() -> void:
 				_content.add_child(UiKit.label("CHOISIS TON PERSONNAGE", 40))
 			else:
 				var tournament := _tournament.tournament
-				var names: Array = _tournament_game.slots.map(func(p: int) -> String: return tournament.players[p].name)
-				_content.add_child(UiKit.label("%s contre %s" % names, 40))
-				_content.add_child(UiKit.label("%s   ·   map : %s   ·   %d vies" % [TournamentData.round_name(_tournament_game.get("round_size", 1)),
+				var names: Array = _match_players().map(func(p: int) -> String: return tournament.players[p].name)
+				_content.add_child(UiKit.label(" contre ".join(names), 40 if names.size() == 2 else 32))
+				_content.add_child(UiKit.label("%s   ·   map : %s   ·   %d vies" % [TournamentData.round_name(_tournament_game.get("round_players", 2)),
 					_tournament._map_name(tournament.map), tournament.lives], 20, UiKit.HIGHLIGHT))
 			var slots := HBoxContainer.new()
 			slots.alignment = BoxContainer.ALIGNMENT_CENTER
 			slots.add_theme_constant_override("separation", 18)
-			for i in (MAX_PLAYERS if _tournament_game.is_empty() else 2):
+			for i in (MAX_PLAYERS if _tournament_game.is_empty() else _match_players().size()):
 				slots.add_child(_character_slot(i))
 			_content.add_child(slots)
 			var hint := "gauche / droite : perso, haut / bas : arme, A pour valider, B pour revenir"
@@ -491,8 +496,8 @@ func _join_hint() -> Label:
 func _character_slot(index: int) -> PanelContainer:
 	var color: Color = Game.PLAYER_COLORS[index]
 	var title := "Joueur %d" % (index + 1)
-	if not _tournament_game.is_empty() and index < 2:  # match de tournoi : le nom et la couleur du joueur
-		var player: Dictionary = _tournament.tournament.players[_tournament_game.slots[index]]
+	if not _tournament_game.is_empty() and index < _match_players().size():  # match de tournoi : le nom et la couleur du joueur
+		var player: Dictionary = _tournament.tournament.players[_match_players()[index]]
 		color = TournamentData.COLORS[player.color]
 		title = player.name
 	var joined := index < players.size()

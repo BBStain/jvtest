@@ -60,6 +60,10 @@ func _draw() -> void:
 	for column in layout.columns:
 		draw_string(font, Vector2(column.x, layout.bracket_top + 16), column.title,
 			HORIZONTAL_ALIGNMENT_CENTER, column.width, 16, UiKit.HIGHLIGHT)
+	if layout.final_label.x >= 0:
+		var column_width: float = layout.columns[0].width
+		draw_string(font, layout.final_label - Vector2((column_width - layout.matches[-1].slots[0].size.x) / 2.0, 0), "Finale",
+			HORIZONTAL_ALIGNMENT_CENTER, column_width, 16, UiKit.HIGHLIGHT)
 	for game in layout.matches:
 		for link in game.links:
 			draw_polyline(PackedVector2Array(link), LINE_COLOR, 2.0)
@@ -130,10 +134,16 @@ func _layout() -> Dictionary:
 	for p in count:
 		pool.append(Rect2(Vector2((p % POOL_COLUMNS) * (chip.x + 6), 22 + (p / POOL_COLUMNS) * POOL_ROW), chip))
 	var bracket_top: float = 22 + maxi(pool_rows, 1) * POOL_ROW + 10
-	var result := {"pool": pool, "places": [], "columns": [], "matches": [], "bracket_top": bracket_top}
+	var result := {"pool": pool, "places": [], "columns": [], "matches": [], "bracket_top": bracket_top,
+		"final_label": Vector2(-1, -1)}  ## matchs à 4 : où écrire « Finale » (au-dessus de la finale)
 	var bracket := tournament.bracket()
 	if bracket.is_empty():
 		return result
+	# Matchs à 4 : la finale (un duel) n'a qu'un match d'où elle vient. Elle se met au milieu,
+	# au-dessus de ce dernier match à 4.
+	var final_duel: Dictionary = bracket[-1][0] if bracket[-1][0].sources.size() == 1 else {}
+	if not final_duel.is_empty():
+		bracket = bracket.slice(0, bracket.size() - 1)
 	var round_count := bracket.size()
 	var area_top := bracket_top + TITLE_HEIGHT
 	var area_height := size.y - area_top
@@ -143,7 +153,7 @@ func _layout() -> Dictionary:
 	for c in column_count:
 		var r := mini(c, column_count - 1 - c)
 		result.columns.append({"x": c * column_width, "width": column_width,
-			"title": TournamentData.round_name(bracket[r].size())})
+			"title": TournamentData.round_name(bracket[r].size() * bracket[r][0].slots.size())})
 	# Le côté de chaque match (-1 gauche, 1 droite, 0 la finale), en partant de la finale.
 	var side := {bracket[-1][0].number: 0}
 	var by_number := {}
@@ -159,7 +169,12 @@ func _layout() -> Dictionary:
 	var stacked := {-1: 0, 0: 0, 1: 0}
 	# La taille des cases suit le nombre d'inscrits : peu de joueurs = grandes cases, beaucoup = petites.
 	var busiest: int = maxi(per_side[-1], maxi(per_side[1], per_side[0]))
-	var slot_height := clampf((area_height / busiest - 8) / TournamentData.PER_MATCH, 14.0, 64.0)
+	var match_slots: int = first[0].slots.size()
+	var slot_height := clampf((area_height / busiest - 8) / match_slots, 14.0, 64.0)
+	var final_gap := 40.0  ## matchs à 4 : la place de la finale au-dessus du milieu
+	if not final_duel.is_empty():
+		# Le milieu empile la finale (2 cases) et le dernier match à 4 : il faut que ça tienne.
+		slot_height = minf(slot_height, (area_height - final_gap - 8) / (match_slots + 2 * 2))
 	var edges := {}  ## numéro du match -> [bord gauche, bord droit] au milieu de sa hauteur
 	result.places.resize(count)
 	for r in round_count:
@@ -174,6 +189,8 @@ func _layout() -> Dictionary:
 				var match_height := area_height / maxi(per_side[game_side], 1)
 				middle = area_top + (stacked[game_side] + 0.5) * match_height
 				stacked[game_side] += 1
+				if game_side == 0 and not final_duel.is_empty():
+					middle += (2 * slot_height + final_gap) / 2.0
 			else:
 				for source in game.sources:
 					middle += edges[source][0].y
@@ -194,4 +211,16 @@ func _layout() -> Dictionary:
 				links.append([from, Vector2(elbow, from.y), Vector2(elbow, middle), to])
 			edges[game.number] = [Vector2(x, middle), Vector2(x + box_width, middle)]
 			result.matches.append({"number": game.number, "slots": slots, "values": game.slots, "links": links, "later": r > 0})
+	if not final_duel.is_empty():
+		# La finale : au-dessus du dernier match à 4, reliée à lui par un trait.
+		var center: Dictionary = result.matches[-1]
+		var below: Rect2 = center.slots[0]
+		var top := below.position.y - final_gap - 2 * slot_height
+		var slots := []
+		for s in 2:
+			slots.append(Rect2(below.position.x, top + s * slot_height + 1, below.size.x, slot_height - 2))
+		var x := below.get_center().x
+		result.matches.append({"number": final_duel.number, "slots": slots, "values": final_duel.slots, "later": true,
+			"links": [[Vector2(x, below.position.y), Vector2(x, top + 2 * slot_height)]]})
+		result.final_label = Vector2(below.position.x, top - 6)
 	return result

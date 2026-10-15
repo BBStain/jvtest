@@ -29,6 +29,8 @@ var _message := ""           ## SIGNUP : un petit message (nom déjà pris...)
 var _confirm := false        ## un 2e appui sur A confirme (retirer un joueur, tout effacer)
 var _focus := Focus.RANDOM   ## BOARD : ce qui est sélectionné
 var _tab := Tab.MAPS         ## BOARD : la page de réglages affichée
+var _rule := 0               ## BOARD, page RÈGLES : la ligne choisie (0 = vies, 1 = joueurs par match)
+const RULE_COUNT := 2
 var _anim_start := -1        ## BOARD : début de l'animation du tirage (voir TournamentBoard)
 var _from_places: Array = [] ## BOARD : la place de chaque joueur avant le tirage (-1 = salle d'attente)
 var launch := {}             ## BOARD : le match à lancer (le menu le prend et passe au choix des persos)
@@ -253,6 +255,12 @@ func _handle_board(action: String) -> void:
 		board_message = ""
 	match action:
 		"up", "down":
+			var rule_step := 1 if action == "down" else -1
+			if _focus == Focus.SETTING and _tab == Tab.RULES and _rule + rule_step in range(RULE_COUNT):
+				_rule += rule_step  # d'une ligne de RÈGLES à l'autre
+				return
+			if _tab == Tab.RULES:
+				_rule = 0 if action == "down" else RULE_COUNT - 1
 			var bottom := _focus if _focus in [Focus.RANDOM, Focus.PLAY] else Focus.RANDOM
 			var order := [Focus.TABS, Focus.SETTING, bottom]
 			_focus = order[posmod(order.find(_focus if _focus != Focus.PLAY else bottom) + (1 if action == "down" else -1), order.size())]
@@ -320,6 +328,8 @@ func _change_setting(step: int) -> void:
 	if _tab == Tab.MAPS:
 		var maps := GameSetup.MAPS
 		tournament.map = maps[posmod(maps.find(tournament.map) + step, maps.size())]
+	elif _rule == 1:
+		tournament.next_match_size(step)
 	else:
 		var span := TournamentData.MAX_LIVES - TournamentData.MIN_LIVES + 1
 		tournament.lives = TournamentData.MIN_LIVES + posmod(tournament.lives - TournamentData.MIN_LIVES + step, span)
@@ -456,13 +466,24 @@ func _build_board(parent: VBoxContainer) -> void:
 			box.add_child(UiKit.cell_button(("✔  " if chosen else "") + map_name, on and chosen, _click_setting, 280))
 		box.add_child(UiKit.label("Il n'y a que l'Arène pour l'instant.", 16, UiKit.TEXT_DIM))
 	else:
-		var lives_row := HBoxContainer.new()
-		lives_row.alignment = BoxContainer.ALIGNMENT_CENTER
-		lives_row.add_theme_constant_override("separation", 10)
-		lives_row.add_child(UiKit.label("Vies :", 22))
-		lives_row.add_child(UiKit.cell_button("<   %d   >" % tournament.lives, on, _click_setting, 140))
-		box.add_child(lives_row)
+		box.add_child(_rule_row("Vies :", "<   %d   >" % tournament.lives, on and _rule == 0, 0))
 		box.add_child(UiKit.label("par joueur et par match", 16, UiKit.TEXT_DIM))
+		box.add_child(_rule_row("Joueurs :", "<   %d   >" % tournament.match_size, on and _rule == 1, 1))
+		var size_note := "par match : duels, le gagnant passe" if tournament.match_size == 2 \
+			else "par match : les 2 derniers en vie passent"
+		box.add_child(UiKit.label(size_note, 16, UiKit.TEXT_DIM))
+
+
+## Une ligne de RÈGLES : son nom et sa valeur (cliquable).
+func _rule_row(title: String, value: String, selected: bool, rule: int) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 10)
+	var name_label := UiKit.label(title, 22)
+	name_label.custom_minimum_size.x = 110
+	row.add_child(name_label)
+	row.add_child(UiKit.cell_button(value, selected, _click_rule.bind(rule), 140))
+	return row
 
 
 ## Une ligne « titre : ... », centrée.
@@ -565,6 +586,11 @@ func _click_tab(tab: int) -> void:
 	_focus = Focus.TABS
 	_tab = tab
 	_redraw.call()
+
+
+func _click_rule(rule: int) -> void:
+	_rule = rule
+	_click_setting()
 
 
 func _click_setting() -> void:

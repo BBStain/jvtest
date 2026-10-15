@@ -895,7 +895,7 @@ func _ready() -> void:
 	game.fighters[1].eliminated = true
 	game._check_end_of_match()
 	await shot("15c_tournoi_victoire")
-	check(TournamentData.load_saved().results.get(str(first_match.number), -9) == first_match.slots[0], "Match : le vainqueur est noté dans l'arbre")
+	check(TournamentData.load_saved().results.get(str(first_match.number), []) == [first_match.slots[0]], "Match : le vainqueur est noté dans l'arbre")
 	game.queue_free(); game = null
 	menu.queue_free()
 	menu = load("res://scenes/menu.tscn").instantiate()
@@ -928,6 +928,43 @@ func _ready() -> void:
 	check(tm.tournament.players.size() == 32 and rounds_32.size() == 5 and rounds_32[0].size() == 16, "Arbre : 32 joueurs, 5 tours")
 	await get_tree().create_timer(TournamentBoard.animation_length(32) + 0.2).timeout
 	await shot("16_tournoi_arbre_32")
+	# Matchs à 4 : les 2 derniers en vie passent
+	tm._focus = TournamentMenu.Focus.SETTING
+	tm._tab = TournamentMenu.Tab.RULES
+	tm._rule = 0
+	menu.handle(pad, "down")
+	check(tm._rule == 1 and tm._focus == TournamentMenu.Focus.SETTING, "Réglages : bas passe à la ligne Joueurs par match")
+	menu.handle(pad, "right")
+	var rounds_4 := tm.tournament.bracket()
+	check(tm.tournament.match_size == 4 and rounds_4.size() == 5 and rounds_4[0].size() == 8 and rounds_4[0][0].slots.size() == 4
+		and rounds_4[3].size() == 1 and rounds_4[-1][0].slots.size() == 2, "Arbre à 4 : 8 matchs à 4, puis 4, 2, 1, et la finale en duel")
+	await shot("16b_tournoi_arbre_32_a_4")
+	tm._focus = TournamentMenu.Focus.PLAY
+	menu.handle(pad, "confirm")
+	var match_4: Dictionary = menu._tournament_game
+	check(menu.screen == menu.Screen.CHARACTERS and match_4.slots.size() == 4 and menu.players.is_empty(), "Match à 4 : la page d'appel appelle 4 noms")
+	var pad2 := {"type": "joypad", "id": 1}
+	for device in [pad, kb_right, kb_left, pad2]:
+		menu.handle(device, "")
+	check(menu.players == [pad, kb_right, kb_left, pad2], "Match à 4 : les 4 manettes se lient chacune à un nom")
+	await shot("16c_tournoi_appel_4")
+	for device in [pad, kb_right, kb_left, pad2]:
+		menu.handle(device, "confirm")
+	check(GameSetup.tournament_match.get("qualified", 0) == 2 and GameSetup.player_devices.size() == 4, "Match à 4 : la partie se lance à 4")
+	await new_game()
+	game.fighters[0].eliminated = true
+	game._check_end_of_match()
+	check(not game._match_over, "Match à 4 : à 3 en vie, ça continue")
+	game.fighters[2].eliminated = true
+	game._check_end_of_match()
+	await shot("16d_tournoi_qualifies")
+	var saved_4 := TournamentData.load_saved()
+	var next_4: Dictionary = saved_4.bracket()[1].filter(func(g: Dictionary) -> bool: return match_4.number in g.sources)[0]
+	check(game._match_over and saved_4.results.get(str(match_4.number), []) == [match_4.slots[1], match_4.slots[3]]
+		and match_4.slots[1] in next_4.slots and match_4.slots[3] in next_4.slots, "Match à 4 : les 2 derniers en vie passent au tour suivant")
+	GameSetup.lives = GameSetup.tournament_match.previous_lives
+	GameSetup.tournament_match = {}
+	game.queue_free(); game = null
 	menu.queue_free()
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(TournamentData.SAVE_PATH))
 
