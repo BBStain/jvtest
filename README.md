@@ -188,8 +188,15 @@ Dans le menu principal, **ÉDITEUR** ouvre l'éditeur de map, à la manette ou �
 **A maintenu** pour prendre un élément et le déplacer, **X** le catalogue (A pose l'élément au curseur), **Y** les réglages
 (haut / bas pour choisir, gauche / droite pour changer), **stick droit** la taille (droite = plus large, haut = plus haut ;
 sans rien de choisi, il bouge la vue), **LB / RB** tourner, **LT / RT** zoom, **R3** dupliquer, **B** annuler / lâcher,
-**Start** le menu (tester, sauver, nom avec un clavier à l'écran, ouvrir, nouvelle map, annuler, grille, aimant, quitter),
+**Start** le menu (tester, sauver, nom avec un clavier à l'écran, ouvrir, nouvelle map, annuler, voir bouger, grille, aimant, quitter),
 **Select** tester tout de suite. Le bas de l'écran rappelle toujours les boutons.
+
+**Tout peut bouger** (sauf les points d'apparition) : dans les réglages, *Direction* et *Distance* lui donnent un
+aller-retour (avec sa durée et un arrêt à chaque bout). **Attaché à** relie un élément à un autre : il suit alors tous ses
+mouvements, en plus des siens (une plateforme attachée à un bloc qui monte monte avec lui ; une liane attachée à cette
+plateforme aussi). On fait ainsi des structures animées. Déplacer un élément dans l'éditeur emmène ce qui y est attaché.
+« Attacher à... » permet de montrer l'autre élément directement sur la map (clic ou A). **Voir bouger** (en haut, ou dans
+le menu Start) fait bouger l'aperçu comme en partie. Les liens sont les pointillés orange.
 
 TESTER lance une partie à 2 sur la map ; QUITTER dans le menu pause ramène dans l'éditeur. Les maps sauvées restent dans le
 navigateur et apparaissent dans le choix de la map (après l'Arène). Elles sont rangées en JSON (voir `scripts/editor/map_data.gd`).

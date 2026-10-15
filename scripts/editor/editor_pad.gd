@@ -8,10 +8,12 @@ extends Node
 ##   Y                 : les réglages de l'élément choisi (haut / bas, gauche / droite pour changer)
 ##   stick droit       : taille de l'élément choisi (droite = plus large, haut = plus haut) ;
 ##                       sans élément choisi, il bouge la vue
-##   LB / RB           : tourner (ou changer la direction d'une plateforme mobile)
+##   LB / RB           : tourner (ou changer la direction d'un élément qui bouge sans tourner)
 ##   LT / RT           : zoom          R3 (cliquer le stick droit) : dupliquer
 ##   B                 : annuler le déplacement en cours, sinon lâcher le choix, sinon fermer le panneau
-##   Start             : le menu (tester, sauver, nom, ouvrir, nouvelle map, annuler, grille, aimant, quitter)
+##   Start             : le menu (tester, sauver, nom, ouvrir, nouvelle map, annuler, voir bouger, grille,
+##                       aimant, quitter)
+## Pour attacher un élément à un autre : Y (réglages) > « Attacher à... », puis A sur l'autre élément.
 ##   Select / View     : tester la map tout de suite
 ## Dès qu'on touche la souris ou le clavier, le curseur disparaît (et revient à la manette).
 
@@ -139,6 +141,11 @@ func press(button: int) -> void:
 					var rows := editor.prop_rows()
 					if index < rows.size():
 						MapEditor.activate_row(rows[index])
+					if editor.attach_picking:  # « Attacher à... » : on va montrer l'autre élément sur la map
+						var help := MapEditor.ATTACH_HELP
+						_close()
+						editor.set_help(help)
+						return
 					_after_props_change()
 				JOY_BUTTON_B, JOY_BUTTON_Y:
 					_close()
@@ -178,6 +185,12 @@ func release(button: int) -> void:
 
 
 func _press_map(button: int) -> void:
+	if editor.attach_picking:  # on montre l'élément auquel attacher le choix
+		if button == JOY_BUTTON_A:
+			editor.finish_attach_pick(cursor)
+		elif button == JOY_BUTTON_B:
+			editor.finish_attach_pick(null)
+		return
 	match button:
 		JOY_BUTTON_A:
 			var picked := editor._pick(cursor)
@@ -414,6 +427,8 @@ func _open_menu(at := 0) -> void:
 			editor.new_map()},
 		{"label": "Annuler", "kind": "button", "press": editor.undo},
 		{"label": "Refaire", "kind": "button", "press": editor.redo},
+		{"label": "Voir bouger", "kind": "choice", "options": ["non", "oui"], "index": int(editor.playing),
+			"set": func(i: int) -> void: editor.set_playing(i == 1)},
 		{"label": "Grille", "kind": "choice", "options": ["non", "oui"], "index": int(editor.grid_on),
 			"set": func(i: int) -> void: editor.set_grid(i == 1)},
 		{"label": "Taille de la grille", "kind": "number", "value": float(editor.grid_size), "min": 8.0, "max": 400.0,
