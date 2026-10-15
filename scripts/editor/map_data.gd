@@ -25,6 +25,7 @@ extends RefCounted
 
 const FORMAT := 1
 const SAVE_DIR := "user://cartes"
+const BUNDLED_DIR := "res://maps_editeur"   ## les maps faites avec l'éditeur et livrées avec le jeu (ex. La Tour)
 const DRAFT_NAME := "_brouillon"    ## la map en cours, gardée quand on quitte l'éditeur
 
 ## Tout ce qu'on peut poser dans l'éditeur. Pour chaque type :
@@ -338,10 +339,13 @@ static func save(data: Dictionary, as_name := "") -> bool:
 	return true
 
 
+## Une map sauvée par le joueur, sinon une map livrée avec le jeu du même nom.
 static func load_saved(map_name: String) -> Dictionary:
 	var path := file_path(map_name)
 	if not FileAccess.file_exists(path):
-		return {}
+		path = "%s/%s.json" % [BUNDLED_DIR, file_name(map_name)]
+		if not FileAccess.file_exists(path):
+			return {}
 	return from_json(FileAccess.get_file_as_string(path))
 
 
@@ -349,14 +353,17 @@ static func delete_saved(map_name: String) -> void:
 	DirAccess.remove_absolute(file_path(map_name))
 
 
-## Les maps sauvegardées (leurs noms de fichier, sans le brouillon), dans l'ordre alphabétique.
+## Les maps sauvegardées (leurs noms de fichier, sans le brouillon) et celles livrées avec le jeu,
+## dans l'ordre alphabétique.
 static func list_saved() -> Array[String]:
 	var names: Array[String] = []
-	var dir := DirAccess.open(SAVE_DIR)
-	if dir == null:
-		return names
-	for file in dir.get_files():
-		if file.ends_with(".json") and file.get_basename() != DRAFT_NAME:
-			names.append(file.get_basename())
+	for folder in [SAVE_DIR, BUNDLED_DIR]:
+		var dir := DirAccess.open(folder)
+		if dir == null:
+			continue
+		for file in dir.get_files():
+			var base := file.get_basename()
+			if file.ends_with(".json") and base != DRAFT_NAME and not base in names:
+				names.append(base)
 	names.sort()
 	return names

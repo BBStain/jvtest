@@ -200,6 +200,9 @@ le menu Start) fait bouger l'aperçu comme en partie. Les liens sont les pointil
 
 TESTER lance une partie à 2 sur la map ; QUITTER dans le menu pause ramène dans l'éditeur. Les maps sauvées restent dans le
 navigateur et apparaissent dans le choix de la map (après l'Arène). Elles sont rangées en JSON (voir `scripts/editor/map_data.gd`).
+Les maps du dossier `maps_editeur/` sont livrées avec le jeu (comme **La Tour**, une grande map verticale faite avec
+l'éditeur) : on les joue depuis le choix de la map et on les ouvre dans l'éditeur pour les modifier (Sauver garde alors
+sa propre copie dans le navigateur).
 
 ## Jouer en ligne avec les copains
 

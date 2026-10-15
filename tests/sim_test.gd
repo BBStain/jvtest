@@ -2484,6 +2484,20 @@ func _ready() -> void:
 	check(saved_map.map_name == "_test_editeur", "Éditeur : une map sauvée se charge par son nom")
 	saved_map.free()
 	MapData.delete_saved("_test_editeur")
+	# La Tour : une grande map verticale faite avec l'éditeur, livrée avec le jeu
+	check("carte:La_Tour" in GameSetup.all_maps(), "La Tour : livrée avec le jeu, elle est dans le choix des maps")
+	var tower_data := MapData.load_saved("La_Tour")
+	var tower_area := MapData.bounds(tower_data)
+	check(tower_data.elements.size() > 40 and tower_area.size.y > 3000, "La Tour : une grande map verticale (%d éléments, %.0f px de haut)" % [tower_data.elements.size(), tower_area.size.y])
+	GameSetup.map_path = "carte:La_Tour"
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}], [{"type": "joypad", "id": 6}]]
+	await new_game()
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(90)
+	var tower_landed: int = game.fighters.filter(func(fi): return fi.is_on_floor() and fi.lives == GameSetup.lives).size()
+	check(tower_landed == 4 and game.map.has_node("Mouvements"), "La Tour : les 4 joueurs atterrissent, les ascenseurs et la tour bougent (%d/4)" % tower_landed)
+	GameSetup.player_devices = []
 	# Une structure animée en partie : un bloc qui va à droite, une plateforme attachée ; J1 posé dessus est emmené
 	var anim_map := MapData.new_map("Anim")
 	var carrier := MapData.add_element(anim_map, "sol", Vector2(640, 300))

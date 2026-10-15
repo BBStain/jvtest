@@ -1,0 +1,738 @@
+{
+  "format": 1,
+  "name": "La Tour",
+  "elements": [
+    {
+      "id": 1,
+      "type": "sol",
+      "pos": [
+        900,
+        30
+      ],
+      "size": [
+        1600,
+        60
+      ],
+      "rot": 0.0,
+      "color": "#525973"
+    },
+    {
+      "id": 2,
+      "type": "spawn_joueur",
+      "pos": [
+        400,
+        0
+      ],
+      "player": 1
+    },
+    {
+      "id": 3,
+      "type": "spawn_joueur",
+      "pos": [
+        700,
+        0
+      ],
+      "player": 2
+    },
+    {
+      "id": 4,
+      "type": "spawn_joueur",
+      "pos": [
+        1100,
+        0
+      ],
+      "player": 3
+    },
+    {
+      "id": 5,
+      "type": "spawn_joueur",
+      "pos": [
+        1400,
+        0
+      ],
+      "player": 4
+    },
+    {
+      "id": 6,
+      "type": "plateforme",
+      "pos": [
+        500,
+        -180
+      ],
+      "size": [
+        300,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 7,
+      "type": "plateforme",
+      "pos": [
+        1300,
+        -180
+      ],
+      "size": [
+        300,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 8,
+      "type": "plateforme",
+      "pos": [
+        900,
+        -340
+      ],
+      "size": [
+        360,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 9,
+      "type": "plateforme",
+      "pos": [
+        420,
+        -500
+      ],
+      "size": [
+        260,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 10,
+      "type": "plateforme",
+      "pos": [
+        1380,
+        -500
+      ],
+      "size": [
+        260,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 11,
+      "type": "spawn_objet",
+      "pos": [
+        900,
+        -420
+      ]
+    },
+    {
+      "id": 12,
+      "type": "mobile",
+      "pos": [
+        900,
+        -560
+      ],
+      "size": [
+        160,
+        16
+      ],
+      "travel": [
+        0,
+        -940
+      ],
+      "period": 7.0,
+      "pause": 1.5,
+      "color": "#9e8cd9"
+    },
+    {
+      "id": 13,
+      "type": "sol",
+      "pos": [
+        160,
+        -1100
+      ],
+      "size": [
+        60,
+        800
+      ],
+      "rot": 0.0,
+      "color": "#525973"
+    },
+    {
+      "id": 14,
+      "type": "echelle",
+      "pos": [
+        260,
+        -1050
+      ],
+      "size": [
+        40,
+        700
+      ],
+      "color": "#d9b366"
+    },
+    {
+      "id": 15,
+      "type": "plateforme",
+      "pos": [
+        330,
+        -660
+      ],
+      "size": [
+        200,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 16,
+      "type": "plateforme",
+      "pos": [
+        1450,
+        -680
+      ],
+      "size": [
+        180,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 17,
+      "type": "plateforme",
+      "pos": [
+        1610,
+        -840
+      ],
+      "size": [
+        180,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 18,
+      "type": "plateforme",
+      "pos": [
+        1450,
+        -1000
+      ],
+      "size": [
+        180,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 19,
+      "type": "plateforme",
+      "pos": [
+        1610,
+        -1160
+      ],
+      "size": [
+        180,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 20,
+      "type": "plateforme",
+      "pos": [
+        1450,
+        -1320
+      ],
+      "size": [
+        180,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 21,
+      "type": "sol",
+      "pos": [
+        1740,
+        -1000
+      ],
+      "size": [
+        60,
+        700
+      ],
+      "rot": 0.0,
+      "color": "#525973"
+    },
+    {
+      "id": 22,
+      "type": "plateforme",
+      "pos": [
+        590,
+        -1500
+      ],
+      "size": [
+        440,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 23,
+      "type": "plateforme",
+      "pos": [
+        1210,
+        -1500
+      ],
+      "size": [
+        440,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 24,
+      "type": "fenetre",
+      "pos": [
+        420,
+        -1563
+      ],
+      "size": [
+        90,
+        110
+      ],
+      "color": "#8cc7e6"
+    },
+    {
+      "id": 25,
+      "type": "fenetre",
+      "pos": [
+        1380,
+        -1563
+      ],
+      "size": [
+        90,
+        110
+      ],
+      "color": "#8cc7e6"
+    },
+    {
+      "id": 26,
+      "type": "reapparition",
+      "pos": [
+        900,
+        -1600
+      ]
+    },
+    {
+      "id": 27,
+      "type": "spawn_objet",
+      "pos": [
+        1300,
+        -1580
+      ]
+    },
+    {
+      "id": 28,
+      "type": "sol",
+      "pos": [
+        1100,
+        -1880
+      ],
+      "size": [
+        60,
+        360
+      ],
+      "rot": 0.0,
+      "color": "#d9735e",
+      "travel": [
+        -400,
+        0
+      ],
+      "period": 6.0,
+      "pause": 0.5,
+      "attach": 0
+    },
+    {
+      "id": 29,
+      "type": "plateforme",
+      "pos": [
+        990,
+        -1700
+      ],
+      "size": [
+        160,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#e6a08f",
+      "attach": 28
+    },
+    {
+      "id": 30,
+      "type": "plateforme",
+      "pos": [
+        1210,
+        -1860
+      ],
+      "size": [
+        160,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#e6a08f",
+      "attach": 28
+    },
+    {
+      "id": 31,
+      "type": "plateforme",
+      "pos": [
+        990,
+        -2020
+      ],
+      "size": [
+        160,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#e6a08f",
+      "attach": 28
+    },
+    {
+      "id": 32,
+      "type": "liane",
+      "pos": [
+        1270,
+        -1860
+      ],
+      "length": 200.0,
+      "color": "#59b34d",
+      "attach": 30
+    },
+    {
+      "id": 33,
+      "type": "liane",
+      "pos": [
+        300,
+        -2150
+      ],
+      "length": 260.0,
+      "color": "#59b34d"
+    },
+    {
+      "id": 34,
+      "type": "liane",
+      "pos": [
+        520,
+        -2150
+      ],
+      "length": 260.0,
+      "color": "#59b34d"
+    },
+    {
+      "id": 35,
+      "type": "liane",
+      "pos": [
+        1500,
+        -2150
+      ],
+      "length": 260.0,
+      "color": "#59b34d"
+    },
+    {
+      "id": 36,
+      "type": "plateforme",
+      "pos": [
+        350,
+        -1700
+      ],
+      "size": [
+        220,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 37,
+      "type": "plateforme",
+      "pos": [
+        1500,
+        -1700
+      ],
+      "size": [
+        220,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 38,
+      "type": "mobile",
+      "pos": [
+        260,
+        -2180
+      ],
+      "size": [
+        160,
+        16
+      ],
+      "travel": [
+        0,
+        -560
+      ],
+      "period": 5.0,
+      "pause": 1.0,
+      "color": "#9e8cd9"
+    },
+    {
+      "id": 39,
+      "type": "mobile",
+      "pos": [
+        1540,
+        -2180
+      ],
+      "size": [
+        160,
+        16
+      ],
+      "travel": [
+        0,
+        -560
+      ],
+      "period": 6.0,
+      "pause": 1.0,
+      "color": "#9e8cd9"
+    },
+    {
+      "id": 40,
+      "type": "plateforme",
+      "pos": [
+        700,
+        -2200
+      ],
+      "size": [
+        240,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 41,
+      "type": "plateforme",
+      "pos": [
+        1100,
+        -2200
+      ],
+      "size": [
+        240,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 42,
+      "type": "fenetre",
+      "pos": [
+        900,
+        -2275
+      ],
+      "size": [
+        90,
+        110
+      ],
+      "color": "#8cc7e6"
+    },
+    {
+      "id": 43,
+      "type": "fenetre",
+      "pos": [
+        900,
+        -2385
+      ],
+      "size": [
+        90,
+        110
+      ],
+      "color": "#8cc7e6"
+    },
+    {
+      "id": 44,
+      "type": "fenetre",
+      "pos": [
+        900,
+        -2495
+      ],
+      "size": [
+        90,
+        110
+      ],
+      "color": "#8cc7e6"
+    },
+    {
+      "id": 45,
+      "type": "plateforme",
+      "pos": [
+        620,
+        -2400
+      ],
+      "size": [
+        220,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 46,
+      "type": "plateforme",
+      "pos": [
+        1180,
+        -2400
+      ],
+      "size": [
+        220,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 47,
+      "type": "spawn_objet",
+      "pos": [
+        900,
+        -2780
+      ]
+    },
+    {
+      "id": 48,
+      "type": "plateforme",
+      "pos": [
+        560,
+        -2600
+      ],
+      "size": [
+        240,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#9e8cd9",
+      "travel": [
+        680,
+        0
+      ],
+      "period": 8.0,
+      "pause": 0.8,
+      "attach": 0
+    },
+    {
+      "id": 49,
+      "type": "plateforme",
+      "pos": [
+        560,
+        -2760
+      ],
+      "size": [
+        120,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#9e8cd9",
+      "attach": 48
+    },
+    {
+      "id": 50,
+      "type": "plateforme",
+      "pos": [
+        230,
+        -2780
+      ],
+      "size": [
+        220,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 51,
+      "type": "plateforme",
+      "pos": [
+        1570,
+        -2780
+      ],
+      "size": [
+        220,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 52,
+      "type": "plateforme",
+      "pos": [
+        900,
+        -2960
+      ],
+      "size": [
+        1100,
+        24
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 53,
+      "type": "spawn_objet",
+      "pos": [
+        900,
+        -3040
+      ]
+    },
+    {
+      "id": 54,
+      "type": "plateforme",
+      "pos": [
+        620,
+        -3140
+      ],
+      "size": [
+        200,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    },
+    {
+      "id": 55,
+      "type": "plateforme",
+      "pos": [
+        1180,
+        -3140
+      ],
+      "size": [
+        200,
+        16
+      ],
+      "rot": 0.0,
+      "color": "#808aa8"
+    }
+  ]
+}
