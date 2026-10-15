@@ -19,7 +19,6 @@ const EMPTY_COLOR := Color(1, 1, 1, 0.06)
 var tournament: TournamentData
 var from_places: Array = []    ## d'où part chaque joueur pendant l'animation : sa place d'avant, ou -1 (salle d'attente)
 var anim_start := -1           ## quand l'animation a commencé (Time.get_ticks_msec), -1 = pas d'animation
-var next_match := -1           ## le numéro du prochain match à jouer (entouré en jaune), -1 = aucun
 
 
 func _init(data: TournamentData, view_size: Vector2, start: int, from: Array) -> void:
@@ -75,10 +74,6 @@ func _draw() -> void:
 				_text(slot, "?", Color(1, 1, 1, 0.3))
 			elif game.later:
 				_name_box(slot, value)  # il est passé d'office : il attend déjà ici
-	for game in layout.matches:
-		if game.number == next_match and landed and not game.slots.is_empty():
-			var frame: Rect2 = game.slots[0].merge(game.slots[-1]).grow(4)
-			draw_rect(frame, UiKit.HIGHLIGHT, false, 3.0)
 	# Les noms : dans la salle d'attente tant qu'ils ne sont pas tirés, sinon à leur place
 	# (en vol pendant l'animation).
 	var place_of := {}

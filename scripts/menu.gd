@@ -508,8 +508,7 @@ func _character_slot(index: int) -> PanelContainer:
 		# Page d'appel : le nom appelé attend sa manette (le prochain à se lier clignote).
 		panel.add_theme_stylebox_override("panel", UiKit.slot_style(color, index == players.size()))
 		box.get_child(0).add_theme_color_override("font_color", color)
-		var called := "%s,\nappuie sur A\nde ta manette\npour la lier\nà ton nom" % title
-		box.add_child(UiKit.label(called if index == players.size() else "en attente…", 20,
+		box.add_child(UiKit.label("Appuie sur A" if index == players.size() else "en attente…", 22,
 			Color.WHITE if index == players.size() else Color(1, 1, 1, 0.35)))
 		return panel
 	if not joined:

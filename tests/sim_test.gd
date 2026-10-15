@@ -863,9 +863,14 @@ func _ready() -> void:
 	# Lancer un match depuis l'arbre : le vainqueur avance tout seul
 	var menu_lives := GameSetup.lives
 	tm._focus = TournamentMenu.Focus.PLAY
-	var first_match := tm.tournament.next_match()
-	check(tm._play_text().begins_with("START : "), "Match : le bouton START montre le prochain match")
+	var picked := {}
+	for i in 40:
+		picked[tm.tournament.random_match().number] = true
+	var playable: Array = tm.tournament.bracket()[0].filter(func(g: Dictionary) -> bool: return g.slots[0] >= 0 and g.slots[1] >= 0)
+	check(picked.size() == playable.size() and picked.keys().all(func(n: int) -> bool: return n <= tm.tournament.bracket()[0].size()),
+		"Match : START tire au hasard un match du 1er tour")
 	menu.handle(pad, "confirm")
+	var first_match: Dictionary = menu._tournament_game
 	check(menu.screen == menu.Screen.CHARACTERS and menu.players.is_empty(), "Match : START ouvre la page d'appel, aucune manette liée")
 	await shot("15a_tournoi_appel")
 	menu.handle(kb_right, "")

@@ -216,6 +216,23 @@ func next_match() -> Dictionary:
 	return {}
 
 
+## START : un match tiré au hasard parmi ceux qu'on peut jouer dans le tour en cours
+## (les 2 joueurs connus, pas encore de vainqueur). {} s'il n'y en a pas.
+func random_match() -> Dictionary:
+	var first := next_match()
+	if first.is_empty():
+		return {}
+	var choices := []
+	for matches in bracket():
+		if matches.size() != first.round_size:
+			continue
+		for game in matches:
+			if game.slots[0] >= 0 and game.slots[1] >= 0 and not results.has(str(game.number)):
+				game.round_size = matches.size()
+				choices.append(game)
+	return choices.pick_random()
+
+
 ## Le champion (le vainqueur de la finale), ou UNKNOWN si la finale n'est pas jouée.
 func champion() -> int:
 	var rounds := bracket()

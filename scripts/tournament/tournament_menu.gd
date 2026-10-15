@@ -288,22 +288,19 @@ func _shuffle_or_confirm() -> void:
 	_shuffle()
 
 
-## START : lance le prochain match (le menu passe au choix des persos des 2 joueurs).
+## START : tire au hasard un match du tour en cours et le lance (le menu passe à la page d'appel).
 func _play() -> void:
-	var game := tournament.next_match()
+	var game := tournament.random_match()
 	if not game.is_empty():
 		launch = game
 
 
-## Le texte du bouton START : le prochain match, le champion, ou ce qu'il manque.
+## Ce qu'on dit sous les boutons quand START ne peut rien lancer : le champion, ou ce qu'il manque.
 func _play_text() -> String:
-	var game := tournament.next_match()
-	if not game.is_empty():
-		return "START : %s contre %s" % [tournament.players[game.slots[0]].name, tournament.players[game.slots[1]].name]
 	var champion := tournament.champion()
 	if champion >= 0:
 		return "CHAMPION : %s !" % tournament.players[champion].name
-	return "Tire au sort d'abord"
+	return "Tire au sort d'abord avec ALÉATOIRE"
 
 
 ## Tire les places au sort, et lance l'animation des noms qui volent jusqu'à leur place.
@@ -412,7 +409,6 @@ func _build_board(parent: VBoxContainer) -> void:
 	row.add_child(left)
 	left.add_child(TournamentBoard.new(tournament, BOARD_SIZE, _anim_start, _from_places))
 	var next := tournament.next_match()
-	left.get_child(0).next_match = next.get("number", -1)
 	var buttons := HBoxContainer.new()
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	buttons.add_theme_constant_override("separation", 16)
@@ -420,11 +416,11 @@ func _build_board(parent: VBoxContainer) -> void:
 	random.custom_minimum_size.x = 300
 	random.add_theme_font_size_override("font_size", 34)
 	buttons.add_child(random)
-	var play := UiKit.menu_button(_play_text(), _focus == Focus.PLAY, _click_play, 70)
-	play.custom_minimum_size.x = 520
-	play.add_theme_font_size_override("font_size", 24)
+	var play := UiKit.menu_button("START", _focus == Focus.PLAY, _click_play, 70)
+	play.custom_minimum_size.x = 300
+	play.add_theme_font_size_override("font_size", 34)
 	if next.is_empty():
-		play.add_theme_color_override("font_color", UiKit.HIGHLIGHT if tournament.champion() >= 0 else UiKit.TEXT_DIM)
+		play.add_theme_color_override("font_color", UiKit.TEXT_DIM)
 	buttons.add_child(play)
 	left.add_child(buttons)
 	var hint := "A : valider      gauche / droite : ALÉATOIRE ou START      haut / bas : réglages      B : inscription"
@@ -432,6 +428,8 @@ func _build_board(parent: VBoxContainer) -> void:
 		hint = "Refaire le tirage efface les matchs déjà joués. Appuie encore sur A pour confirmer."
 	elif board_message != "":
 		hint = board_message
+	elif next.is_empty():
+		hint = _play_text()
 	left.add_child(UiKit.label(hint, 16, WARNING if _confirm or board_message != "" else UiKit.TEXT_DIM))
 
 	var panel := PanelContainer.new()
