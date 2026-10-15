@@ -13,6 +13,11 @@ extends RefCounted
 ##       ...
 ##     ]
 ##   }
+## Tout ce qui n'est pas un point d'apparition peut bouger (voir MOTION_DEFAULTS) :
+##   "travel" : le trajet d'un aller-retour depuis sa place ([0, 0] : il ne bouge pas) ;
+##   "period" / "pause" : durée d'un aller-retour, arrêt à chaque bout (en secondes) ;
+##   "attach" : le numéro (id) de l'élément auquel il est attaché (0 : aucun). Attaché, il suit
+##              tous les mouvements de cet élément, en plus des siens : on fait des structures.
 ## Les positions sont en pixels du jeu (x : droite, y : bas) ; "pos" est le centre de l'élément,
 ## sauf pour les points d'apparition (les pieds) et la liane (son point d'accroche, en haut).
 ## Un champ absent prend la valeur par défaut du CATALOGUE : un vieux fichier se charge toujours.
@@ -20,6 +25,7 @@ extends RefCounted
 
 const FORMAT := 1
 const SAVE_DIR := "user://cartes"
+const BUNDLED_DIR := "res://maps_editeur"   ## les maps faites avec l'éditeur et livrées avec le jeu (ex. La Tour)
 const DRAFT_NAME := "_brouillon"    ## la map en cours, gardée quand on quitte l'éditeur
 
 ## Tout ce qu'on peut poser dans l'éditeur. Pour chaque type :
@@ -68,6 +74,9 @@ const TABS := ["Décor", "Mouvement", "Apparitions"]
 ## Ces types sont des points (pas de taille) : on les attrape par un rond autour de "pos".
 const POINT_TYPES := ["spawn_joueur", "reapparition", "spawn_objet"]
 const POINT_RADIUS := 26.0
+## Les réglages de mouvement de tout ce qui n'est pas un point (la plateforme mobile a les siens).
+const MOTION_DEFAULTS := {"travel": [0, 0], "period": 4.0, "pause": 0.0, "attach": 0}
+const MAX_CHAIN := 16              ## une chaîne d'éléments attachés ne va pas plus loin
 
 
 ## Une map toute neuve, déjà jouable : un sol, deux départs, une réapparition.
@@ -85,6 +94,8 @@ static func new_map(map_name := "Ma map") -> Dictionary:
 static func add_element(data: Dictionary, type: String, pos: Vector2) -> Dictionary:
 	var element := {"id": next_id(data), "type": type, "pos": [pos.x, pos.y]}
 	element.merge((CATALOG[type].defaults as Dictionary).duplicate(true))
+	if movable(type):
+		element.merge(MOTION_DEFAULTS.duplicate(true))
 	data.elements.append(element)
 	return element
 
@@ -106,6 +117,8 @@ static func normalized(raw: Dictionary) -> Dictionary:
 		if not (item is Dictionary) or not CATALOG.has(item.get("type", "")):
 			continue
 		var element: Dictionary = (CATALOG[item.type].defaults as Dictionary).duplicate(true)
+		if movable(item.type):
+			element.merge(MOTION_DEFAULTS.duplicate(true))
 		element.merge(item, true)
 		if not (element.get("pos") is Array) or element.pos.size() < 2:
 			element.pos = [0, 0]
@@ -117,7 +130,98 @@ static func normalized(raw: Dictionary) -> Dictionary:
 		element.id = id
 		used_ids[id] = true
 		data.elements.append(element)
+	# Attaché à un élément qui n'existe pas (ou à un point) : plus attaché.
+	var found := by_id(data)
+	for element in data.elements:
+		if element.has("attach"):
+			var parent: Dictionary = found.get(int(element.attach), {})
+			if parent.is_empty() or not movable(parent.type) or attach_loops(data, element.id, int(element.attach)):
+				element.attach = 0
+			else:
+				element.attach = int(element.attach)
 	return data
+
+
+## Peut bouger et être attaché (tout sauf les points d'apparition).
+static func movable(type: String) -> bool:
+	return CATALOG.has(type) and not type in POINT_TYPES
+
+
+static func by_id(data: Dictionary) -> Dictionary:
+	var found := {}
+	for element in data.elements:
+		found[int(element.id)] = element
+	return found
+
+
+## Attacher "child_id" à "parent_id" ferait-il une boucle (A attaché à B attaché à A) ?
+static func attach_loops(data: Dictionary, child_id: int, parent_id: int) -> bool:
+	var found := by_id(data)
+	var id := parent_id
+	for i in MAX_CHAIN:
+		if id == 0:
+			return false
+		if id == child_id:
+			return true
+		id = int(found.get(id, {}).get("attach", 0))
+	return true
+
+
+# --- Le mouvement des éléments ---
+
+## Le décalage d'un élément à cause de son propre aller-retour, au temps t (en secondes).
+## Même va-et-vient que les plateformes mobiles de l'Arène : il ralentit à chaque bout (et s'y arrête "pause" s).
+static func own_offset(element: Dictionary, t: float) -> Vector2:
+	var travel := vec(element, "travel")
+	if travel == Vector2.ZERO:
+		return Vector2.ZERO
+	var period := maxf(float(element.get("period", 4.0)), 0.2)
+	var pause := maxf(float(element.get("pause", 0.0)), 0.0)
+	var half := period / 2.0
+	var cycle := fposmod(t, period + 2.0 * pause)
+	var k := 0.0
+	if cycle < half:
+		k = (1.0 - cos(cycle / half * PI)) / 2.0
+	elif cycle < half + pause:
+		k = 1.0
+	elif cycle < period + pause:
+		k = (1.0 + cos((cycle - half - pause) / half * PI)) / 2.0
+	return travel * k
+
+
+## Le décalage total d'un élément au temps t : le sien, plus celui de tout ce à quoi il est attaché.
+static func offset_at(found: Dictionary, element: Dictionary, t: float) -> Vector2:
+	var offset := Vector2.ZERO
+	var current := element
+	for i in MAX_CHAIN:
+		offset += own_offset(current, t)
+		var parent: Dictionary = found.get(int(current.get("attach", 0)), {})
+		if parent.is_empty():
+			break
+		current = parent
+	return offset
+
+
+## Les trajets de l'élément et de tout ce à quoi il est attaché (pour savoir jusqu'où il peut aller).
+static func chain_travels(found: Dictionary, element: Dictionary) -> Array[Vector2]:
+	var travels: Array[Vector2] = []
+	var current := element
+	for i in MAX_CHAIN:
+		if current.has("travel"):
+			travels.append(vec(current, "travel"))
+		var parent: Dictionary = found.get(int(current.get("attach", 0)), {})
+		if parent.is_empty():
+			break
+		current = parent
+	return travels
+
+
+## L'élément bouge-t-il pendant la partie (lui, ou ce à quoi il est attaché) ?
+static func moves(found: Dictionary, element: Dictionary) -> bool:
+	for travel in chain_travels(found, element):
+		if travel != Vector2.ZERO:
+			return true
+	return false
 
 
 # --- Lire les champs d'un élément ---
@@ -174,7 +278,7 @@ static func bounds_of(element: Dictionary) -> Rect2:
 	var rect := Rect2(center_of(element), Vector2.ZERO)
 	for corner in corners:
 		rect = rect.expand(center_of(element) + (corner as Vector2).rotated(rotation(element)))
-	if element.type == "mobile":
+	if element.has("travel"):
 		rect = rect.merge(Rect2(rect.position + vec(element, "travel"), rect.size))
 	return rect
 
@@ -183,8 +287,20 @@ static func bounds_of(element: Dictionary) -> Rect2:
 static func bounds(data: Dictionary) -> Rect2:
 	var rect := Rect2()
 	var first := true
+	var found := by_id(data)
 	for element in data.elements:
-		rect = bounds_of(element) if first else rect.merge(bounds_of(element))
+		# Jusqu'où il peut aller, avec les mouvements de tout ce à quoi il est attaché.
+		var low := Vector2.ZERO
+		var high := Vector2.ZERO
+		for travel in chain_travels(found, element):
+			low += travel.min(Vector2.ZERO)
+			high += travel.max(Vector2.ZERO)
+		var reach := bounds_of(element)
+		if element.has("travel"):
+			var own := vec(element, "travel")
+			reach = Rect2(reach.position - own.min(Vector2.ZERO), reach.size - own.abs())  # sans son trajet...
+		reach = reach.grow_individual(-low.x, -low.y, high.x, high.y)                     # ...et avec toute la chaîne
+		rect = reach if first else rect.merge(reach)
 		first = false
 	return rect
 
@@ -197,7 +313,10 @@ static func to_json(data: Dictionary) -> String:
 
 ## Lit une map depuis du texte JSON. Renvoie {} si le texte n'est pas une map.
 static func from_json(text: String) -> Dictionary:
-	var parsed = JSON.parse_string(text)
+	var json := JSON.new()
+	if json.parse(text) != OK:  # (sans afficher d'erreur : un mauvais fichier, ça arrive)
+		return {}
+	var parsed = json.data
 	if not (parsed is Dictionary) or not parsed.has("elements"):
 		return {}
 	return normalized(parsed)
@@ -223,10 +342,13 @@ static func save(data: Dictionary, as_name := "") -> bool:
 	return true
 
 
+## Une map sauvée par le joueur, sinon une map livrée avec le jeu du même nom.
 static func load_saved(map_name: String) -> Dictionary:
 	var path := file_path(map_name)
 	if not FileAccess.file_exists(path):
-		return {}
+		path = "%s/%s.json" % [BUNDLED_DIR, file_name(map_name)]
+		if not FileAccess.file_exists(path):
+			return {}
 	return from_json(FileAccess.get_file_as_string(path))
 
 
@@ -234,14 +356,17 @@ static func delete_saved(map_name: String) -> void:
 	DirAccess.remove_absolute(file_path(map_name))
 
 
-## Les maps sauvegardées (leurs noms de fichier, sans le brouillon), dans l'ordre alphabétique.
+## Les maps sauvegardées (leurs noms de fichier, sans le brouillon) et celles livrées avec le jeu,
+## dans l'ordre alphabétique.
 static func list_saved() -> Array[String]:
 	var names: Array[String] = []
-	var dir := DirAccess.open(SAVE_DIR)
-	if dir == null:
-		return names
-	for file in dir.get_files():
-		if file.ends_with(".json") and file.get_basename() != DRAFT_NAME:
-			names.append(file.get_basename())
+	for folder in [SAVE_DIR, BUNDLED_DIR]:
+		var dir := DirAccess.open(folder)
+		if dir == null:
+			continue
+		for file in dir.get_files():
+			var base := file.get_basename()
+			if file.ends_with(".json") and base != DRAFT_NAME and not base in names:
+				names.append(base)
 	names.sort()
 	return names
