@@ -111,49 +111,80 @@ func is_seeded() -> bool:
 	return true
 
 
-## La taille de chaque match du 1er tour (au plus juste : des duels, et au plus un joueur seul).
-func first_round_sizes() -> Array[int]:
-	var sizes: Array[int] = []
-	var count := ceili(players.size() / float(PER_MATCH))
-	for m in count:
-		sizes.append(players.size() / count + (1 if m < players.size() % count else 0))
-	return sizes
+const BYE := -2      ## une case "passe d'office" (pas d'adversaire)
+const UNKNOWN := -1  ## une case pas encore connue (pas tiré, ou vainqueur pas encore joué)
 
 
-## L'arbre : une liste de tours, chaque tour une liste de matchs.
+## La taille de l'arbre : la puissance de 2 juste au-dessus du nombre d'inscrits (5 -> 8).
+func bracket_size() -> int:
+	var size := 2
+	while size < players.size():
+		size *= 2
+	return size
+
+
+## L'ordre classique des têtes de série dans un arbre de cette taille (8 -> 1 8 4 5 2 7 3 6) :
+## les places au-delà du nombre d'inscrits deviennent des « passe d'office », et elles tombent
+## chacune face à un joueur différent, bien réparties dans l'arbre.
+static func seed_order(size: int) -> Array[int]:
+	var order: Array[int] = [1, 2]
+	while order.size() < size:
+		var next: Array[int] = []
+		for s in order:
+			next.append(s)
+			next.append(order.size() * 2 + 1 - s)
+		order = next
+	return order
+
+
+## L'arbre : une liste de tours, chaque tour une liste de matchs (des duels).
 ## Un match = {"number": numéro (M1, M2... sur tout le tournoi),
-##             "slots": une case par joueur : au 1er tour l'index du joueur (-1 = pas encore tiré),
-##                      ensuite -1 (on ne sait pas encore qui gagne),
-##             "sources": les numéros des matchs dont les vainqueurs viennent ici}.
+##             "slots": les 2 cases : l'index du joueur, UNKNOWN (pas encore tiré / pas encore
+##                      joué) ou BYE (passe d'office),
+##             "places": au 1er tour, la place de chaque case (voir seeding), -1 pour un BYE,
+##             "sources": les numéros des 2 matchs dont les vainqueurs viennent ici}.
+## Un joueur qui passe d'office est déjà inscrit au tour suivant.
 func bracket() -> Array:
 	var rounds := []
 	if players.size() < 2:
 		return rounds
+	var order := seed_order(bracket_size())
+	var seeded := is_seeded()
 	var number := 1
 	var first := []
-	var place := 0
-	for size in first_round_sizes():
+	for m in order.size() / 2:
 		var slots := []
-		for s in size:
-			slots.append(seeding[place] if is_seeded() else -1)
-			place += 1
-		first.append({"number": number, "slots": slots, "sources": []})
+		var places := []
+		for seed in [order[2 * m], order[2 * m + 1]]:
+			if seed > players.size():
+				slots.append(BYE)
+				places.append(-1)
+			else:
+				slots.append(seeding[seed - 1] if seeded else UNKNOWN)
+				places.append(seed - 1)
+		first.append({"number": number, "slots": slots, "places": places, "sources": []})
 		number += 1
 	rounds.append(first)
 	while rounds[-1].size() > 1:
 		var previous: Array = rounds[-1]
 		var next := []
-		for m in range(0, previous.size(), PER_MATCH):
-			var sources := []
-			for game in previous.slice(m, m + PER_MATCH):
-				sources.append(game.number)
+		for m in range(0, previous.size(), 2):
 			var slots := []
-			slots.resize(sources.size())
-			slots.fill(-1)
-			next.append({"number": number, "slots": slots, "sources": sources})
+			for game in [previous[m], previous[m + 1]]:
+				slots.append(_known_winner(game))
+			next.append({"number": number, "slots": slots, "places": [], "sources": [previous[m].number, previous[m + 1].number]})
 			number += 1
 		rounds.append(next)
 	return rounds
+
+
+## Le vainqueur d'un match s'il est déjà connu (l'autre case est un passe d'office), sinon UNKNOWN.
+static func _known_winner(game: Dictionary) -> int:
+	if game.slots[0] == BYE:
+		return game.slots[1]
+	if game.slots[1] == BYE:
+		return game.slots[0]
+	return UNKNOWN
 
 
 ## Le nom d'un tour, d'après son nombre de matchs : Finale, Demies, Quarts, Huitièmes...

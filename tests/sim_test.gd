@@ -842,7 +842,13 @@ func _ready() -> void:
 	menu.handle(pad, "confirm")
 	check(tm.tournament.is_seeded() and tm._anim_start >= 0, "Arbre : ALÉATOIRE place tout le monde (avec l'animation)")
 	var rounds := tm.tournament.bracket()
-	check(rounds.size() == 3 and rounds[0].size() == 3 and rounds[-1].size() == 1, "Arbre : 5 joueurs = 3 tours (un passe d'office)")
+	var byes := []
+	for game in rounds[0]:
+		if TournamentData.BYE in game.slots:
+			byes.append(game.slots[0] if game.slots[1] == TournamentData.BYE else game.slots[1])
+	check(rounds.size() == 3 and rounds[0].size() == 4 and byes.size() == 3 and rounds[1][0].slots.has(byes[0])
+		and not (TournamentData.BYE in rounds[1][0].slots + rounds[1][1].slots),
+		"Arbre : 5 joueurs = arbre de 8, 3 passent d'office une seule fois, puis demies et finale")
 	await get_tree().create_timer(0.35).timeout
 	await shot("13_tournoi_tirage")
 	await get_tree().create_timer(1.0).timeout

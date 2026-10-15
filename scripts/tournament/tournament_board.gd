@@ -56,17 +56,24 @@ func _draw() -> void:
 		draw_rect(pool[p], EMPTY_COLOR)
 	# L'arbre.
 	var font := ThemeDB.fallback_font
+	var landed := anim_start < 0 or _elapsed() > animation_length(count)
 	for column in layout.columns:
 		draw_string(font, Vector2(column.x, layout.bracket_top + 16), column.title,
 			HORIZONTAL_ALIGNMENT_CENTER, column.width, 16, UiKit.HIGHLIGHT)
 	for game in layout.matches:
 		for link in game.links:
 			draw_polyline(PackedVector2Array(link), LINE_COLOR, 2.0)
-		for slot in game.slots:
+		for s in game.slots.size():
+			var slot: Rect2 = game.slots[s]
 			draw_rect(slot, EMPTY_COLOR)
 			draw_rect(slot, LINE_COLOR, false, 1.0)
-			if game.later:
+			var value: int = game.values[s]
+			if value == TournamentData.BYE:
+				_text(slot, "exempt", Color(1, 1, 1, 0.3))
+			elif game.later and (value < 0 or not landed):
 				_text(slot, "?", Color(1, 1, 1, 0.3))
+			elif game.later:
+				_name_box(slot, value)  # il est passé d'office : il attend déjà ici
 	# Les noms : dans la salle d'attente tant qu'ils ne sont pas tirés, sinon à leur place
 	# (en vol pendant l'animation).
 	var place_of := {}
@@ -145,7 +152,6 @@ func _layout() -> Dictionary:
 			by_number[game.number] = game
 			for i in game.sources.size():
 				side[game.sources[i]] = side[game.number] if side[game.number] != 0 else (-1 if i == 0 else 1)
-	var place := 0
 	var first: Array = bracket[0]
 	var per_side := {-1: 0, 0: 0, 1: 0}
 	for game in first:
@@ -177,9 +183,8 @@ func _layout() -> Dictionary:
 			for s in game.slots.size():
 				var slot := Rect2(x, top + s * slot_height + 1, box_width, slot_height - 2)
 				slots.append(slot)
-				if r == 0:
-					result.places[place] = slot
-					place += 1
+				if r == 0 and game.places[s] >= 0:
+					result.places[game.places[s]] = slot
 			var links := []
 			for source in game.sources:
 				var source_side: int = side[source]
@@ -188,5 +193,5 @@ func _layout() -> Dictionary:
 				var elbow := (from.x + to.x) / 2.0
 				links.append([from, Vector2(elbow, from.y), Vector2(elbow, middle), to])
 			edges[game.number] = [Vector2(x, middle), Vector2(x + box_width, middle)]
-			result.matches.append({"slots": slots, "links": links, "later": r > 0})
+			result.matches.append({"slots": slots, "values": game.slots, "links": links, "later": r > 0})
 	return result
