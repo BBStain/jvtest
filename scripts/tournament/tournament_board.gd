@@ -99,7 +99,7 @@ func _name_box(rect: Rect2, player: int) -> void:
 
 
 func _text(rect: Rect2, text: String, color: Color) -> void:
-	var size := clampi(int(rect.size.y * 0.62), 9, 18)
+	var size := clampi(int(rect.size.y * 0.55), 9, 30)
 	draw_string(ThemeDB.fallback_font, Vector2(rect.position.x + 6, rect.get_center().y + size * 0.36), text,
 		HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 8, size, color)
 
@@ -132,7 +132,7 @@ func _layout() -> Dictionary:
 	var area_height := size.y - area_top
 	var column_count := 2 * round_count - 1
 	var column_width := size.x / column_count
-	var box_width := minf(column_width - 14, 200.0)
+	var box_width := minf(column_width * 0.88, 280.0)
 	for c in column_count:
 		var r := mini(c, column_count - 1 - c)
 		result.columns.append({"x": c * column_width, "width": column_width,
@@ -151,6 +151,9 @@ func _layout() -> Dictionary:
 	for game in first:
 		per_side[side[game.number]] += 1
 	var stacked := {-1: 0, 0: 0, 1: 0}
+	# La taille des cases suit le nombre d'inscrits : peu de joueurs = grandes cases, beaucoup = petites.
+	var busiest: int = maxi(per_side[-1], maxi(per_side[1], per_side[0]))
+	var slot_height := clampf((area_height / busiest - 8) / TournamentData.PER_MATCH, 14.0, 64.0)
 	var edges := {}  ## numéro du match -> [bord gauche, bord droit] au milieu de sa hauteur
 	result.places.resize(count)
 	for r in round_count:
@@ -161,17 +164,14 @@ func _layout() -> Dictionary:
 				column = round_count - 1
 			var x := column * column_width + (column_width - box_width) / 2.0
 			var middle := 0.0
-			var slot_height := 30.0
 			if game.sources.is_empty():
 				var match_height := area_height / maxi(per_side[game_side], 1)
-				slot_height = minf(30.0, (match_height - 6) / TournamentData.PER_MATCH)
 				middle = area_top + (stacked[game_side] + 0.5) * match_height
 				stacked[game_side] += 1
 			else:
 				for source in game.sources:
 					middle += edges[source][0].y
 				middle /= game.sources.size()
-				slot_height = minf(30.0, area_height / 8.0)
 			var slots := []
 			var top: float = middle - game.slots.size() * slot_height / 2.0
 			for s in game.slots.size():
