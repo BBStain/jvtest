@@ -206,7 +206,7 @@ sa propre copie dans le navigateur).
 
 **Exporter / Importer** : les maps sauvées restent dans *ce* navigateur. Pour en garder une pour toujours, l'ouvrir dans un
 autre navigateur ou sur un autre PC, ou l'envoyer à un copain : **Exporter** (en haut, ou Start > Exporter à la manette)
-télécharge la map dans un fichier `.json` (dossier Téléchargements). Dans l'autre navigateur : ÉDITEUR > **Ouvrir ▾ >
+télécharge la map dans un fichier `.json` (dossier Téléchargements). Dans l'autre navigateur : ÉDITEUR > **Ouvrir... >
 Importer un fichier...**, choisis le fichier : la map s'ouvre et y est sauvée (elle apparaît aussi dans le choix des maps).
 
 ## Jouer en ligne avec les copains

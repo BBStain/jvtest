@@ -453,7 +453,7 @@ func _open_list() -> void:
 		_rows.append({"label": saved, "kind": "button", "press": func() -> void:
 			_close()
 			editor.open_map(saved)})
-	_rows.append({"label": "← Retour", "kind": "button", "press": _open_menu.bind(4)})
+	_rows.append({"label": "< Retour", "kind": "button", "press": _open_menu.bind(4)})
 	index = 0
 	_show_rows("OUVRIR UNE MAP")
 
@@ -472,7 +472,7 @@ func _show_rows(title := "") -> void:
 			"number":
 				text += "   <  %d  >" % int(row.value)
 		var on := i == index
-		var label := UiKit.label(("▶  " if on else "    ") + text, 20, UiKit.HIGHLIGHT if on else Color.WHITE)
+		var label := UiKit.label((">  " if on else "    ") + text, 20, UiKit.HIGHLIGHT if on else Color.WHITE)
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		_box.add_child(label)
 	_panel.visible = true

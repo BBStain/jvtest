@@ -31,8 +31,9 @@ const AUTOSAVE_TIME := 20.0        ## le brouillon est gardé tout seul toutes l
 const MAX_UNDO := 100
 const HANDLE := 9.0                ## demi-taille du carré pour agrandir (à l'écran)
 ## Les 12 directions d'un mouvement (tous les 30°).
-const DIRECTION_NAMES := ["→ droite", "↗ 30°", "↗ 60°", "↑ haut", "↖ 120°", "↖ 150°",
-	"← gauche", "↙ 210°", "↙ 240°", "↓ bas", "↘ 300°", "↘ 330°"]
+## (Sans flèches : la police du jeu dans le navigateur ne les a pas, elles s'afficheraient en carrés.)
+const DIRECTION_NAMES := ["droite", "30°", "60°", "haut", "120°", "150°",
+	"gauche", "210°", "240°", "bas", "300°", "330°"]
 const PLAYER_COLORS := [Color(0.95, 0.3, 0.3), Color(0.3, 0.6, 1.0), Color(0.35, 0.85, 0.4), Color(1.0, 0.8, 0.2)]
 ## Les couleurs qu'on fait défiler à la manette (gauche / droite sur « Couleur »).
 const COLOR_PRESETS := ["#525973", "#808aa8", "#9e8cd9", "#8cc7e6", "#59b34d", "#d9b366", "#d9735e", "#e6e6e6"]
@@ -494,10 +495,13 @@ func import_map() -> void:
 			var input = document.createElement('input');
 			input.type = 'file';
 			input.accept = '.json,application/json';
+			input.style.display = 'none';
 			input.onchange = function () {
 				var file = input.files[0];
+				input.remove();
 				if (file) { file.text().then(function (text) { window.jvtestImportMap(text); }); }
 			};
+			document.body.appendChild(input);
 			input.click();
 		})();""", true)
 		return
@@ -1010,7 +1014,7 @@ func _top_bar() -> PanelContainer:
 	panel.add_child(bar)
 	bar.add_child(_button("Nouvelle", new_map))
 	_open_button = MenuButton.new()
-	_open_button.text = "Ouvrir ▾"
+	_open_button.text = "Ouvrir..."
 	_open_button.flat = false
 	_open_button.about_to_popup.connect(_fill_open_menu)
 	_open_button.get_popup().index_pressed.connect(func(i: int) -> void:
@@ -1059,7 +1063,7 @@ func _top_bar() -> PanelContainer:
 	var push := Control.new()
 	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(push)
-	var test := _button("▶ TESTER", test_map)
+	var test := _button("TESTER", test_map)
 	test.add_theme_color_override("font_color", UiKit.HIGHLIGHT)
 	bar.add_child(test)
 	bar.add_child(_button("Quitter", quit_editor))
@@ -1071,7 +1075,7 @@ func _fill_open_menu() -> void:
 	popup.clear()
 	var names := MapData.list_saved()
 	for map_name in names:
-		popup.add_item(map_name)
+		popup.add_item(map_name.replace("_", " "))
 		popup.set_item_metadata(popup.item_count - 1, map_name)
 	if names.is_empty():
 		popup.add_item("(aucune map sauvée)")
