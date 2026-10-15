@@ -784,6 +784,190 @@ func _ready() -> void:
 	check(menu.players.is_empty() and menu.screen == menu.Screen.TITLE, "Perso : le dernier joueur se retire, retour à l'écran titre")
 	menu.queue_free()
 
+	# 10b2) TOURNOI : le code, l'inscription (nom + couleur), puis l'arbre, ALÉATOIRE et les réglages
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TournamentData.SAVE_PATH))
+	TournamentData.unlocked = false
+	GameSetup.player_devices = []
+	menu = load("res://scenes/menu.tscn").instantiate()
+	menu.change_scene_on_start = false
+	add_child(menu)
+	await get_tree().process_frame
+	menu.handle(pad, "confirm")
+	for i in 5:
+		menu.handle(pad, "down")
+	await shot("10_menu_tournoi")
+	menu.handle(pad, "confirm")
+	var tm: TournamentMenu = menu._tournament
+	check(menu.screen == menu.Screen.TOURNAMENT and tm.page == TournamentMenu.Page.CODE, "Tournoi : le bouton TOURNOI demande le code")
+	var type_text := func(text: String) -> void:
+		for letter in text:
+			var key := InputEventKey.new()
+			key.pressed = true
+			key.unicode = letter.unicode_at(0)
+			menu._input(key)
+	var enter := InputEventKey.new()
+	enter.pressed = true
+	enter.keycode = KEY_ENTER
+	type_text.call("swat")
+	menu.handle(pad, "confirm")
+	check(tm.page == TournamentMenu.Page.CODE and tm._wrong_code, "Tournoi : un code faux ne fait pas entrer")
+	type_text.call("swag")
+	menu.handle(pad, "confirm")
+	check(tm.page == TournamentMenu.Page.SIGNUP and tm.tournament.players.is_empty(), "Tournoi : le code ouvre l'inscription")
+	menu.handle(pad, "confirm")
+	check(tm.page == TournamentMenu.Page.KEYBOARD, "Inscription : A sur le nom ouvre le clavier")
+	type_text.call("Stain")
+	menu._input(enter)
+	check(tm.page == TournamentMenu.Page.SIGNUP and tm._row == TournamentMenu.Row.COLOR, "Inscription : nom tapé, on passe à la couleur")
+	menu.handle(pad, "right")
+	menu.handle(pad, "right")
+	menu.handle(pad, "confirm")
+	check(tm.tournament.players.size() == 1 and tm.tournament.players[0] == {"name": "Stain", "color": 2},
+		"Inscription : Stain s'inscrit avec la couleur choisie")
+	for player_name in ["Bob", "Zoé", "Lulu", "Max", "stain"]:
+		menu.handle(pad, "confirm")
+		type_text.call(player_name)
+		menu._input(enter)
+		menu.handle(pad, "confirm")
+	check(tm.tournament.players.size() == 5 and tm._message == "Ce nom est déjà pris", "Inscription : 5 inscrits, pas deux fois le même nom")
+	var colors := {}
+	for player in tm.tournament.players:
+		colors[player.color] = true
+	check(colors.size() == 5, "Inscription : chaque nouvel inscrit reçoit une couleur libre")
+	await shot("11_tournoi_inscription")
+	tm._row = TournamentMenu.Row.NEXT
+	menu.handle(pad, "confirm")
+	check(tm.page == TournamentMenu.Page.BOARD and not tm.tournament.is_seeded(), "Arbre : on y arrive, personne n'est encore placé")
+	await shot("12_tournoi_arbre_vide")
+	menu.handle(pad, "confirm")
+	check(tm.tournament.is_seeded() and tm._anim_start >= 0, "Arbre : ALÉATOIRE place tout le monde (avec l'animation)")
+	var rounds := tm.tournament.bracket()
+	var byes := []
+	for game in rounds[0]:
+		if TournamentData.BYE in game.slots:
+			byes.append(game.slots[0] if game.slots[1] == TournamentData.BYE else game.slots[1])
+	check(rounds.size() == 3 and rounds[0].size() == 4 and byes.size() == 3 and rounds[1][0].slots.has(byes[0])
+		and not (TournamentData.BYE in rounds[1][0].slots + rounds[1][1].slots),
+		"Arbre : 5 joueurs = arbre de 8, 3 passent d'office une seule fois, puis demies et finale")
+	await get_tree().create_timer(0.35).timeout
+	await shot("13_tournoi_tirage")
+	await get_tree().create_timer(1.0).timeout
+	await shot("14_tournoi_arbre")
+	menu.handle(pad, "up")
+	menu.handle(pad, "up")
+	menu.handle(pad, "right")
+	menu.handle(pad, "down")
+	menu.handle(pad, "right")
+	check(tm._tab == TournamentMenu.Tab.RULES and tm.tournament.lives == 4, "Réglages : page RÈGLES, les vies passent à 4")
+	await shot("15_tournoi_regles")
+	# Lancer un match depuis l'arbre : le vainqueur avance tout seul
+	var menu_lives := GameSetup.lives
+	tm._focus = TournamentMenu.Focus.PLAY
+	var picked := {}
+	for i in 40:
+		picked[tm.tournament.random_match().number] = true
+	var playable: Array = tm.tournament.bracket()[0].filter(func(g: Dictionary) -> bool: return g.slots[0] >= 0 and g.slots[1] >= 0)
+	check(picked.size() == playable.size() and picked.keys().all(func(n: int) -> bool: return n <= tm.tournament.bracket()[0].size()),
+		"Match : START tire au hasard un match du 1er tour")
+	menu.handle(pad, "confirm")
+	var first_match: Dictionary = menu._tournament_game
+	check(menu.screen == menu.Screen.CHARACTERS and menu.players.is_empty(), "Match : START ouvre la page d'appel, aucune manette liée")
+	await shot("15a_tournoi_appel")
+	menu.handle(kb_right, "")
+	check(menu.players == [kb_right], "Match : la 1re manette qui appuie se lie au 1er nom appelé")
+	menu.handle(kb_right, "quit")
+	check(menu.players.is_empty() and menu.screen == menu.Screen.CHARACTERS, "Match : se retirer détache la manette du nom")
+	menu.handle(kb_right, "")
+	menu.handle(pad, "")
+	menu.handle(kb_left, "")
+	check(menu.players == [kb_right, pad], "Match : la 2e manette se lie au 2e nom, pas de 3e")
+	menu.handle(pad, "right")
+	menu.handle(pad, "down")
+	check(menu._character_choice[1] == 1 and menu._weapon_choice[1] == 1, "Match : chacun choisit son perso et son arme")
+	await shot("15b_tournoi_persos")
+	menu.handle(kb_right, "confirm")
+	menu.handle(pad, "confirm")
+	check(GameSetup.tournament_match.get("number", -1) == first_match.number and GameSetup.lives == 4 and GameSetup.player_devices.size() == 2,
+		"Match : la partie se lance avec les vies du tournoi")
+	await new_game()
+	check(game.fighters[0].color == TournamentData.COLORS[tm.tournament.players[first_match.slots[0]].color]
+		and GameSetup.player_devices == [[kb_right], [pad]] and GameSetup.map_path == tm.tournament.map, "Match : chacun a sa couleur et sa manette, sur la map du tournoi")
+	game.fighters[1].eliminated = true
+	game._check_end_of_match()
+	await shot("15c_tournoi_victoire")
+	check(TournamentData.load_saved().results.get(str(first_match.number), []) == [first_match.slots[0]], "Match : le vainqueur est noté dans l'arbre")
+	game.queue_free(); game = null
+	menu.queue_free()
+	menu = load("res://scenes/menu.tscn").instantiate()
+	menu.change_scene_on_start = false
+	add_child(menu)
+	await get_tree().process_frame
+	tm = menu._tournament
+	check(menu.screen == menu.Screen.TOURNAMENT and tm.page == TournamentMenu.Page.BOARD and GameSetup.lives == menu_lives
+		and tm.tournament.next_match().get("number", -1) != first_match.number, "Match : retour sur l'arbre, prêt pour le match suivant")
+	await shot("15d_tournoi_apres_match")
+	menu._add_player(pad)
+	menu.handle(pad, "back")
+	check(tm.page == TournamentMenu.Page.SIGNUP, "Arbre : B revient à l'inscription")
+	tm._row = TournamentMenu.Row.PLAYERS
+	tm._chip = 4
+	menu.handle(pad, "confirm")
+	menu.handle(pad, "confirm")
+	check(tm.tournament.players.size() == 4 and not tm.tournament.is_seeded(), "Inscription : retirer un inscrit (2 appuis) refait le tirage")
+	menu.handle(pad, "back")
+	check(menu.screen == menu.Screen.MAIN and menu._choice == 5, "Tournoi : B revient au menu principal")
+	menu.handle(pad, "confirm")
+	check(tm.page == TournamentMenu.Page.SIGNUP and tm.tournament.players.size() == 4 and tm.tournament.lives == 4,
+		"Tournoi : tout est enregistré, et le code n'est plus demandé")
+	for i in 28:
+		tm.tournament.add_player("Joueur %d" % (i + 1), i % TournamentData.COLORS.size())
+	tm._row = TournamentMenu.Row.NEXT
+	menu.handle(pad, "confirm")
+	menu.handle(pad, "confirm")
+	var rounds_32 := tm.tournament.bracket()
+	check(tm.tournament.players.size() == 32 and rounds_32.size() == 5 and rounds_32[0].size() == 16, "Arbre : 32 joueurs, 5 tours")
+	await get_tree().create_timer(TournamentBoard.animation_length(32) + 0.2).timeout
+	await shot("16_tournoi_arbre_32")
+	# Matchs à 4 : les 2 derniers en vie passent
+	tm._focus = TournamentMenu.Focus.SETTING
+	tm._tab = TournamentMenu.Tab.RULES
+	tm._rule = 0
+	menu.handle(pad, "down")
+	check(tm._rule == 1 and tm._focus == TournamentMenu.Focus.SETTING, "Réglages : bas passe à la ligne Joueurs par match")
+	menu.handle(pad, "right")
+	var rounds_4 := tm.tournament.bracket()
+	check(tm.tournament.match_size == 4 and rounds_4.size() == 5 and rounds_4[0].size() == 8 and rounds_4[0][0].slots.size() == 4
+		and rounds_4[3].size() == 1 and rounds_4[-1][0].slots.size() == 2, "Arbre à 4 : 8 matchs à 4, puis 4, 2, 1, et la finale en duel")
+	await shot("16b_tournoi_arbre_32_a_4")
+	tm._focus = TournamentMenu.Focus.PLAY
+	menu.handle(pad, "confirm")
+	var match_4: Dictionary = menu._tournament_game
+	check(menu.screen == menu.Screen.CHARACTERS and match_4.slots.size() == 4 and menu.players.is_empty(), "Match à 4 : la page d'appel appelle 4 noms")
+	var pad2 := {"type": "joypad", "id": 1}
+	for device in [pad, kb_right, kb_left, pad2]:
+		menu.handle(device, "")
+	check(menu.players == [pad, kb_right, kb_left, pad2], "Match à 4 : les 4 manettes se lient chacune à un nom")
+	await shot("16c_tournoi_appel_4")
+	for device in [pad, kb_right, kb_left, pad2]:
+		menu.handle(device, "confirm")
+	check(GameSetup.tournament_match.get("qualified", 0) == 2 and GameSetup.player_devices.size() == 4, "Match à 4 : la partie se lance à 4")
+	await new_game()
+	game.fighters[0].eliminated = true
+	game._check_end_of_match()
+	check(not game._match_over, "Match à 4 : à 3 en vie, ça continue")
+	game.fighters[2].eliminated = true
+	game._check_end_of_match()
+	await shot("16d_tournoi_qualifies")
+	var saved_4 := TournamentData.load_saved()
+	var next_4: Dictionary = saved_4.bracket()[1].filter(func(g: Dictionary) -> bool: return match_4.number in g.sources)[0]
+	check(game._match_over and saved_4.results.get(str(match_4.number), []) == [match_4.slots[1], match_4.slots[3]]
+		and match_4.slots[1] in next_4.slots and match_4.slots[3] in next_4.slots, "Match à 4 : les 2 derniers en vie passent au tour suivant")
+	GameSetup.lives = GameSetup.tournament_match.previous_lives
+	GameSetup.tournament_match = {}
+	game.queue_free(); game = null
+	menu.queue_free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(TournamentData.SAVE_PATH))
+
 	# 10c) Une partie avec 5 vies les affiche bien
 	GameSetup.player_devices = []
 	await new_game()

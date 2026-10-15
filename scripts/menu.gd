@@ -1,12 +1,13 @@
 extends Control
 ## Le menu du jeu, du premier écran jusqu'au lancement de la partie :
 ##   1. Écran titre : « Appuie sur une touche ». Le premier qui appuie devient le joueur 1.
-##   2. Menu principal : JOUER, EN LIGNE, COMMANDES, OPTIONS, ÉDITEUR. Tant qu'on est dans le menu, chaque
+##   2. Menu principal : JOUER, EN LIGNE, COMMANDES, OPTIONS, ÉDITEUR, TOURNOI. Tant qu'on est dans le menu, chaque
 ##      nouvelle manette ou côté de clavier qui appuie sur une touche devient le joueur suivant.
 ##   3. Choix du personnage : chaque joueur fait défiler les persos (gauche / droite) et les armes
 ##      (haut / bas), puis valide.
 ##   4. Choix de la map (celles du jeu, puis celles faites dans l'éditeur), puis la partie se lance.
 ## ÉDITEUR : l'éditeur de map (à la souris et au clavier, voir scripts/editor/map_editor.gd).
+## TOURNOI : créer un tournoi et voir son arbre, derrière un code (voir scripts/tournament/).
 ## EN LIGNE : créer un salon (on reçoit un code de 4 lettres à donner aux copains) ou en
 ## rejoindre un avec son code. Dans le salon, chacun choisit son perso et se dit prêt, puis
 ## l'hôte choisit la map et lance la partie (voir Online). Seul le joueur 1 joue en ligne.
@@ -19,13 +20,13 @@ extends Control
 ## gauche) ou I (clavier droit).
 ## (voir MenuInput pour la lecture des touches et UiKit pour les morceaux d'affichage communs)
 
-enum Screen { TITLE, MAIN, CONTROLS, OPTIONS, CHARACTERS, MAPS, ONLINE, ONLINE_CODE, ONLINE_LOBBY, ONLINE_MAP }
+enum Screen { TITLE, MAIN, CONTROLS, OPTIONS, CHARACTERS, MAPS, ONLINE, ONLINE_CODE, ONLINE_LOBBY, ONLINE_MAP, TOURNAMENT }
 
 const MIN_PLAYERS := 2
 const MAX_PLAYERS := 4
 const GAME_SCENE := "res://scenes/main.tscn"
 const EDITOR_SCENE := "res://scenes/editor.tscn"
-const MAIN_BUTTONS := ["JOUER", "EN LIGNE", "COMMANDES", "OPTIONS", "ÉDITEUR"]
+const MAIN_BUTTONS := ["JOUER", "EN LIGNE", "COMMANDES", "OPTIONS", "ÉDITEUR", "TOURNOI"]
 const ONLINE_BUTTONS := ["CRÉER UN SALON", "REJOINDRE UN SALON"]
 const MIN_LIVES := 1
 const MAX_LIVES := 5
@@ -49,10 +50,13 @@ var _pad_test_cells: Array = []          ## COMMANDES : [case "Manette", bouton/
 var _pad_test_info: Label                ## COMMANDES : les manettes branchées (reconnues ou non)
 var _code_letters: Array[String] = []    ## le code tapé pour rejoindre un salon
 var _code_cursor := 0
+var _tournament: TournamentMenu          ## les écrans du bouton TOURNOI
+var _tournament_game := {}               ## le match de tournoi dont on choisit les persos (vide = partie normale)
 
 
 func _ready() -> void:
 	InputBindings.fix_web_triggers()
+	_tournament = TournamentMenu.new(_show)
 	GameSetup.return_scene = ""  # une partie lancée d'ici revient ici
 	var background := ColorRect.new()
 	background.color = UiKit.BG_COLOR
@@ -84,6 +88,13 @@ func _ready() -> void:
 		if i < GameSetup.player_weapons.size():
 			_weapon_choice[-1] = maxi(GameSetup.WEAPONS.find(GameSetup.player_weapons[i]), 0)
 	screen = Screen.MAIN if not players.is_empty() else Screen.TITLE
+	# Retour d'un match de tournoi : on revient sur l'arbre (le vainqueur y est déjà noté).
+	if not GameSetup.tournament_match.is_empty():
+		GameSetup.lives = GameSetup.tournament_match.previous_lives
+		GameSetup.tournament_match = {}
+		if not players.is_empty():
+			_tournament.open_board()
+			screen = Screen.TOURNAMENT
 	# Retour d'une partie en ligne : dans le salon, ou sur l'écran EN LIGNE si la session est finie.
 	if Online.is_online() and not Online.local_device.is_empty():
 		_restore_online_player()
@@ -116,6 +127,10 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if screen == Screen.ONLINE_CODE and _type_code_key(event):
 		return
+	if screen == Screen.TOURNAMENT and _tournament.type_key(event):
+		_show()
+		get_viewport().set_input_as_handled()
+		return
 	var press := _input_reader.read(event)
 	if press.is_empty():
 		if event is InputEventMouseButton and event.pressed and screen == Screen.TITLE:
@@ -138,6 +153,14 @@ func handle(device: Dictionary, action: String) -> void:
 			_handle_online(action)
 		return
 	var player := players.find(device)
+	if player == -1 and screen == Screen.CHARACTERS and not _tournament_game.is_empty():
+		# Match de tournoi : une manette qui appuie se lie au prochain nom appelé (B = retour à l'arbre).
+		if action == "back":
+			_back_to_tournament_board()
+		elif players.size() < _match_players().size():
+			_add_player(device)
+			_show()
+		return
 	if player == -1:
 		# Un nouvel appareil appuie : il devient le joueur suivant (pas pendant le choix de la map).
 		if screen != Screen.MAPS and players.size() < MAX_PLAYERS:
@@ -156,6 +179,15 @@ func handle(device: Dictionary, action: String) -> void:
 			_handle_characters(player, action)
 		Screen.MAPS:
 			_handle_maps(action)
+		Screen.TOURNAMENT:
+			_tournament.handle(action)
+			if not _tournament.launch.is_empty():
+				_prepare_tournament_match(_tournament.launch)
+				_tournament.launch = {}
+			elif _tournament.exited:
+				_go(Screen.MAIN, 5)
+			else:
+				_show()
 
 
 func _on_joy_connection_changed(id: int, connected: bool) -> void:
@@ -200,6 +232,9 @@ func _open_main_button(index: int) -> void:
 		4:
 			if change_scene_on_start:
 				get_tree().change_scene_to_file(EDITOR_SCENE)
+		5:
+			_tournament.open()
+			_go(Screen.TOURNAMENT, 5)
 
 
 func _handle_options(action: String) -> void:
@@ -227,7 +262,9 @@ func _handle_characters(player: int, action: String) -> void:
 				_show()
 		"confirm":
 			_locked[player] = true
-			if _all_locked():
+			if _all_locked() and not _tournament_game.is_empty():
+				_start_tournament_match()
+			elif _all_locked():
 				_go(Screen.MAPS)
 			else:
 				_show()
@@ -235,10 +272,16 @@ func _handle_characters(player: int, action: String) -> void:
 			if _locked[player]:
 				_locked[player] = false
 				_show()
+			elif not _tournament_game.is_empty():
+				_back_to_tournament_board()
 			elif player == 0:
 				_go(Screen.MAIN, 0)
 		"quit":
-			_remove_player(player)  # le joueur se retire (les suivants remontent d'une place)
+			if _tournament_game.is_empty():
+				_remove_player(player)  # le joueur se retire (les suivants remontent d'une place)
+			else:
+				_unbind(player)  # match de tournoi : la manette se détache du nom
+				_show()
 
 
 func _all_locked() -> bool:
@@ -270,6 +313,54 @@ func _start_game() -> void:
 	GameSetup.map_path = _maps[_map_choice]
 	if change_scene_on_start:
 		get_tree().change_scene_to_file(GAME_SCENE)
+
+
+## START dans l'arbre du tournoi : la page d'appel du match. Les 2 noms sont appelés, chacun
+## lie une manette (ou un côté du clavier) à son nom en appuyant dessus, choisit son perso et
+## son arme ; la partie se lance sur la map et avec les vies réglées dans le tournoi.
+func _prepare_tournament_match(game: Dictionary) -> void:
+	while not players.is_empty():
+		_unbind(players.size() - 1)
+	_tournament_game = game
+	_go(Screen.CHARACTERS)
+
+
+## Détache une manette de la page d'appel (sans quitter l'écran).
+func _unbind(index: int) -> void:
+	players.remove_at(index)
+	_character_choice.remove_at(index)
+	_weapon_choice.remove_at(index)
+	_locked.remove_at(index)
+
+
+func _back_to_tournament_board() -> void:
+	_tournament_game = {}
+	for i in players.size():
+		_locked[i] = false
+	_tournament.open_board()
+	_go(Screen.TOURNAMENT, 5)
+
+
+## Les joueurs du match de tournoi en cours (sans les cases « exempt »), dans l'ordre de l'arbre.
+func _match_players() -> Array:
+	return _tournament_game.slots.filter(func(p: int) -> bool: return p >= 0)
+
+
+func _start_tournament_match() -> void:
+	var tournament := _tournament.tournament
+	GameSetup.tournament_match = {
+		"number": _tournament_game.number,
+		"players": _match_players(),
+		"names": _match_players().map(func(p: int) -> String: return tournament.players[p].name),
+		"colors": _match_players().map(func(p: int) -> Color: return TournamentData.COLORS[tournament.players[p].color]),
+		"qualified": TournamentData.qualified_count(_tournament_game),
+		"previous_lives": GameSetup.lives,
+	}
+	GameSetup.lives = tournament.lives
+	_maps.assign([tournament.map])
+	_map_choice = 0
+	_tournament_game = {}
+	_start_game()
 
 
 func _add_player(device: Dictionary) -> void:
@@ -321,8 +412,11 @@ func _show() -> void:
 			_content.add_child(UiKit.label("manette ou clavier", 18, UiKit.TEXT_DIM))
 		Screen.MAIN:
 			_add_title(56)
+			var buttons := VBoxContainer.new()  # plus serrés que le reste : 6 boutons doivent tenir
+			buttons.add_theme_constant_override("separation", 10)
 			for i in MAIN_BUTTONS.size():
-				_content.add_child(UiKit.menu_button(MAIN_BUTTONS[i], i == _choice, _open_main_button.bind(i)))
+				buttons.add_child(UiKit.menu_button(MAIN_BUTTONS[i], i == _choice, _open_main_button.bind(i), 60))
+			_content.add_child(buttons)
 			_content.add_child(UiKit.spacer(10))
 			_content.add_child(_player_chips())
 			_content.add_child(_join_hint())
@@ -337,15 +431,24 @@ func _show() -> void:
 			_content.add_child(UiKit.label("Vies par joueur :   <   %d   >" % GameSetup.lives, 30, UiKit.HIGHLIGHT))
 			_content.add_child(UiKit.label("gauche / droite pour changer, B / Échap : retour", 18, UiKit.TEXT_DIM))
 		Screen.CHARACTERS:
-			_content.add_child(UiKit.label("CHOISIS TON PERSONNAGE", 40))
+			if _tournament_game.is_empty():
+				_content.add_child(UiKit.label("CHOISIS TON PERSONNAGE", 40))
+			else:
+				var tournament := _tournament.tournament
+				var names: Array = _match_players().map(func(p: int) -> String: return tournament.players[p].name)
+				_content.add_child(UiKit.label(" contre ".join(names), 40 if names.size() == 2 else 32))
+				_content.add_child(UiKit.label("%s   ·   map : %s   ·   %d vies" % [TournamentData.round_name(_tournament_game.get("round_players", 2)),
+					_tournament._map_name(tournament.map), tournament.lives], 20, UiKit.HIGHLIGHT))
 			var slots := HBoxContainer.new()
 			slots.alignment = BoxContainer.ALIGNMENT_CENTER
 			slots.add_theme_constant_override("separation", 18)
-			for i in MAX_PLAYERS:
+			for i in (MAX_PLAYERS if _tournament_game.is_empty() else _match_players().size()):
 				slots.add_child(_character_slot(i))
 			_content.add_child(slots)
 			var hint := "gauche / droite : perso, haut / bas : arme, A pour valider, B pour revenir"
-			if players.size() < MIN_PLAYERS:
+			if not _tournament_game.is_empty():
+				hint = "B : retour à l'arbre" if players.is_empty() else hint
+			elif players.size() < MIN_PLAYERS:
 				hint = "Il faut au moins 2 joueurs : appuie sur une touche d'une autre manette ou de l'autre côté du clavier"
 			_content.add_child(UiKit.label(hint, 18, UiKit.TEXT_DIM))
 		Screen.MAPS:
@@ -354,6 +457,8 @@ func _show() -> void:
 			_content.add_child(UiKit.label("CHOISIS LA MAP", 40))
 			_content.add_child(_map_card())
 			_content.add_child(UiKit.label("gauche / droite pour choisir, A pour lancer la partie, B pour revenir", 18, UiKit.TEXT_DIM))
+		Screen.TOURNAMENT:
+			_tournament.build(_content)
 		_:
 			_show_online()
 
@@ -390,6 +495,11 @@ func _join_hint() -> Label:
 ## petit, description plus longue...) ne fait rien bouger à l'écran.
 func _character_slot(index: int) -> PanelContainer:
 	var color: Color = Game.PLAYER_COLORS[index]
+	var title := "Joueur %d" % (index + 1)
+	if not _tournament_game.is_empty() and index < _match_players().size():  # match de tournoi : le nom et la couleur du joueur
+		var player: Dictionary = _tournament.tournament.players[_match_players()[index]]
+		color = TournamentData.COLORS[player.color]
+		title = player.name
 	var joined := index < players.size()
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = SLOT_SIZE
@@ -398,7 +508,14 @@ func _character_slot(index: int) -> PanelContainer:
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_theme_constant_override("separation", 10)
 	panel.add_child(box)
-	box.add_child(UiKit.label("Joueur %d" % (index + 1), 26, color if joined else Color(1, 1, 1, 0.3)))
+	box.add_child(UiKit.label(title, 26, color if joined else Color(1, 1, 1, 0.3)))
+	if not joined and not _tournament_game.is_empty():
+		# Page d'appel : le nom appelé attend sa manette (le prochain à se lier clignote).
+		panel.add_theme_stylebox_override("panel", UiKit.slot_style(color, index == players.size()))
+		box.get_child(0).add_theme_color_override("font_color", color)
+		box.add_child(UiKit.label("Appuie sur A" if index == players.size() else "en attente…", 22,
+			Color.WHITE if index == players.size() else Color(1, 1, 1, 0.35)))
+		return panel
 	if not joined:
 		box.add_child(UiKit.label("Appuie sur\nune touche\npour rejoindre", 18, Color(1, 1, 1, 0.35)))
 		return panel
@@ -747,18 +864,7 @@ func _show_online() -> void:
 			_content.add_child(UiKit.label("B / Échap : retour", 18, UiKit.TEXT_DIM))
 		Screen.ONLINE_CODE:
 			_content.add_child(UiKit.label("CODE DU SALON", 44))
-			var row := HBoxContainer.new()
-			row.alignment = BoxContainer.ALIGNMENT_CENTER
-			row.add_theme_constant_override("separation", 14)
-			for i in 4:
-				var box := PanelContainer.new()
-				box.custom_minimum_size = Vector2(80, 96)
-				box.add_theme_stylebox_override("panel", UiKit.slot_style(UiKit.HIGHLIGHT if i == _code_cursor else Color(1, 1, 1, 0.4), i == _code_cursor))
-				var letter := UiKit.label(_code_letters[i] if i < _code_letters.size() else "", 56)
-				letter.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-				box.add_child(letter)
-				row.add_child(box)
-			_content.add_child(row)
+			_content.add_child(UiKit.code_boxes(_code_letters, _code_cursor))
 			_content.add_child(UiKit.label("Clavier : tape les lettres (Retour arrière pour effacer)", 18, UiKit.TEXT_DIM))
 			_content.add_child(UiKit.label("Manette : haut / bas change la lettre, gauche / droite change de case", 18, UiKit.TEXT_DIM))
 			_content.add_child(UiKit.label("A / Entrée : rejoindre      B / Échap : retour", 18, UiKit.TEXT_DIM))
