@@ -9,7 +9,7 @@ extends RefCounted
 
 enum Page { CODE, SIGNUP, KEYBOARD, BOARD }
 enum Row { NAME, COLOR, REGISTER, PLAYERS, NEXT, CLEAR }       ## SIGNUP, de haut en bas
-enum Focus { RANDOM, TABS, SETTING }                           ## BOARD
+enum Focus { RANDOM, PLAY, TABS, SETTING }                           ## BOARD
 enum Tab { MAPS, RULES }
 
 const CHIP_COLUMNS := 8
@@ -31,6 +31,8 @@ var _focus := Focus.RANDOM   ## BOARD : ce qui est sélectionné
 var _tab := Tab.MAPS         ## BOARD : la page de réglages affichée
 var _anim_start := -1        ## BOARD : début de l'animation du tirage (voir TournamentBoard)
 var _from_places: Array = [] ## BOARD : la place de chaque joueur avant le tirage (-1 = salle d'attente)
+var launch := {}             ## BOARD : le match à lancer (le menu le prend et passe au choix des persos)
+var board_message := ""     ## BOARD : un petit message (il manque une manette...)
 var _keyboard: TextKeyboard
 var _letters: Array[String] = []
 var _cursor := 0
@@ -231,15 +233,29 @@ func _after_keyboard() -> void:
 
 func _open_board() -> void:
 	page = Page.BOARD
-	_focus = Focus.RANDOM
+	_focus = Focus.PLAY if not tournament.next_match().is_empty() else Focus.RANDOM
 	_anim_start = -1
+	_confirm = false
+	board_message = ""
+
+
+## Revient sur l'arbre (après un match du tournoi, ou en quittant le choix des persos).
+func open_board() -> void:
+	exited = false
+	tournament = TournamentData.load_saved()
+	_open_board()
 
 
 func _handle_board(action: String) -> void:
+	if action != "confirm":
+		_confirm = false
+	if action != "":
+		board_message = ""
 	match action:
 		"up", "down":
-			var order := [Focus.TABS, Focus.SETTING, Focus.RANDOM]
-			_focus = order[posmod(order.find(_focus) + (1 if action == "down" else -1), order.size())]
+			var bottom := _focus if _focus in [Focus.RANDOM, Focus.PLAY] else Focus.RANDOM
+			var order := [Focus.TABS, Focus.SETTING, bottom]
+			_focus = order[posmod(order.find(_focus if _focus != Focus.PLAY else bottom) + (1 if action == "down" else -1), order.size())]
 		"left", "right":
 			var step := 1 if action == "right" else -1
 			match _focus:
@@ -247,18 +263,47 @@ func _handle_board(action: String) -> void:
 					_tab = posmod(_tab + step, Tab.size())
 				Focus.SETTING:
 					_change_setting(step)
-				Focus.RANDOM:
-					_focus = Focus.TABS
+				Focus.RANDOM, Focus.PLAY:
+					_focus = Focus.PLAY if _focus == Focus.RANDOM else Focus.RANDOM
 		"confirm":
 			match _focus:
 				Focus.RANDOM:
-					_shuffle()
+					_shuffle_or_confirm()
+				Focus.PLAY:
+					_play()
 				Focus.TABS:
 					_tab = posmod(_tab + 1, Tab.size())
 				Focus.SETTING:
 					_change_setting(1)
 		"back":
 			_open_signup()
+
+
+## ALÉATOIRE : une fois des matchs joués, un 2e appui est demandé (le tirage efface les résultats).
+func _shuffle_or_confirm() -> void:
+	if not tournament.results.is_empty() and not _confirm:
+		_confirm = true
+		return
+	_confirm = false
+	_shuffle()
+
+
+## START : lance le prochain match (le menu passe au choix des persos des 2 joueurs).
+func _play() -> void:
+	var game := tournament.next_match()
+	if not game.is_empty():
+		launch = game
+
+
+## Le texte du bouton START : le prochain match, le champion, ou ce qu'il manque.
+func _play_text() -> String:
+	var game := tournament.next_match()
+	if not game.is_empty():
+		return "START : %s contre %s" % [tournament.players[game.slots[0]].name, tournament.players[game.slots[1]].name]
+	var champion := tournament.champion()
+	if champion >= 0:
+		return "CHAMPION : %s !" % tournament.players[champion].name
+	return "Tire au sort d'abord"
 
 
 ## Tire les places au sort, et lance l'animation des noms qui volent jusqu'à leur place.
@@ -366,11 +411,28 @@ func _build_board(parent: VBoxContainer) -> void:
 	left.add_theme_constant_override("separation", 12)
 	row.add_child(left)
 	left.add_child(TournamentBoard.new(tournament, BOARD_SIZE, _anim_start, _from_places))
+	var next := tournament.next_match()
+	left.get_child(0).next_match = next.get("number", -1)
+	var buttons := HBoxContainer.new()
+	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	buttons.add_theme_constant_override("separation", 16)
 	var random := UiKit.menu_button("ALÉATOIRE", _focus == Focus.RANDOM, _click_random, 70)
-	random.custom_minimum_size.x = 420
-	random.add_theme_font_size_override("font_size", 36)
-	left.add_child(random)
-	left.add_child(UiKit.label("A : tirer au sort      haut / bas : réglages      B : inscription", 16, UiKit.TEXT_DIM))
+	random.custom_minimum_size.x = 300
+	random.add_theme_font_size_override("font_size", 34)
+	buttons.add_child(random)
+	var play := UiKit.menu_button(_play_text(), _focus == Focus.PLAY, _click_play, 70)
+	play.custom_minimum_size.x = 520
+	play.add_theme_font_size_override("font_size", 24)
+	if next.is_empty():
+		play.add_theme_color_override("font_color", UiKit.HIGHLIGHT if tournament.champion() >= 0 else UiKit.TEXT_DIM)
+	buttons.add_child(play)
+	left.add_child(buttons)
+	var hint := "A : valider      gauche / droite : ALÉATOIRE ou START      haut / bas : réglages      B : inscription"
+	if _confirm:
+		hint = "Refaire le tirage efface les matchs déjà joués. Appuie encore sur A pour confirmer."
+	elif board_message != "":
+		hint = board_message
+	left.add_child(UiKit.label(hint, 16, WARNING if _confirm or board_message != "" else UiKit.TEXT_DIM))
 
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size = Vector2(PANEL_WIDTH, 0)
@@ -488,8 +550,16 @@ func _click_chip(index: int) -> void:
 
 
 func _click_random() -> void:
+	if _focus != Focus.RANDOM:
+		_confirm = false
 	_focus = Focus.RANDOM
-	_shuffle()
+	_shuffle_or_confirm()
+	_redraw.call()
+
+
+func _click_play() -> void:
+	_focus = Focus.PLAY
+	_play()
 	_redraw.call()
 
 

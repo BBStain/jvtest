@@ -40,6 +40,10 @@ static var map_path: String = MAPS[0]
 static var editor_map: Dictionary = {}
 ## Où revient-on en quittant la partie (vide = le menu). L'éditeur y met sa scène quand on teste.
 static var return_scene := ""
+## Un match de tournoi (vide = partie normale) : {"number": numéro du match, "players": les 2
+## joueurs du tournoi (J1, J2), "names", "colors", "previous_lives": les vies d'OPTIONS à remettre}.
+## La partie note le vainqueur dans l'arbre, et le menu revient sur l'arbre.
+static var tournament_match := {}
 ## Le nombre de vies de chaque joueur (réglable dans OPTIONS).
 static var lives := 3
 

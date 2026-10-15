@@ -860,6 +860,48 @@ func _ready() -> void:
 	menu.handle(pad, "right")
 	check(tm._tab == TournamentMenu.Tab.RULES and tm.tournament.lives == 4, "Réglages : page RÈGLES, les vies passent à 4")
 	await shot("15_tournoi_regles")
+	# Lancer un match depuis l'arbre : le vainqueur avance tout seul
+	var menu_lives := GameSetup.lives
+	tm._focus = TournamentMenu.Focus.PLAY
+	var first_match := tm.tournament.next_match()
+	check(tm._play_text().begins_with("START : "), "Match : le bouton START montre le prochain match")
+	menu.handle(pad, "confirm")
+	check(menu.screen == menu.Screen.CHARACTERS and menu.players.is_empty(), "Match : START ouvre la page d'appel, aucune manette liée")
+	await shot("15a_tournoi_appel")
+	menu.handle(kb_right, "")
+	check(menu.players == [kb_right], "Match : la 1re manette qui appuie se lie au 1er nom appelé")
+	menu.handle(kb_right, "quit")
+	check(menu.players.is_empty() and menu.screen == menu.Screen.CHARACTERS, "Match : se retirer détache la manette du nom")
+	menu.handle(kb_right, "")
+	menu.handle(pad, "")
+	menu.handle(kb_left, "")
+	check(menu.players == [kb_right, pad], "Match : la 2e manette se lie au 2e nom, pas de 3e")
+	menu.handle(pad, "right")
+	menu.handle(pad, "down")
+	check(menu._character_choice[1] == 1 and menu._weapon_choice[1] == 1, "Match : chacun choisit son perso et son arme")
+	await shot("15b_tournoi_persos")
+	menu.handle(kb_right, "confirm")
+	menu.handle(pad, "confirm")
+	check(GameSetup.tournament_match.get("number", -1) == first_match.number and GameSetup.lives == 4 and GameSetup.player_devices.size() == 2,
+		"Match : la partie se lance avec les vies du tournoi")
+	await new_game()
+	check(game.fighters[0].color == TournamentData.COLORS[tm.tournament.players[first_match.slots[0]].color]
+		and GameSetup.player_devices == [[kb_right], [pad]] and GameSetup.map_path == tm.tournament.map, "Match : chacun a sa couleur et sa manette, sur la map du tournoi")
+	game.fighters[1].eliminated = true
+	game._check_end_of_match()
+	await shot("15c_tournoi_victoire")
+	check(TournamentData.load_saved().results.get(str(first_match.number), -9) == first_match.slots[0], "Match : le vainqueur est noté dans l'arbre")
+	game.queue_free(); game = null
+	menu.queue_free()
+	menu = load("res://scenes/menu.tscn").instantiate()
+	menu.change_scene_on_start = false
+	add_child(menu)
+	await get_tree().process_frame
+	tm = menu._tournament
+	check(menu.screen == menu.Screen.TOURNAMENT and tm.page == TournamentMenu.Page.BOARD and GameSetup.lives == menu_lives
+		and tm.tournament.next_match().get("number", -1) != first_match.number, "Match : retour sur l'arbre, prêt pour le match suivant")
+	await shot("15d_tournoi_apres_match")
+	menu._add_player(pad)
 	menu.handle(pad, "back")
 	check(tm.page == TournamentMenu.Page.SIGNUP, "Arbre : B revient à l'inscription")
 	tm._row = TournamentMenu.Row.PLAYERS

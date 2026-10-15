@@ -116,6 +116,8 @@ func _ready() -> void:
 		fighter.max_lives = GameSetup.lives
 		fighter.lives = GameSetup.lives
 		fighter.color = PLAYER_COLORS[i]
+		if not GameSetup.tournament_match.is_empty() and i < GameSetup.tournament_match.colors.size():
+			fighter.color = GameSetup.tournament_match.colors[i]  # sa couleur du tournoi
 		fighter.gauge = gauge
 		fighter.input_source = LocalInputSource.new(i)
 		if online and Online.players[i].id != Online.my_id:
@@ -771,10 +773,22 @@ func _check_end_of_match() -> void:
 	_match_over_time = 0.0
 	_duel.clear()
 	_time_engine.stop(true)
-	if alive.size() == 1:
+	if alive.size() == 1 and not GameSetup.tournament_match.is_empty():
+		_record_tournament_winner(alive[0])
+	elif alive.size() == 1:
 		_show_end("Joueur %d gagne !" % (alive[0].player_index + 1), alive[0].color)
 	else:
 		_show_end("Égalité !", Color.WHITE)
+
+
+## Match de tournoi : le vainqueur est noté dans l'arbre (il passe au tour suivant).
+func _record_tournament_winner(fighter: Fighter) -> void:
+	var tournament_match := GameSetup.tournament_match
+	var tournament := TournamentData.load_saved()
+	tournament.set_result(tournament_match.number, tournament_match.players[fighter.player_index])
+	tournament.save()
+	_show_end("%s gagne !" % tournament_match.names[fighter.player_index], fighter.color)
+	$UI/EndScreen/Restart.text = "Start, A ou Entrée : rejouer le match      B ou Échap : retour à l'arbre"
 
 
 func _show_end(text: String, color: Color) -> void:

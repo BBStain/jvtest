@@ -29,6 +29,7 @@ var players: Array[Dictionary] = []  ## {"name": String, "color": index dans COL
 var seeding: Array[int] = []         ## les joueurs (leur index) dans l'ordre des places du 1er tour ; vide = pas encore tirés
 var lives := 3
 var map: String = GameSetup.MAPS[0]
+var results := {}                   ## numéro du match (en texte) -> le joueur qui l'a gagné
 
 
 ## Le tournoi enregistré (un tournoi vide s'il n'y en a pas).
@@ -48,6 +49,10 @@ static func load_saved() -> TournamentData:
 	if not tournament.is_seeded():
 		tournament.seeding = []
 	tournament.lives = clampi(int(data.get("lives", 3)), MIN_LIVES, MAX_LIVES)
+	var saved_results = data.get("results", {})
+	if tournament.is_seeded() and saved_results is Dictionary:
+		for number in saved_results:
+			tournament.results[str(number)] = int(saved_results[number])
 	if str(data.get("map", "")) in GameSetup.MAPS:
 		tournament.map = data.map
 	return tournament
@@ -61,7 +66,7 @@ static func check_code(typed: String) -> bool:
 func save() -> void:
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file != null:
-		file.store_string(JSON.stringify({"players": players, "seeding": seeding, "lives": lives, "map": map}))
+		file.store_string(JSON.stringify({"players": players, "seeding": seeding, "lives": lives, "map": map, "results": results}))
 
 
 ## Inscrit un joueur (pas de doublon, pas de nom vide). Renvoie false s'il n'a pas été inscrit.
@@ -75,12 +80,14 @@ func add_player(player_name: String, color: int) -> bool:
 			return false
 	players.append({"name": player_name, "color": color})
 	seeding = []
+	results = {}
 	return true
 
 
 func remove_player(index: int) -> void:
 	players.remove_at(index)
 	seeding = []
+	results = {}
 
 
 ## La couleur proposée au prochain inscrit : la première pas encore prise (après "after").
@@ -94,6 +101,7 @@ func next_free_color(after := -1) -> int:
 
 ## Tire au sort la place de chaque joueur dans le 1er tour.
 func shuffle() -> void:
+	results = {}
 	seeding = []
 	for i in players.size():
 		seeding.append(i)
@@ -171,20 +179,49 @@ func bracket() -> Array:
 		for m in range(0, previous.size(), 2):
 			var slots := []
 			for game in [previous[m], previous[m + 1]]:
-				slots.append(_known_winner(game))
+				slots.append(winner_of(game))
 			next.append({"number": number, "slots": slots, "places": [], "sources": [previous[m].number, previous[m + 1].number]})
 			number += 1
 		rounds.append(next)
 	return rounds
 
 
-## Le vainqueur d'un match s'il est déjà connu (l'autre case est un passe d'office), sinon UNKNOWN.
-static func _known_winner(game: Dictionary) -> int:
+## Le vainqueur d'un match s'il est déjà connu (match joué, ou l'autre case est un passe d'office),
+## sinon UNKNOWN.
+func winner_of(game: Dictionary) -> int:
+	if results.has(str(game.number)):
+		return results[str(game.number)]
 	if game.slots[0] == BYE:
 		return game.slots[1]
 	if game.slots[1] == BYE:
 		return game.slots[0]
 	return UNKNOWN
+
+
+## Note le vainqueur d'un match (il passe au tour suivant).
+func set_result(number: int, winner: int) -> void:
+	results[str(number)] = winner
+
+
+## Le prochain match à jouer : le premier dont les 2 joueurs sont connus et qui n'a pas encore
+## de vainqueur, tour après tour. {} s'il n'y en a pas (pas tiré, ou tournoi fini).
+func next_match() -> Dictionary:
+	if not is_seeded():
+		return {}
+	for matches in bracket():
+		for game in matches:
+			if game.slots[0] >= 0 and game.slots[1] >= 0 and not results.has(str(game.number)):
+				game.round_size = matches.size()  # pour le nom du tour (Finale, Demies...)
+				return game
+	return {}
+
+
+## Le champion (le vainqueur de la finale), ou UNKNOWN si la finale n'est pas jouée.
+func champion() -> int:
+	var rounds := bracket()
+	if rounds.is_empty() or not is_seeded():
+		return UNKNOWN
+	return winner_of(rounds[-1][0])
 
 
 ## Le nom d'un tour, d'après son nombre de matchs : Finale, Demies, Quarts, Huitièmes...
