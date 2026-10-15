@@ -11,7 +11,7 @@ extends Node
 ##   LB / RB           : tourner (ou changer la direction d'un élément qui bouge sans tourner)
 ##   LT / RT           : zoom          R3 (cliquer le stick droit) : dupliquer
 ##   B                 : annuler le déplacement en cours, sinon lâcher le choix, sinon fermer le panneau
-##   Start             : le menu (tester, sauver, nom, ouvrir, nouvelle map, annuler, voir bouger, grille,
+##   Start             : le menu (tester, sauver, nom, ouvrir, exporter, nouvelle map, annuler, voir bouger, grille,
 ##                       aimant, quitter)
 ## Pour attacher un élément à un autre : Y (réglages) > « Attacher à... », puis A sur l'autre élément.
 ##   Select / View     : tester la map tout de suite
@@ -422,6 +422,9 @@ func _open_menu(at := 0) -> void:
 			editor.save_map()},
 		{"label": "Nom : " + name_text, "kind": "button", "press": _open_keyboard},
 		{"label": "Ouvrir une map", "kind": "button", "press": _open_list},
+		{"label": "Exporter (fichier)", "kind": "button", "press": func() -> void:
+			_close()
+			editor.export_map()},
 		{"label": "Nouvelle map", "kind": "button", "press": func() -> void:
 			_close()
 			editor.new_map()},

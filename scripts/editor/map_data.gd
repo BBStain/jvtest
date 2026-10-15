@@ -313,7 +313,10 @@ static func to_json(data: Dictionary) -> String:
 
 ## Lit une map depuis du texte JSON. Renvoie {} si le texte n'est pas une map.
 static func from_json(text: String) -> Dictionary:
-	var parsed = JSON.parse_string(text)
+	var json := JSON.new()
+	if json.parse(text) != OK:  # (sans afficher d'erreur : un mauvais fichier, ça arrive)
+		return {}
+	var parsed = json.data
 	if not (parsed is Dictionary) or not parsed.has("elements"):
 		return {}
 	return normalized(parsed)

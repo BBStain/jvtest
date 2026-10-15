@@ -2402,7 +2402,7 @@ func _ready() -> void:
 	editor.delete_selected()
 	editor.delete_selected()
 	epad.press(JOY_BUTTON_START)
-	for i in 9:
+	for i in 10:
 		epad.nav(Vector2i(0, 1))
 	epad.nav(Vector2i(1, 0))
 	check(epad.focus == EditorPad.Focus.MENU and not editor.grid_on, "Éditeur manette : Start ouvre le menu, la grille s'y éteint")
@@ -2458,6 +2458,20 @@ func _ready() -> void:
 		{"id": 2, "type": "sol", "pos": [0, 0], "attach": 3}, {"id": 3, "type": "sol", "pos": [0, 0], "attach": 2}]})
 	check(int(loose.elements[0].attach) == 0 and (int(loose.elements[1].attach) == 0 or int(loose.elements[2].attach) == 0),
 		"Éditeur mouvement : un fichier avec un lien vers rien ou une boucle est réparé")
+	# 14d) Exporter / importer : la map passe dans un fichier, et revient (dans un autre navigateur)
+	editor._name_edit.text = "_test_export"
+	var exported := editor.export_map()
+	var exported_text := FileAccess.get_file_as_string(MapEditor.EXPORT_DIR + "/" + exported)
+	check(exported == "_test_export.json" and MapData.from_json(exported_text) == MapData.normalized(editor.data),
+		"Éditeur : Exporter écrit la map dans un fichier .json")
+	var count_before_import: int = editor.data.elements.size()
+	editor.new_map()
+	check(not editor.import_text("pas une map") and editor.data.elements.size() != count_before_import,
+		"Éditeur : Importer refuse un fichier qui n'est pas une map")
+	check(editor.import_text(exported_text) and editor.data.elements.size() == count_before_import
+		and "_test_export" in MapData.list_saved(), "Éditeur : Importer ouvre la map du fichier et la sauve dans le navigateur")
+	MapData.delete_saved("_test_export")
+	DirAccess.remove_absolute(MapEditor.EXPORT_DIR + "/" + exported)
 	editor._name_edit.text = "_test_editeur"
 	check(editor.save_map() and "_test_editeur" in MapData.list_saved(), "Éditeur : la map est sauvée et listée")
 	check(MapData.load_saved("_test_editeur") == MapData.normalized(editor.data), "Éditeur : la map sauvée se relit pareil")

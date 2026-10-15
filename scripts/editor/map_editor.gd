@@ -36,6 +36,8 @@ const DIRECTION_NAMES := ["→ droite", "↗ 30°", "↗ 60°", "↑ haut", "↖
 const PLAYER_COLORS := [Color(0.95, 0.3, 0.3), Color(0.3, 0.6, 1.0), Color(0.35, 0.85, 0.4), Color(1.0, 0.8, 0.2)]
 ## Les couleurs qu'on fait défiler à la manette (gauche / droite sur « Couleur »).
 const COLOR_PRESETS := ["#525973", "#808aa8", "#9e8cd9", "#8cc7e6", "#59b34d", "#d9b366", "#d9735e", "#e6e6e6"]
+const IMPORT_ITEM := "<importer>"         ## dans le menu Ouvrir : importer un fichier
+const EXPORT_DIR := "user://exports"      ## hors navigateur, les maps exportées vont ici
 const LINK_COLOR := Color(1.0, 0.6, 0.25)  ## les liens « attaché à »
 const ATTACH_HELP := "ATTACHER   montre l'élément auquel l'attacher (clic ou A)   ·   Échap ou B : annuler"
 const MOUSE_HELP := "Clic : choisir / déplacer   ·   carré jaune : taille   ·   R : tourner   ·   Suppr : effacer   ·   Ctrl+C / Ctrl+V : copier / coller   ·   Ctrl+Z : annuler   ·   clic droit : bouger la vue   ·   molette : zoom   ·   (ou prends une manette)"
@@ -82,6 +84,8 @@ var _ui: CanvasLayer
 var _pad: EditorPad
 var _juice: EditorJuice
 var _play_check: CheckButton
+var _import_callback: JavaScriptObject  ## navigateur : reçoit le texte du fichier choisi
+var _import_dialog: FileDialog          ## hors navigateur : choisir le fichier
 var _motion: MapMotion                ## fait bouger l'aperçu quand « Voir bouger » est allumé
 var _catalog_buttons: Array[Button] = []
 var _catalog_types: Array[String] = []
@@ -454,6 +458,79 @@ func open_map(map_name: String) -> void:
 	var area := MapData.bounds(data)
 	_camera.position = area.get_center()
 	_say("Ouverte : %s" % data.name)
+
+
+## Exporter : la map part dans un fichier .json. Dans le navigateur, il est téléchargé (dossier
+## Téléchargements) ; sur PC, il est écrit dans le dossier du jeu (exports/). Renvoie le nom du fichier.
+func export_map() -> String:
+	data.name = _name_edit.text.strip_edges() if _name_edit.text.strip_edges() != "" else "Ma map"
+	var file := MapData.file_name(str(data.name)) + ".json"
+	var text := MapData.to_json(data)
+	if OS.has_feature("web"):
+		JavaScriptBridge.download_buffer(text.to_utf8_buffer(), file, "application/json")
+		_say("Exportée : %s (dans tes Téléchargements)" % file)
+	else:
+		DirAccess.make_dir_recursive_absolute(EXPORT_DIR)
+		var out := FileAccess.open("%s/%s" % [EXPORT_DIR, file], FileAccess.WRITE)
+		if out == null:
+			_say("Impossible d'exporter")
+			return ""
+		out.store_string(text)
+		out.close()
+		_say("Exportée : %s" % ProjectSettings.globalize_path("%s/%s" % [EXPORT_DIR, file]))
+	_juice.toast("Exportée !")
+	return file
+
+
+## Importer : on choisit un fichier .json de map (exporté ici ou ailleurs). Elle est sauvée dans ce
+## navigateur (on la retrouve dans Ouvrir et dans le choix des maps) et ouverte.
+func import_map() -> void:
+	if OS.has_feature("web"):
+		# Le navigateur ouvre sa fenêtre « choisir un fichier » ; le texte du fichier revient dans _on_import_text.
+		_import_callback = JavaScriptBridge.create_callback(_on_import_text)
+		var window := JavaScriptBridge.get_interface("window")
+		window.jvtestImportMap = _import_callback
+		JavaScriptBridge.eval("""(function () {
+			var input = document.createElement('input');
+			input.type = 'file';
+			input.accept = '.json,application/json';
+			input.onchange = function () {
+				var file = input.files[0];
+				if (file) { file.text().then(function (text) { window.jvtestImportMap(text); }); }
+			};
+			input.click();
+		})();""", true)
+		return
+	if _import_dialog == null:
+		_import_dialog = FileDialog.new()
+		_import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		_import_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		_import_dialog.filters = PackedStringArray(["*.json ; Map de l'éditeur"])
+		_import_dialog.size = Vector2i(800, 500)
+		_import_dialog.file_selected.connect(func(path: String) -> void: import_text(FileAccess.get_file_as_string(path)))
+		_ui.add_child(_import_dialog)
+	_import_dialog.popup_centered()
+
+
+func _on_import_text(args: Array) -> void:
+	if not args.is_empty():
+		import_text(str(args[0]))
+
+
+## Le texte d'un fichier de map : il est vérifié, sauvé dans ce navigateur, puis ouvert.
+func import_text(text: String) -> bool:
+	var loaded := MapData.from_json(text)
+	if loaded.is_empty():
+		_say("Ce fichier n'est pas une map de l'éditeur")
+		return false
+	MapData.save(loaded)
+	_push_undo()
+	data = loaded
+	_rebuild_all()
+	_camera.position = MapData.bounds(data).get_center()
+	_say("Importée : %s (sauvée dans ce navigateur)" % data.name)
+	_juice.toast("Importée !")
+	return true
 
 
 ## Lance une partie à 2 joueurs sur la map (clavier gauche + manette 1, clavier droit + manette 2).
@@ -937,9 +1014,16 @@ func _top_bar() -> PanelContainer:
 	_open_button.flat = false
 	_open_button.about_to_popup.connect(_fill_open_menu)
 	_open_button.get_popup().index_pressed.connect(func(i: int) -> void:
-		open_map(_open_button.get_popup().get_item_metadata(i)))
+		var picked: Variant = _open_button.get_popup().get_item_metadata(i)
+		if picked == IMPORT_ITEM:
+			import_map()
+		elif picked is String:
+			open_map(picked))
 	bar.add_child(_open_button)
 	bar.add_child(_button("Sauver", save_map))
+	var export := _button("Exporter", export_map)
+	export.tooltip_text = "Télécharge la map dans un fichier .json (pour la garder, l'ouvrir dans un autre navigateur ou l'envoyer)."
+	bar.add_child(export)
 	bar.add_child(VSeparator.new())
 	bar.add_child(_text("Nom"))
 	_name_edit = LineEdit.new()
@@ -986,13 +1070,15 @@ func _fill_open_menu() -> void:
 	var popup := _open_button.get_popup()
 	popup.clear()
 	var names := MapData.list_saved()
+	for map_name in names:
+		popup.add_item(map_name)
+		popup.set_item_metadata(popup.item_count - 1, map_name)
 	if names.is_empty():
 		popup.add_item("(aucune map sauvée)")
 		popup.set_item_disabled(0, true)
-		return
-	for i in names.size():
-		popup.add_item(names[i])
-		popup.set_item_metadata(i, names[i])
+	popup.add_separator()
+	popup.add_item("Importer un fichier...")
+	popup.set_item_metadata(popup.item_count - 1, IMPORT_ITEM)
 
 
 func _catalog_panel() -> PanelContainer:
