@@ -69,6 +69,12 @@ const KNOCKED_SPEED_MAX := 1400.0          ## ... jauge pleine (berserk) : elle 
 const KNOCKED_LIFT := 0.9                  ## elle part en cloche, vers l'arrière de celui qui frappait
 const KNOCKED_PICKUP_DELAY := 0.4          ## on ne peut pas la rattraper tout de suite en vol
 
+# --- Objets et armes qui traînent par terre (voir LooseBody) : un coup les fait valdinguer ---
+const LOOSE_HIT_SPEED := 1.2               ## vitesse = recul du coup x 1,2 (lourde, marteau : plus loin)
+const LOOSE_HIT_LIFT := 300.0              ## ... un peu vers le haut, pour qu'ils décollent du sol
+const LOOSE_HIT_LOCK := 0.3                ## le même coup ne le refrappe pas à chaque frame
+const LOOSE_BLAST_SPEED := 1100.0          ## soufflé par une grenade
+
 const ONLINE_HEADER := 11                  ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
 var fighters: Array[Fighter] = []
@@ -202,6 +208,7 @@ func _physics_process(delta: float) -> void:
 	_resolve_clashes()
 	_resolve_hits()
 	_resolve_projectiles()
+	_hit_loose_objects()
 	_tick_pickups(delta)
 	_check_blast_zone()
 	_update_stun_slowmo()
@@ -847,7 +854,7 @@ func _remove_projectile(projectile: Projectile) -> void:
 ## Ce qui vole : les lances et les balles touchent le premier joueur sur leur chemin, les
 ## grenades explosent au bout de leur mèche. Un coup peut renvoyer une balle ou repousser une grenade.
 ## Une lance posée est ramassée par son lanceur quand il passe dessus ; sortie de la map, elle
-## revient tout de suite à son lanceur.
+## est perdue.
 func _resolve_projectiles() -> void:
 	for projectile: Projectile in projectiles.duplicate():
 		if not projectile in projectiles:
@@ -864,7 +871,7 @@ func _resolve_projectiles() -> void:
 func _resolve_spear(projectile: Projectile) -> void:
 	var thrower: Fighter = fighters[projectile.owner_index]
 	if not map.blast_zone.has_point(projectile.position):
-		_return_weapon(thrower)
+		_remove_projectile(projectile)  # sortie de la map : perdue (elle revient à la prochaine vie perdue)
 		return
 	if projectile.state != Projectile.State.FLYING:
 		if projectile.kind == "arme" and projectile.age < KNOCKED_PICKUP_DELAY:
@@ -979,9 +986,15 @@ func _resolve_grenade(grenade: Projectile) -> void:
 
 ## L'explosion d'une grenade : tous ceux qui sont dans le rayon (le lanceur aussi) sont touchés
 ## et éjectés loin du centre. Un bouclier la bloque (et craque beaucoup).
+## Les objets et armes par terre dans le rayon sont soufflés.
 func _explode(where: Vector2) -> void:
 	_spawn_explosion(where, Color(1.0, 0.55, 0.2))
 	map.smash_windows_in(where, GRENADE_RADIUS)
+	for loose: Node2D in _loose_objects():
+		var away := loose.position - where
+		if away.length() <= GRENADE_RADIUS:
+			var dir := (away.normalized() if away.length() > 1.0 else Vector2.UP) + Vector2(0.0, -0.5)
+			loose.launch(dir.normalized() * LOOSE_BLAST_SPEED)
 	for fighter in fighters:
 		if fighter.eliminated or fighter.is_invincible() or fighter.is_item_shielded():
 			continue
@@ -1088,6 +1101,37 @@ func _on_item_used(fighter: Fighter, kind: String, direction: Vector2, power: fl
 
 ## Toutes les ITEM_SPAWN_TIME secondes, un objet tiré au sort apparaît à un des points prévus
 ## par la map et tombe jusqu'à ce qu'il y a dessous. On le ramasse en passant dessus (si on n'a pas déjà un objet).
+## Ce qui traîne sans danger sur la map : objets pas encore ramassés, lances retombées ou
+## plantées, armes qui ont sauté des mains.
+func _loose_objects() -> Array[Node2D]:
+	var list: Array[Node2D] = []
+	list.append_array(pickups)
+	for projectile in projectiles:
+		if projectile.kind in ["lance", "arme"] and projectile.state != Projectile.State.FLYING:
+			list.append(projectile)
+	return list
+
+
+## Un coup qui passe sur un objet ou une arme par terre le fait valdinguer dans le sens du coup,
+## d'autant plus loin que le coup pousse fort. Le coup continue (il peut aussi toucher un joueur).
+func _hit_loose_objects() -> void:
+	for fighter in fighters:
+		if fighter.eliminated or not fighter.is_attack_active():
+			continue
+		for loose: Node2D in _loose_objects():
+			if loose.hit_lock > 0.0 or not _loose_in_attack(loose, fighter):
+				continue
+			var speed := fighter.attack_knockback() * LOOSE_HIT_SPEED
+			loose.launch(fighter.attack_direction() * speed + Vector2(0.0, -LOOSE_HIT_LIFT))
+
+
+func _loose_in_attack(loose: Node2D, fighter: Fighter) -> bool:
+	if loose is Projectile:
+		return _projectile_in_attack(loose, fighter)
+	var closest := Geometry2D.get_closest_point_to_segment(loose.position, fighter.attack_start(), fighter.attack_center())
+	return closest.distance_to(loose.position) <= fighter.attack_radius() + ItemPickup.SIZE / 2.0
+
+
 func _tick_pickups(delta: float) -> void:
 	_item_spawn_timer -= delta
 	if _item_spawn_timer <= 0.0:

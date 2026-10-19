@@ -1708,6 +1708,9 @@ func _ready() -> void:
 	p1._attack_cooldown_timer = 0.0
 	await step(14)
 	check(p1.weapon_away, "Lance : relancée")
+	game.projectiles[0].position = Vector2(640, 5000)
+	await step(1)
+	check(p1.weapon_away and game.projectiles.is_empty(), "Lance : sortie de la map, elle est perdue (on reste à mains nues)")
 	p1.position = Vector2(640, 2000)
 	await step(2)
 	check(not p1.weapon_away and game.projectiles.is_empty(), "Lance : tombé de la map, on réapparaît avec sa lance")
@@ -2010,6 +2013,79 @@ func _ready() -> void:
 	for pickup in game.pickups:
 		all_landed = all_landed and pickup.landed
 	check(all_landed, "Objets : ils se posent sur le décor")
+	# 19k) Physique : posé sur une plateforme qui bouge, l'objet est transporté ; elle part, il retombe ;
+	# un coup le fait valdinguer dans le sens du coup ; une grenade le souffle ; une fenêtre qui casse le lâche
+	for pickup in game.pickups.duplicate():
+		game._remove_pickup(pickup)
+	game._item_spawn_timer = 999.0
+	p1.take_item("pistolet"); p2.take_item("pistolet")  # mains pleines : ils ne ramassent rien
+	p1.position = Vector2(900, 540); p2.position = Vector2(1100, 540)
+	var ride := MovingPlatform.new()
+	ride.size = Vector2(200, 16); ride.travel = Vector2(300, 0); ride.period = 2.0
+	ride.position = Vector2(50, 200)
+	game.map.add_child(ride)
+	await step(1)
+	var rider: ItemPickup = game.spawn_pickup("bouclier", Vector2(ride.position.x, 120))
+	for i in 60:
+		await step(1)
+		if rider.landed:
+			break
+	var gap := rider.position.x - ride.position.x
+	await step(20)
+	check(rider.landed and ride.position.x > 120.0 and absf(rider.position.x - ride.position.x - gap) < 4.0 and absf(rider.position.y - 179.0) < 3.0,
+		"Objets : posé sur une plateforme qui bouge, il est transporté (écart %.1f)" % (rider.position.x - ride.position.x - gap))
+	ride.queue_free()
+	await step(10)
+	check(not rider.landed and rider.position.y > 185.0, "Objets : la plateforme partie, il retombe")
+	for i in 90:
+		await step(1)
+		if rider.landed:
+			break
+	check(rider.landed, "Objets : il se repose plus bas")
+	p1.position = rider.position + Vector2(-50, 0)
+	p1._invincible_timer = 0.0
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	check(not rider.landed and rider.velocity.x > 500.0 and rider.velocity.y < 0.0, "Objets : un coup le fait valdinguer dans le sens du coup (vx %.0f)" % rider.velocity.x)
+	var light_speed := rider.velocity.length()
+	await step(1)
+	check(rider.velocity.length() < light_speed * 1.2, "Objets : le même coup ne le refrappe pas à chaque frame")
+	await step(120)
+	game._explode(rider.position + Vector2(60, 10))
+	check(rider.velocity.x < -300.0 and rider.velocity.y < 0.0, "Objets : une grenade le souffle")
+	await step(120)
+	var pane := BreakableWindow.new()
+	pane.size = Vector2(120, 20)
+	pane.position = Vector2(150, 200)
+	game.map.add_child(pane)
+	await step(1)
+	for pickup in game.pickups.duplicate():
+		game._remove_pickup(pickup)
+	rider = game.spawn_pickup("bouclier", Vector2(150, 150))
+	await step(40)
+	check(rider.landed and absf(rider.position.y - 177.0) < 3.0, "Objets : il se pose sur une fenêtre")
+	pane.smash()
+	await step(10)
+	check(not rider.landed and rider.position.y > 185.0, "Objets : la fenêtre casse, il tombe")
+	# ... pareil pour une arme qui traîne par terre
+	var lying := Projectile.new()
+	lying.kind = "arme"; lying.state = Projectile.State.DROPPED; lying.length = 40.0; lying.color = Color.RED
+	lying.position = Vector2(700, 400)
+	game._add_projectile(lying)
+	for i in 90:
+		await step(1)
+		if lying.state == Projectile.State.STUCK:
+			break
+	check(lying.state == Projectile.State.STUCK, "Arme par terre : elle se pose")
+	p1.position = lying.position + Vector2(50, -20)
+	p1._attack_cooldown_timer = 0.0
+	light_now(p1, Vector2.LEFT)
+	await step(1)
+	check(lying.state == Projectile.State.DROPPED and lying.velocity.x < -500.0, "Arme par terre : un coup la fait valdinguer (vx %.0f)" % lying.velocity.x)
+	lying.position = Vector2(700, 3000)
+	await step(1)
+	check(not lying in game.projectiles, "Arme par terre : sortie de la map, elle est perdue")
+	p1.item = ""; p2.item = ""
 
 	# 17) Le toit de l'Arène (le labo) : on ne le traverse pas par en dessous ; on y monte par l'échelle
 	# (à gauche, très rapide, on est éjecté en haut) ou par l'ascenseur (à droite)

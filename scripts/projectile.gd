@@ -21,9 +21,8 @@ const GRENADE_BOUNCE := 0.4             ## la grenade rebondit (garde 40 % de sa
 const BULLET_LIFETIME := 2.5            ## une balle qui ne touche rien disparaît au bout de ce temps
 const RADIUS := 6.0                     ## épaisseur de la zone qui touche
 const SPEAR_LENGTH := 70.0              ## lance neuve (plus courte à chaque fois qu'elle est contrée)
-const KNOCKED_GRAVITY := 1400.0         ## arme qui a sauté des mains
-const KNOCKED_SPIN := 14.0              ## ... elle tourne sur elle-même en volant
-const KNOCKED_BOUNCE := 0.5             ## ... et rebondit sur les murs et plafonds (garde 50 % de sa vitesse)
+const KNOCKED_SPIN := 14.0              ## arme qui a sauté des mains : elle tourne sur elle-même en volant
+const KNOCKED_RADIUS := 4.0             ## ... (elle tombe et rebondit comme un objet, voir LooseBody)
 const KNOCKED_SCALE := 1.3              ## ... dessinée un peu plus grande qu'en main, pour la repérer
 
 var kind := "lance"
@@ -37,6 +36,9 @@ var color := Color(1, 1, 1)
 var fuse := -1.0                        ## grenade : temps avant l'explosion
 var age := 0.0
 var finished := false                   ## à retirer (balle arrivée dans un mur, grenade qui explose)
+var body := LooseBody.new()             ## arme posée ou plantée : elle suit ce qui la porte (plateforme qui bouge)
+var tumbling := false                   ## lance frappée par terre : elle vole pointe devant et se replante
+var hit_lock := 0.0                     ## vient d'être frappée : le même coup ne la refrappe pas
 var simulate := true                    ## false chez un copain en ligne : il ne fait qu'afficher
 
 
@@ -44,6 +46,7 @@ func _physics_process(delta: float) -> void:
 	if not simulate:
 		return
 	age += delta
+	hit_lock -= delta
 	match kind:
 		"balle":
 			_tick_bullet(delta)
@@ -58,6 +61,7 @@ func _physics_process(delta: float) -> void:
 
 func _tick_spear(delta: float) -> void:
 	if state == State.STUCK:
+		_follow_support()
 		return
 	velocity.y += (FLY_GRAVITY if state == State.FLYING else DROP_GRAVITY) * delta
 	var step := velocity * delta
@@ -69,10 +73,23 @@ func _tick_spear(delta: float) -> void:
 		position += (hit.position as Vector2) - tip()
 		velocity = Vector2.ZERO
 		state = State.STUCK
+		tumbling = false
+		body.rest_on(self, hit.collider)
 	else:
 		position += step
-	if state == State.FLYING:
-		rotation = velocity.angle()
+	if state == State.FLYING or tumbling:
+		rotation = velocity.angle()  # frappée par un coup : elle part pointe devant
+
+
+## Lance plantée : elle suit ce dans quoi elle est plantée (bloc qui bouge). S'il disparaît
+## (fenêtre cassée...), elle retombe.
+func _follow_support() -> void:
+	body.follow(self)
+	var dir := Vector2.RIGHT.rotated(rotation)
+	if _ray(tip() - dir * 6.0, tip() + dir * 6.0, true).is_empty():
+		state = State.DROPPED
+		velocity = Vector2.ZERO
+		body.launch()
 
 
 func _tick_bullet(delta: float) -> void:
@@ -109,25 +126,23 @@ func _tick_grenade(delta: float) -> void:
 
 
 func _tick_knocked(delta: float) -> void:
-	if state == State.STUCK:
-		return
-	velocity.y += KNOCKED_GRAVITY * delta
-	var step := velocity * delta
-	var hit := _ray(position, position + step + step.normalized() * RADIUS, velocity.y > 0.0)
-	if hit.is_empty():
-		position += step
-		rotation += KNOCKED_SPIN * delta * (1.0 if velocity.x >= 0.0 else -1.0)
-		return
-	var normal: Vector2 = hit.normal
-	position = (hit.position as Vector2) + normal * RADIUS
-	if normal.y < -0.5:
-		# Au sol : elle se pose à plat.
-		position = (hit.position as Vector2) + normal * 3.0
-		velocity = Vector2.ZERO
-		rotation = 0.0 if cos(rotation) >= 0.0 else PI
+	velocity = body.step(self, velocity, KNOCKED_RADIUS, delta)
+	if body.resting:
+		if state != State.STUCK:
+			rotation = 0.0 if cos(rotation) >= 0.0 else PI  # au sol : elle se pose à plat
 		state = State.STUCK
 	else:
-		velocity = velocity.bounce(normal) * KNOCKED_BOUNCE
+		state = State.DROPPED
+		rotation += KNOCKED_SPIN * delta * (1.0 if velocity.x >= 0.0 else -1.0)
+
+
+## Un coup (ou une explosion) l'envoie valdinguer, sans danger.
+func launch(new_velocity: Vector2) -> void:
+	velocity = new_velocity
+	state = State.DROPPED
+	tumbling = kind == "lance"
+	body.launch()
+	hit_lock = Game.LOOSE_HIT_LOCK
 
 
 ## Un rayon contre les sols et les murs (et les plateformes traversables quand on tombe dessus).

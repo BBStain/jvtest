@@ -9,13 +9,17 @@ extends Node2D
 
 const KINDS := ["pistolet", "grenade", "bouclier"]
 const SIZE := 26.0
-const GRAVITY := 1400.0
-const MAX_FALL := 600.0
+const MAX_FALL := 600.0                 ## il tombe du ciel doucement (plus vite s'il est frappé)
 
 var kind := "pistolet"
 var velocity := Vector2.ZERO
-var landed := false
+var body := LooseBody.new()             ## tombe, se pose, suit les plateformes, valdingue quand on le frappe
+var hit_lock := 0.0                     ## vient d'être frappé : le même coup ne le refrappe pas
+var _launched := false                  ## frappé, pas encore reposé
 var simulate := true                    ## false chez un copain en ligne : il ne fait qu'afficher
+var landed: bool:                       ## posé quelque part
+	get:
+		return body.resting
 
 
 static func color_of(item_kind: String) -> Color:
@@ -30,19 +34,22 @@ static func color_of(item_kind: String) -> Color:
 
 
 func _physics_process(delta: float) -> void:
-	if not simulate or landed:
+	if not simulate:
 		return
-	velocity.y = minf(velocity.y + GRAVITY * delta, MAX_FALL)
-	var bottom := position + Vector2(0.0, SIZE / 2.0)
-	var mask := 1 | (1 << (Fighter.PLATFORM_LAYER - 1))
-	var query := PhysicsRayQueryParameters2D.create(bottom, bottom + velocity * delta, mask)
-	var hit := get_world_2d().direct_space_state.intersect_ray(query)
-	if hit.is_empty():
-		position += velocity * delta
-	else:
-		position = (hit.position as Vector2) - Vector2(0.0, SIZE / 2.0)
-		velocity = Vector2.ZERO
-		landed = true
+	hit_lock -= delta
+	if not _launched:
+		velocity.y = minf(velocity.y, MAX_FALL)  # chute tranquille quand personne ne l'a frappé
+	velocity = body.step(self, velocity, SIZE / 2.0, delta)
+	if body.resting:
+		_launched = false
+
+
+## Un coup (ou une explosion) l'envoie valdinguer.
+func launch(new_velocity: Vector2) -> void:
+	velocity = new_velocity
+	body.launch()
+	_launched = true
+	hit_lock = Game.LOOSE_HIT_LOCK
 
 
 func rect() -> Rect2:
