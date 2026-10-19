@@ -63,6 +63,12 @@ const GRENADE_RADIUS := 140.0              ## rayon de l'explosion
 const GRENADE_KNOCKBACK := 1150.0
 const GRENADE_SHIELD_DAMAGE := 3
 
+# --- Blocage parfait : l'arme de celui qui frappait lui saute des mains ---
+const KNOCKED_SPEED_MIN := 550.0           ## jauge de contre vide : elle tombe à quelques pas...
+const KNOCKED_SPEED_MAX := 1400.0          ## ... jauge pleine (berserk) : elle part très loin
+const KNOCKED_LIFT := 0.9                  ## elle part en cloche, vers l'arrière de celui qui frappait
+const KNOCKED_PICKUP_DELAY := 0.4          ## on ne peut pas la rattraper tout de suite en vol
+
 const ONLINE_HEADER := 11                  ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
 var fighters: Array[Fighter] = []
@@ -491,9 +497,12 @@ func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -
 	var heavy_countered := a.is_heavy_attack() != b.is_heavy_attack()
 	var explosion := a.is_heavy_attack() and b.is_heavy_attack()
 	var worn: Array[Fighter] = []  # les lourdes contrées : leur arme s'use (voir _wear_weapon)
+	var repaired: Array[Fighter] = []  # ceux qui ont contré au coup léger : leur arme se répare
 	for fighter in [a, b]:
 		if fighter.is_heavy_attack() and not fighter.weapon_away:
 			worn.append(fighter)
+		elif not fighter.is_heavy_attack() and (counterer == null or fighter == counterer):
+			repaired.append(fighter)
 	_spawn_clash_mark(where, heavy_countered or explosion)
 	gauge.add_counter(heavy_countered or explosion)  # contrer une lourde compte triple
 	for fighter in [a, b]:
@@ -526,11 +535,15 @@ func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -
 		_renew_slowmo(a, b)
 	for fighter in worn:
 		_wear_weapon(fighter, b if fighter == a else a)
+	for fighter in repaired:
+		fighter.weapon_light_counter()
 
 
 ## Blocage parfait : le défenseur a appuyé sur B pile au moment du coup. C'est un contre :
 ## les deux sont repoussés, le bouclier ne craque pas, celui qui frappait ne frappe plus
 ## pendant 1 s et le défenseur peut riposter tout de suite (et n'est plus sonné).
+## L'arme de celui qui frappait lui saute des mains (voir _knock_weapon), après s'être usée
+## si c'était sa lourde (une arme qui casse ne s'envole pas).
 func _parry(attacker: Fighter, defender: Fighter) -> void:
 	var push := _push_dir(attacker, defender)
 	_spawn_clash_mark((attacker.global_position + defender.global_position) / 2.0, false, PARRY_COLOR)
@@ -541,8 +554,30 @@ func _parry(attacker: Fighter, defender: Fighter) -> void:
 	attacker.clash(push * Fighter.CLASH_PUSH * defender.stats.mass(), Fighter.PARRY_COOLDOWN)
 	defender.clash(-push * Fighter.CLASH_PUSH * attacker.stats.mass(), 0.0)
 	_renew_slowmo(attacker, defender)
-	if heavy and armed:
-		_wear_weapon(attacker, defender)
+	if heavy and armed and _wear_weapon(attacker, defender):
+		return
+	_knock_weapon(attacker, push)
+
+
+## L'arme de "holder" lui saute des mains et part en cloche dans la direction "push" (vers
+## l'arrière, loin de celui qui a bloqué). Plus la jauge de contre est haute, plus elle va loin.
+## Elle ne fait mal à personne ; son joueur la ramasse en passant dessus (voir _resolve_spear),
+## ou la retrouve s'il tombe de la map.
+func _knock_weapon(holder: Fighter, push: Vector2) -> void:
+	if not holder.knock_weapon_away():
+		return
+	var speed := lerpf(KNOCKED_SPEED_MIN, KNOCKED_SPEED_MAX, gauge.points / CounterGauge.MAX_POINTS)
+	var knocked := Projectile.new()
+	knocked.kind = "arme"
+	knocked.state = Projectile.State.DROPPED
+	knocked.owner_index = holder.player_index
+	knocked.position = holder.global_position
+	knocked.velocity = (push + Vector2(0.0, -KNOCKED_LIFT)).normalized() * speed
+	knocked.rotation = -PI / 2.0
+	knocked.color = holder.weapon.color
+	knocked.length = holder.weapon.held_length * holder.weapon_length() * Projectile.KNOCKED_SCALE
+	knocked.head = holder.weapon.held_head * holder.weapon_length() * Projectile.KNOCKED_SCALE
+	_add_projectile(knocked)
 
 
 ## La lourde d'une arme a été contrée : l'arme rapetisse, et au 3e contre elle casse (voir
@@ -832,6 +867,8 @@ func _resolve_spear(projectile: Projectile) -> void:
 		_return_weapon(thrower)
 		return
 	if projectile.state != Projectile.State.FLYING:
+		if projectile.kind == "arme" and projectile.age < KNOCKED_PICKUP_DELAY:
+			return
 		if not thrower.eliminated and thrower.body_rect().grow(12.0).has_point(projectile.position):
 			_return_weapon(thrower)
 		return
@@ -859,6 +896,8 @@ func _counter_spear(spear: Projectile, counterer: Fighter) -> void:
 	var thrower: Fighter = fighters[spear.owner_index]
 	if counterer.is_attack_active():
 		counterer.mark_attack_hit()
+		if not counterer.is_heavy_attack():
+			counterer.weapon_light_counter()  # contre au coup léger : l'arme se répare
 	counterer.recover()
 	counterer.reset_cooldown()
 	gauge.add_counter(true)
@@ -1091,10 +1130,11 @@ func _apply_pickups(list: Array) -> void:
 		pickups[i].apply_net_state(list[i])
 
 
-## La lance revient à son lanceur (ramassée, sortie de la map, ou il a réapparu).
+## La lance (ou l'arme qui a sauté des mains) revient à son joueur (ramassée, sortie de la map,
+## ou il a réapparu).
 func _return_weapon(fighter: Fighter) -> void:
 	for projectile: Projectile in projectiles.duplicate():
-		if projectile.kind == "lance" and projectile.owner_index == fighter.player_index:
+		if projectile.kind in ["lance", "arme"] and projectile.owner_index == fighter.player_index:
 			_remove_projectile(projectile)
 	fighter.get_weapon_back()
 

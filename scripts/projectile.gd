@@ -6,6 +6,8 @@ extends Node2D
 ##   balle   : une balle de pistolet, rapide et en ligne droite ; elle disparaît contre un mur.
 ##             Un coup donné au bon moment la renvoie (voir game.gd, _deflect_bullet).
 ##   grenade : elle rebondit sur le sol et explose quand sa mèche est finie. Un coup la repousse.
+##   arme    : l'arme qui a sauté des mains sur un blocage parfait. Elle vole en tournant, sans
+##             danger, rebondit sur les murs, se pose au sol, et son joueur la ramasse en passant dessus.
 ## Seul l'hôte le fait bouger en ligne : les copains reçoivent sa position (voir net_state).
 ## Dessin très simple : à remplacer par un graphiste.
 
@@ -19,6 +21,10 @@ const GRENADE_BOUNCE := 0.4             ## la grenade rebondit (garde 40 % de sa
 const BULLET_LIFETIME := 2.5            ## une balle qui ne touche rien disparaît au bout de ce temps
 const RADIUS := 6.0                     ## épaisseur de la zone qui touche
 const SPEAR_LENGTH := 70.0              ## lance neuve (plus courte à chaque fois qu'elle est contrée)
+const KNOCKED_GRAVITY := 1400.0         ## arme qui a sauté des mains
+const KNOCKED_SPIN := 14.0              ## ... elle tourne sur elle-même en volant
+const KNOCKED_BOUNCE := 0.5             ## ... et rebondit sur les murs et plafonds (garde 50 % de sa vitesse)
+const KNOCKED_SCALE := 1.3              ## ... dessinée un peu plus grande qu'en main, pour la repérer
 
 var kind := "lance"
 var owner_index := 0                    ## le joueur qui l'a lancé (ou qui a renvoyé la balle)
@@ -26,6 +32,7 @@ var velocity := Vector2.ZERO
 var state := State.FLYING
 var knockback := 940.0
 var length := SPEAR_LENGTH
+var head := 0.0                         ## arme qui a sauté : taille de son bout (tête du marteau...)
 var color := Color(1, 1, 1)
 var fuse := -1.0                        ## grenade : temps avant l'explosion
 var age := 0.0
@@ -42,6 +49,8 @@ func _physics_process(delta: float) -> void:
 			_tick_bullet(delta)
 		"grenade":
 			_tick_grenade(delta)
+		"arme":
+			_tick_knocked(delta)
 		_:
 			_tick_spear(delta)
 	queue_redraw()
@@ -99,6 +108,28 @@ func _tick_grenade(delta: float) -> void:
 	position = (hit.position as Vector2) + normal * RADIUS
 
 
+func _tick_knocked(delta: float) -> void:
+	if state == State.STUCK:
+		return
+	velocity.y += KNOCKED_GRAVITY * delta
+	var step := velocity * delta
+	var hit := _ray(position, position + step + step.normalized() * RADIUS, velocity.y > 0.0)
+	if hit.is_empty():
+		position += step
+		rotation += KNOCKED_SPIN * delta * (1.0 if velocity.x >= 0.0 else -1.0)
+		return
+	var normal: Vector2 = hit.normal
+	position = (hit.position as Vector2) + normal * RADIUS
+	if normal.y < -0.5:
+		# Au sol : elle se pose à plat.
+		position = (hit.position as Vector2) + normal * 3.0
+		velocity = Vector2.ZERO
+		rotation = 0.0 if cos(rotation) >= 0.0 else PI
+		state = State.STUCK
+	else:
+		velocity = velocity.bounce(normal) * KNOCKED_BOUNCE
+
+
 ## Un rayon contre les sols et les murs (et les plateformes traversables quand on tombe dessus).
 func _ray(from: Vector2, to: Vector2, with_platforms: bool) -> Dictionary:
 	var query := PhysicsRayQueryParameters2D.create(from, to, 1)
@@ -123,7 +154,7 @@ func drop() -> void:
 
 
 func net_state() -> Array:
-	return [kind, owner_index, position, rotation, state, color, fuse, length]
+	return [kind, owner_index, position, rotation, state, color, fuse, length, head]
 
 
 func apply_net_state(data: Array) -> void:
@@ -135,6 +166,7 @@ func apply_net_state(data: Array) -> void:
 	color = data[5]
 	fuse = data[6] if data.size() > 6 else -1.0
 	length = data[7] if data.size() > 7 else 16.0 if kind == "balle" else 18.0 if kind == "grenade" else SPEAR_LENGTH
+	head = data[8] if data.size() > 8 else 0.0
 	queue_redraw()
 
 
@@ -149,6 +181,12 @@ func _draw() -> void:
 			var blink := int(fuse / lerpf(0.05, 0.25, clampf(fuse / 3.0, 0.0, 1.0))) % 2 == 0
 			draw_circle(Vector2.ZERO, 8.0, Color(1, 0.3, 0.2) if blink and fuse < 1.5 else color)
 			draw_arc(Vector2.ZERO, 8.0, 0.0, TAU, 16, Color(1, 1, 1, 0.6), 1.5)
+		"arme":
+			# Comme dans la main : un manche, et un bout carré (tête du marteau, pointe...).
+			var half := length / 2.0
+			draw_line(Vector2(-half, 0.0), Vector2(half, 0.0), color, 4.0)
+			if head > 0.0:
+				draw_rect(Rect2(Vector2(half, 0.0) - Vector2.ONE * head / 2.0, Vector2.ONE * head), color)
 		_:
 			var half := length / 2.0
 			var alpha := 1.0 if state == State.FLYING else 0.85

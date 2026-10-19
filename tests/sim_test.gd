@@ -1748,6 +1748,85 @@ func _ready() -> void:
 	await step(2)
 	check(not p1.weapon_away and p1.weapon_counters == 0 and is_equal_approx(p1.stats.attack_reach, base.attack_reach * spear_weapon.light_reach_mult),
 		"Lance cassée : une lance neuve revient à la prochaine vie perdue")
+	# 18h) Contrer 2 fois avec le coup léger de son arme la répare d'un cran (pas au-delà de 100 %)
+	GameSetup.player_weapons = [GameSetup.WEAPONS[1], GameSetup.WEAPONS[0]]
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.weapon_counters = 2
+	game._clash(p2, p1, p1.position, p1)
+	check(p1.weapon_counters == 2, "Arme réparée : 1 contre au coup léger ne suffit pas")
+	game._clash(p2, p1, p1.position, p1)
+	check(p1.weapon_counters == 1 and p1._repair_flash_timer > 0.0 and p1._armed_stats.attack_reach > p1._bare_stats.attack_reach * katana.light_reach_mult * 0.7,
+		"Arme réparée : 2 contres au coup léger = 1 cran regagné (60 % -> 80 %)")
+	game._clash(p1, p2, p1.position)  # deux légères qui se percutent : chacun a contré
+	game._clash(p1, p2, p1.position)
+	check(p1.weapon_counters == 0 and is_equal_approx(p1.weapon_length(), 1.0), "Arme réparée : de nouveau neuve")
+	game._clash(p2, p1, p1.position, p1)
+	game._clash(p2, p1, p1.position, p1)
+	p1.weapon_counters = 1
+	game._clash(p2, p1, p1.position, p1)
+	check(p1.weapon_counters == 1, "Arme réparée : une arme neuve ne garde pas de contres d'avance")
+	game._clash(p1, p2, p1.position, p2)
+	check(p1.weapon_counters == 1, "Arme réparée : il faut que ce soit nous qui contrions")
+	p1.weapon_counters = Fighter.WEAPON_MAX_COUNTERS
+	p1.weapon_away = true
+	game._clash(p2, p1, p1.position, p1)
+	game._clash(p2, p1, p1.position, p1)
+	check(p1.is_weapon_broken() and p1.weapon_away, "Arme réparée : une arme cassée ne se répare pas")
+	# 18i) Blocage parfait : l'arme de celui qui frappait lui saute des mains, vers l'arrière, en cloche
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 600; p2.position.x = 650
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= 29 and f < 45)
+	await step(31 + light_frames)
+	check(untouched(p2) and p1.weapon_away and game.projectiles.size() == 1 and game.projectiles[0].kind == "arme",
+		"Arme projetée : un blocage parfait fait sauter l'arme des mains")
+	var knocked: Projectile = game.projectiles[0]
+	check(knocked.velocity.x < 0.0 and knocked.velocity.y < 0.0 and is_equal_approx(p1.stats.attack_reach, base.attack_reach),
+		"Arme projetée : elle part en cloche loin de celui qui bloque ; mains nues en attendant")
+	await step(8)
+	await shot("18_arme_projetee")
+	for i in 120:
+		await step(1)
+		if knocked.state == Projectile.State.STUCK:
+			break
+	check(knocked.state == Projectile.State.STUCK and untouched(p1) and untouched(p2), "Arme projetée : elle retombe au sol sans toucher personne")
+	await shot("18_arme_au_sol")
+	var knocked_x := knocked.position.x
+	p1.input_source = Scripted.new(func(s, f): s.stick.x = 1.0 if p1.position.x < knocked_x else -1.0)
+	for i in 180:
+		await step(1)
+		if not p1.weapon_away:
+			break
+	check(not p1.weapon_away and game.projectiles.is_empty() and is_equal_approx(p1.stats.attack_reach, base.attack_reach * katana.light_reach_mult),
+		"Arme projetée : on la ramasse en passant dessus")
+	# ... on ne la rattrape pas tout de suite, et plus la jauge est haute, plus elle part loin
+	p1.input_source = Scripted.new(func(s, f): pass)
+	game.gauge.points = 0.0
+	game._knock_weapon(p1, Vector2.LEFT)
+	var slow_speed: float = game.projectiles[0].velocity.length()
+	await step(2)
+	check(p1.weapon_away and game.projectiles.size() == 1, "Arme projetée : on ne la rattrape pas dans la seconde")
+	game._return_weapon(p1)
+	check(not p1.weapon_away and game.projectiles.is_empty(), "Arme projetée : elle revient si on tombe de la map")
+	game.gauge.points = CounterGauge.MAX_POINTS
+	game._knock_weapon(p1, Vector2.LEFT)
+	check(game.projectiles[0].velocity.length() > slow_speed * 2.0,
+		"Arme projetée : jauge berserk, elle part bien plus loin (%.0f contre %.0f)" % [game.projectiles[0].velocity.length(), slow_speed])
+	game._return_weapon(p1)
+	game.gauge.points = 0.0
+	# ... à mains nues rien ne s'envole, et une lourde qui casse l'arme ne la fait pas voler
+	game._knock_weapon(p2, Vector2.RIGHT)
+	check(game.projectiles.is_empty(), "Arme projetée : à mains nues, rien ne s'envole")
+	p1.weapon_counters = Fighter.WEAPON_MAX_COUNTERS - 1
+	p1._attack_heavy = true
+	p1._attack_time = 0.0
+	game._parry(p1, p2)
+	check(p1.is_weapon_broken() and game.projectiles.is_empty(), "Arme projetée : une arme qui casse sur le blocage ne s'envole pas")
 	GameSetup.player_weapons = []
 
 	# 19) Les objets qui tombent sur la map : pistolet, grenade, bouclier (RT pour les utiliser)
