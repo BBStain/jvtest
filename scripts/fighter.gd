@@ -81,6 +81,8 @@ const SLAM_WAVE_REACH := 150.0          ## ... jusqu'où elle va de chaque côt�
 const SLAM_WAVE_RADIUS := 14.0          ## ... sa hauteur (de chaque côté du sol)
 const WEAPON_MAX_COUNTERS := 3         ## lourde d'une arme contrée 3 fois : arme cassée jusqu'à la prochaine vie perdue
 const WEAPON_SHRINK := 0.2              ## chaque contre rapetisse l'arme de 20 % (100 %, 80 %, 60 %)
+const WEAPON_REPAIR_COUNTERS := 2       ## contrer 2 fois avec le coup léger de son arme la répare d'un cran
+const WEAPON_REPAIR_FLASH := 0.5        ## arme réparée : un anneau de sa couleur apparaît ce temps
 const THROW_CHARGE_SPEED := 1.5         ## lance / dash du katana : à pleine charge, 1,5 fois plus vite
 
 # --- Objets ramassés sur la map (un seul à la fois, utilisé avec RT ; voir item_pickup.gd) ---
@@ -142,7 +144,7 @@ const NET_VARS := [
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
 	"_stun_timer", "_block_hold_time", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
-	"_swinging", "_swing_anchor", "_item_flash_timer",
+	"_swinging", "_swing_anchor", "_item_flash_timer", "_repair_flash_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -236,6 +238,8 @@ var _item_cooldown := 0.0
 var _grenade_fuse := -1.0               ## grenade dégoupillée en main : temps avant l'explosion (-1 = non)
 var _grenade_hold := 0.0                ## depuis combien de temps RT est gardé (distance du lancer)
 var _item_flash_timer := 0.0            ## > 0 juste après avoir ramassé un objet
+var _repair_flash_timer := 0.0          ## > 0 juste après que son arme a été réparée
+var _repair_counters := 0               ## contres au coup léger depuis la dernière réparation (voir weapon_light_counter)
 
 var gauge := CounterGauge.new()         ## la jauge de contre de la partie (partagée, donnée par game.gd)
 
@@ -393,6 +397,7 @@ func _tick_timers(delta: float) -> void:
 	_vine_regrab_timer -= delta
 	_item_cooldown -= delta
 	_item_flash_timer -= delta
+	_repair_flash_timer -= delta
 	item_shield_timer -= delta
 	_blink_clock += delta
 
@@ -818,6 +823,30 @@ func weapon_countered() -> bool:
 	return true
 
 
+## On a contré avec le coup léger de son arme : tous les WEAPON_REPAIR_COUNTERS contres, une arme
+## usée regagne un cran (80 % -> 100 %, 60 % -> 80 %). Une arme neuve ne garde pas de contres
+## d'avance ; une arme cassée ne se répare pas. Renvoie true si l'arme vient d'être réparée.
+func weapon_light_counter() -> bool:
+	if weapon.is_bare_hands() or weapon_away or weapon_counters <= 0:
+		return false
+	_repair_counters += 1
+	if _repair_counters < WEAPON_REPAIR_COUNTERS:
+		return false
+	_repair_counters = 0
+	weapon_counters -= 1
+	_repair_flash_timer = WEAPON_REPAIR_FLASH
+	return true
+
+
+## Blocage parfait : l'arme en main nous saute des mains (game.gd la fait voler). On se bat à
+## mains nues jusqu'à la ramasser en passant dessus. Renvoie false s'il n'y avait rien en main.
+func knock_weapon_away() -> bool:
+	if weapon.is_bare_hands() or weapon_away:
+		return false
+	weapon_away = true
+	return true
+
+
 func is_weapon_broken() -> bool:
 	return weapon_counters >= WEAPON_MAX_COUNTERS
 
@@ -1182,6 +1211,7 @@ func _lose_life() -> void:
 	if is_weapon_broken():
 		weapon_counters = 0  # arme cassée : une neuve revient à la vie suivante
 		weapon_away = false
+		_repair_counters = 0
 	if lives <= 0:
 		_leave_vine()
 		eliminated = true
@@ -1412,6 +1442,11 @@ func _draw_item(body: Rect2) -> void:
 		var t := 1.0 - _item_flash_timer / ITEM_FLASH_TIME
 		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.4, body.size.y * 1.1, t), 0.0, TAU, 32,
 			Color(ItemPickup.color_of(item), 1.0 - t), 3.0)
+	if _repair_flash_timer > 0.0:
+		# L'arme vient d'être réparée : un anneau de sa couleur.
+		var t := 1.0 - _repair_flash_timer / WEAPON_REPAIR_FLASH
+		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.4, body.size.y * 1.1, t), 0.0, TAU, 32,
+			Color(weapon.color, 1.0 - t), 3.0)
 	var hand := Vector2(facing * (body.size.x / 2.0 + 6.0), 6.0)
 	match item:
 		"pistolet":
