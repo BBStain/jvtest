@@ -202,7 +202,8 @@ TESTER lance une partie à 2 sur la map ; QUITTER dans le menu pause ramène dan
 navigateur et apparaissent dans le choix de la map (après l'Arène). Elles sont rangées en JSON (voir `scripts/editor/map_data.gd`).
 Les maps du dossier `maps_editeur/` sont livrées avec le jeu (comme **La Tour**, une grande map verticale faite avec
 l'éditeur) : on les joue depuis le choix de la map et on les ouvre dans l'éditeur pour les modifier (Sauver garde alors
-sa propre copie dans le navigateur).
+sa propre copie dans le navigateur). Pour faire d'une de ces maps une **map officielle** (jouable aussi en ligne, comme La Tour),
+ajoute son chemin (`res://maps_editeur/Nom.json`) dans la liste `MAPS` de `scripts/game_setup.gd`.
 
 **Exporter / Importer** : les maps sauvées restent dans *ce* navigateur. Pour en garder une pour toujours, l'ouvrir dans un
 autre navigateur ou sur un autre PC, ou l'envoyer à un copain : **Exporter** (en haut, ou Start > Exporter à la manette)

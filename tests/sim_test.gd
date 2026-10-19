@@ -952,7 +952,7 @@ func _ready() -> void:
 		check(description.get_line_count() <= 3, "Contenu : la description de %s tient en 3 lignes (%d)" % [c.display_name, description.get_line_count()])
 		description.queue_free()
 	for path in GameSetup.MAPS:
-		var m := (load(path) as PackedScene).instantiate() as GameMap
+		var m := GameSetup.make_map(path)
 		var problems: Array[String] = []
 		if m == null:
 			problems.append("ce n'est pas une GameMap")
@@ -2499,11 +2499,23 @@ func _ready() -> void:
 	saved_map.free()
 	MapData.delete_saved("_test_editeur")
 	# La Tour : une grande map verticale faite avec l'éditeur, livrée avec le jeu
-	check("carte:La_Tour" in GameSetup.all_maps(), "La Tour : livrée avec le jeu, elle est dans le choix des maps")
+	var tower_path := "res://maps_editeur/La_Tour.json"
+	check(tower_path in GameSetup.MAPS and GameSetup.all_maps().count(tower_path) == 1 and not "carte:La_Tour" in GameSetup.all_maps(),
+		"La Tour : une map officielle du jeu, une seule fois dans le choix des maps (aussi en ligne)")
 	var tower_data := MapData.load_saved("La_Tour")
 	var tower_area := MapData.bounds(tower_data)
-	check(tower_data.elements.size() > 40 and tower_area.size.y > 3000, "La Tour : une grande map verticale (%d éléments, %.0f px de haut)" % [tower_data.elements.size(), tower_area.size.y])
-	GameSetup.map_path = "carte:La_Tour"
+	check(tower_data.elements.size() > 100 and tower_area.size.y > 5000 and tower_area.size.x > 2500,
+		"La Tour : une très grande map verticale (%d éléments, %.0f x %.0f px)" % [tower_data.elements.size(), tower_area.size.x, tower_area.size.y])
+	var tower_map := GameSetup.make_map(tower_path)
+	var host_times := tower_map.moving_state()
+	var guest_map := GameSetup.make_map(tower_path)
+	host_times[-1] = 3.7
+	guest_map.apply_moving_state(host_times)
+	check(host_times.size() == 1 and is_equal_approx(guest_map.get_node("Mouvements").time, 3.7),
+		"La Tour : en ligne, les éléments qui bougent sont calés sur ceux de l'hôte")
+	tower_map.free()
+	guest_map.free()
+	GameSetup.map_path = tower_path
 	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}], [{"type": "joypad", "id": 6}]]
 	await new_game()
 	for fi in game.fighters:
