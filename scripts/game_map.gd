@@ -57,10 +57,13 @@ func _find_moving(node: Node, found: Array[MovingPlatform]) -> void:
 
 
 ## Jeu en ligne (hôte) : où en sont les plateformes qui bougent.
+## (Pour une map de l'éditeur, on ajoute à la fin le temps de ses Mouvements.)
 func moving_state() -> Array:
 	var times := []
 	for platform in moving_platforms():
 		times.append(platform.get_time())
+	if has_node("Mouvements"):
+		times.append(($Mouvements as MapMotion).time)
 	return times
 
 
@@ -69,6 +72,8 @@ func apply_moving_state(times: Array) -> void:
 	var platforms := moving_platforms()
 	for i in mini(times.size(), platforms.size()):
 		platforms[i].set_time(times[i])
+	if has_node("Mouvements") and times.size() > platforms.size():
+		($Mouvements as MapMotion).set_time(times[platforms.size()])
 
 
 ## Les fenêtres cassables de la map (cherchées une seule fois).

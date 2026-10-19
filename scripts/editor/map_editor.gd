@@ -10,7 +10,10 @@ extends Node2D
 ##                 l'élément au milieu de la vue ;
 ##   à droite    : les réglages de l'élément choisi (position, taille, rotation, trajet...) ;
 ##   au milieu   : la map. Clic gauche : choisir / déplacer. Carré jaune : agrandir / rétrécir.
-##                 Rond violet (plateforme mobile) : tirer pour régler son trajet.
+##                 Rond violet (un élément qui bouge) : tirer pour régler son trajet.
+## Tout élément (sauf les points d'apparition) peut bouger : réglages > Mouvement (direction, distance,
+## aller-retour, arrêt). Il peut aussi être attaché à un autre élément : il suit alors ses mouvements
+## (on anime des structures). « Voir bouger » (en haut, ou Start à la manette) fait bouger l'aperçu.
 ##                 Clic droit ou molette enfoncée : déplacer la vue. Molette : zoom.
 ## Raccourcis : R / Maj+R tourner, Suppr effacer, flèches pousser, Ctrl+C / Ctrl+V copier / coller,
 ## Ctrl+D dupliquer, Ctrl+Z / Ctrl+Y annuler / refaire, Ctrl+S sauver, G grille, Échap lâcher.
@@ -27,12 +30,17 @@ const MIN_SIZE := 8.0
 const AUTOSAVE_TIME := 20.0        ## le brouillon est gardé tout seul toutes les 20 s (s'il a changé)
 const MAX_UNDO := 100
 const HANDLE := 9.0                ## demi-taille du carré pour agrandir (à l'écran)
-## Les 12 directions des plateformes mobiles (tous les 30°).
-const DIRECTION_NAMES := ["→ droite", "↗ 30°", "↗ 60°", "↑ haut", "↖ 120°", "↖ 150°",
-	"← gauche", "↙ 210°", "↙ 240°", "↓ bas", "↘ 300°", "↘ 330°"]
+## Les 12 directions d'un mouvement (tous les 30°).
+## (Sans flèches : la police du jeu dans le navigateur ne les a pas, elles s'afficheraient en carrés.)
+const DIRECTION_NAMES := ["droite", "30°", "60°", "haut", "120°", "150°",
+	"gauche", "210°", "240°", "bas", "300°", "330°"]
 const PLAYER_COLORS := [Color(0.95, 0.3, 0.3), Color(0.3, 0.6, 1.0), Color(0.35, 0.85, 0.4), Color(1.0, 0.8, 0.2)]
 ## Les couleurs qu'on fait défiler à la manette (gauche / droite sur « Couleur »).
 const COLOR_PRESETS := ["#525973", "#808aa8", "#9e8cd9", "#8cc7e6", "#59b34d", "#d9b366", "#d9735e", "#e6e6e6"]
+const IMPORT_ITEM := "<importer>"         ## dans le menu Ouvrir : importer un fichier
+const EXPORT_DIR := "user://exports"      ## hors navigateur, les maps exportées vont ici
+const LINK_COLOR := Color(1.0, 0.6, 0.25)  ## les liens « attaché à »
+const ATTACH_HELP := "ATTACHER   montre l'élément auquel l'attacher (clic ou A)   ·   Échap ou B : annuler"
 const MOUSE_HELP := "Clic : choisir / déplacer   ·   carré jaune : taille   ·   R : tourner   ·   Suppr : effacer   ·   Ctrl+C / Ctrl+V : copier / coller   ·   Ctrl+Z : annuler   ·   clic droit : bouger la vue   ·   molette : zoom   ·   (ou prends une manette)"
 
 ## Gardés entre deux visites (quand on part tester la map et qu'on revient).
@@ -44,10 +52,13 @@ var selected_id := -1
 var grid_on := true
 var grid_size := 40
 var snap_on := true
+var playing := false                  ## « Voir bouger » : l'aperçu bouge comme en partie
+var attach_picking := false           ## on attend qu'on montre l'élément auquel attacher le choix
 var change_scene := true              ## false dans les tests : TESTER et Quitter ne changent pas de scène
 
 var _nodes := {}                      ## id -> le nœud d'aperçu de l'élément
 var _clipboard: Dictionary = {}
+var _clipboard_parent: Dictionary = {}   ## l'élément auquel était attaché celui qu'on a copié
 var _undo: Array[String] = []
 var _redo: Array[String] = []
 var _drag := ""                       ## "", "move", "resize", "travel", "length", "pan"
@@ -74,6 +85,10 @@ var _help: Label
 var _ui: CanvasLayer
 var _pad: EditorPad
 var _juice: EditorJuice
+var _play_check: CheckButton
+var _import_callback: JavaScriptObject  ## navigateur : reçoit le texte du fichier choisi
+var _import_dialog: FileDialog          ## hors navigateur : choisir le fichier
+var _motion: MapMotion                ## fait bouger l'aperçu quand « Voir bouger » est allumé
 var _catalog_buttons: Array[Button] = []
 var _catalog_types: Array[String] = []
 var _prop_rows: Array[Dictionary] = []
@@ -99,6 +114,9 @@ func _ready() -> void:
 	_juice = EditorJuice.new()
 	_juice.editor = self
 	add_child(_juice)
+	_motion = MapMotion.new()
+	_motion.process_mode = Node.PROCESS_MODE_DISABLED  # c'est l'éditeur qui le fait avancer
+	add_child(_motion)
 	_pad = EditorPad.new()
 	_pad.editor = self
 	add_child(_pad)
@@ -115,6 +133,8 @@ func _process(delta: float) -> void:
 	_last_camera = _camera.position
 	_last_zoom = _camera.zoom.x
 	_grid.queue_redraw()
+	if playing:
+		_motion.set_time(_motion.time + delta)
 	if _message_left > 0.0:
 		_message_left -= delta
 		if _message_left <= 0.0:
@@ -171,6 +191,10 @@ func delete_selected() -> void:
 	_push_undo()
 	_juice.puff(element)
 	data.elements.erase(element)
+	for other in data.elements:  # ce qui y était attaché ne l'est plus (et reste où il est)
+		if int(other.get("attach", 0)) == element.id:
+			other.attach = 0
+			_refresh(other)
 	if _nodes.has(element.id):
 		_nodes[element.id].queue_free()
 		_nodes.erase(element.id)
@@ -181,6 +205,7 @@ func copy_selected() -> void:
 	var element := selected()
 	if not element.is_empty():
 		_clipboard = element.duplicate(true)
+		_clipboard_parent = MapData.by_id(data).get(int(element.get("attach", 0)), {})
 		_say("Copié")
 
 
@@ -191,6 +216,11 @@ func paste(where: Variant = null) -> Dictionary:
 	_push_undo()
 	var element := _clipboard.duplicate(true)
 	element.id = MapData.next_id(data)
+	# Attaché à un élément qui n'est plus là (ou dont un autre a repris le numéro) : plus attaché.
+	if int(element.get("attach", 0)) != 0:
+		var parent: Dictionary = MapData.by_id(data).get(int(element.attach), {})
+		if not is_same(parent, _clipboard_parent) or MapData.attach_loops(data, element.id, int(element.attach)):
+			element.attach = 0
 	if element.type == "spawn_joueur":
 		element.player = _free_player_number()
 	var pos: Vector2 = where if where != null else MapData.vec(element, "pos") + Vector2(grid_size, grid_size)
@@ -208,13 +238,109 @@ func duplicate_selected() -> void:
 	paste()
 
 
+## Déplace l'élément choisi ; ce qui y est attaché (et ce qui est attaché à ça...) suit.
 func move_selected(pos: Vector2) -> void:
 	var element := selected()
 	if element.is_empty():
 		return
+	_move_with_children(element, pos, true)
+
+
+## Pose un élément ailleurs (calé sur la grille si snap) ; ce qui y est attaché suit du même décalage.
+func _move_with_children(element: Dictionary, pos: Vector2, snap: bool) -> void:
+	var before := MapData.vec(element, "pos")
 	MapData.set_vec(element, "pos", pos)
-	_snap(element)
+	if snap:
+		_snap(element)
 	_refresh(element)
+	var shift := MapData.vec(element, "pos") - before
+	if shift != Vector2.ZERO:
+		for child in attached_to(element.id):
+			MapData.set_vec(child, "pos", MapData.vec(child, "pos") + shift)
+			_refresh(child)
+
+
+## Tout ce qui est attaché à cet élément, directement ou par une chaîne.
+func attached_to(id: int) -> Array[Dictionary]:
+	var found: Array[Dictionary] = []
+	var ids := {id: true}
+	var grew := true
+	while grew:
+		grew = false
+		for element in data.elements:
+			if not ids.has(element.id) and ids.has(int(element.get("attach", 0))):
+				ids[element.id] = true
+				found.append(element)
+				grew = true
+	return found
+
+
+## Attache l'élément choisi à un autre (0 : le détache). Refuse les boucles et les points.
+func attach_selected(parent_id: int) -> bool:
+	var element := selected()
+	if element.is_empty() or not MapData.movable(element.type):
+		return false
+	if parent_id != 0:
+		var parent: Dictionary = MapData.by_id(data).get(parent_id, {})
+		if parent.is_empty() or not MapData.movable(parent.type):
+			_say("On ne peut attacher qu'à un bloc, une plateforme, une échelle, une liane ou une fenêtre")
+			return false
+		if MapData.attach_loops(data, element.id, parent_id):
+			_say("Impossible : ça ferait une boucle (cet élément est déjà attaché à celui-ci)")
+			return false
+	_push_undo()
+	element.attach = parent_id
+	_refresh(element)
+	_show_props()
+	if parent_id != 0:
+		_juice.link(element, MapData.by_id(data)[parent_id])
+		_say("Attaché : il suivra tous les mouvements de : %s" % _element_name(MapData.by_id(data)[parent_id]))
+	else:
+		_say("Détaché")
+	return true
+
+
+## Montre sur la map l'élément auquel attacher le choix (clic ou A) ; Échap ou B pour annuler.
+func start_attach_pick() -> void:
+	if selected().is_empty():
+		return
+	attach_picking = true
+	set_help(ATTACH_HELP)
+	_say("Montre l'élément auquel l'attacher")
+
+
+func finish_attach_pick(world: Variant) -> void:
+	if not attach_picking:
+		return
+	attach_picking = false
+	set_help(EditorPad.HELP[_pad.focus] if _pad.active else MOUSE_HELP)
+	if world == null:
+		_say("Pas attaché")
+		return
+	var target := _pick(world)
+	if target.is_empty() or target.id == selected_id:
+		_say("Pas attaché (il faut montrer un autre élément)")
+		return
+	attach_selected(target.id)
+
+
+## « Voir bouger » : l'aperçu bouge comme pendant la partie (on ne peut pas déplacer pendant ce temps).
+func set_playing(on: bool) -> void:
+	playing = on
+	if _play_check != null and _play_check.button_pressed != on:
+		_play_check.set_pressed_no_signal(on)
+	if on:
+		_motion.time = 0.0
+		_motion.setup(data, _nodes)
+	else:
+		for element in data.elements:
+			if _nodes.has(element.id):
+				_nodes[element.id].position = MapData.vec(element, "pos")
+	_overlay.queue_redraw()
+
+
+func _element_name(element: Dictionary) -> String:
+	return "%s n°%d" % [str(MapData.CATALOG[element.type].label).get_slice(" ", 0), int(element.id)]
 
 
 func rotate_selected(degrees: float) -> void:
@@ -264,7 +390,7 @@ func turn_selected(direction: int) -> void:
 		return
 	if MapData.CATALOG[element.type].rotatable:
 		rotate_selected(ROTATE_STEP * direction)
-	elif element.type == "mobile":
+	elif element.has("travel") and MapData.vec(element, "travel") != Vector2.ZERO:
 		_push_undo()
 		var travel := MapData.vec(element, "travel").rotated(deg_to_rad(30.0 * direction))
 		element.travel = [snappedf(travel.x, 0.01), snappedf(travel.y, 0.01)]
@@ -348,6 +474,91 @@ func open_map(map_name: String) -> void:
 	_say("Ouverte : %s" % data.name)
 
 
+## Exporter : la map part dans un fichier .json. Dans le navigateur, il est téléchargé (dossier
+## Téléchargements) ; sur PC, il est écrit dans le dossier du jeu (exports/). Renvoie le nom du fichier.
+func export_map() -> String:
+	data.name = _name_edit.text.strip_edges() if _name_edit.text.strip_edges() != "" else "Ma map"
+	var file := MapData.file_name(str(data.name)) + ".json"
+	var text := MapData.to_json(data)
+	if OS.has_feature("web"):
+		JavaScriptBridge.download_buffer(text.to_utf8_buffer(), file, "application/json")
+		_say("Exportée : %s (dans tes Téléchargements)" % file)
+	else:
+		DirAccess.make_dir_recursive_absolute(EXPORT_DIR)
+		var out := FileAccess.open("%s/%s" % [EXPORT_DIR, file], FileAccess.WRITE)
+		if out == null:
+			_say("Impossible d'exporter")
+			return ""
+		out.store_string(text)
+		out.close()
+		_say("Exportée : %s" % ProjectSettings.globalize_path("%s/%s" % [EXPORT_DIR, file]))
+	_juice.toast("Exportée !")
+	return file
+
+
+## Importer : on choisit un fichier .json de map (exporté ici ou ailleurs). Elle est sauvée dans ce
+## navigateur (on la retrouve dans Ouvrir et dans le choix des maps) et ouverte.
+func import_map() -> void:
+	if OS.has_feature("web"):
+		# Le navigateur ouvre sa fenêtre « choisir un fichier » ; le texte du fichier revient dans _on_import_text.
+		_import_callback = JavaScriptBridge.create_callback(_on_import_text)
+		var window := JavaScriptBridge.get_interface("window")
+		window.jvtestImportMap = _import_callback
+		JavaScriptBridge.eval("""(function () {
+			var input = document.createElement('input');
+			input.type = 'file';
+			input.accept = '.json,application/json';
+			input.style.display = 'none';
+			input.onchange = function () {
+				var file = input.files[0];
+				input.remove();
+				if (file) { file.text().then(function (text) { window.jvtestImportMap(text); }); }
+			};
+			document.body.appendChild(input);
+			input.click();
+		})();""", true)
+		return
+	if _import_dialog == null:
+		_import_dialog = FileDialog.new()
+		_import_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		_import_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		_import_dialog.filters = PackedStringArray(["*.json ; Map de l'éditeur"])
+		_import_dialog.size = Vector2i(800, 500)
+		_import_dialog.file_selected.connect(func(path: String) -> void: import_text(FileAccess.get_file_as_string(path)))
+		_ui.add_child(_import_dialog)
+	_import_dialog.popup_centered()
+
+
+func _on_import_text(args: Array) -> void:
+	if not args.is_empty():
+		import_text(str(args[0]))
+
+
+## Le texte d'un fichier de map : il est vérifié, sauvé dans ce navigateur, puis ouvert.
+func import_text(text: String) -> bool:
+	var loaded := MapData.from_json(text)
+	if loaded.is_empty():
+		_say("Ce fichier n'est pas une map de l'éditeur")
+		return false
+	# Jamais par-dessus une map déjà sauvée (ni le brouillon) : « Nom (2) », « Nom (3) »...
+	var base_name := str(loaded.name).strip_edges()
+	if base_name == "":
+		base_name = "Ma map"
+	loaded.name = base_name
+	var n := 2
+	while MapData.file_name(str(loaded.name)) == MapData.DRAFT_NAME or FileAccess.file_exists(MapData.file_path(str(loaded.name))):
+		loaded.name = "%s (%d)" % [base_name, n]
+		n += 1
+	MapData.save(loaded)
+	_push_undo()
+	data = loaded
+	_rebuild_all()
+	_camera.position = MapData.bounds(data).get_center()
+	_say("Importée : %s (sauvée dans ce navigateur)" % data.name)
+	_juice.toast("Importée !")
+	return true
+
+
 ## Lance une partie à 2 joueurs sur la map (clavier gauche + manette 1, clavier droit + manette 2).
 func test_map() -> bool:
 	var floors: Array = data.elements.filter(func(e: Dictionary) -> bool: return e.type in ["sol", "plateforme", "mobile"])
@@ -356,7 +567,7 @@ func test_map() -> bool:
 		return false
 	data.name = _name_edit.text.strip_edges() if _name_edit.text.strip_edges() != "" else "Ma map"
 	_save_draft()
-	GameSetup.editor_map = data.duplicate(true)
+	GameSetup.editor_map = MapData.normalized(data)  # (liens cassés réparés, comme après une relecture)
 	GameSetup.map_path = GameSetup.EDITOR_MAP
 	GameSetup.return_scene = EDITOR_SCENE
 	GameSetup.player_devices = []
@@ -405,6 +616,9 @@ func _mouse_button(event: InputEventMouseButton) -> void:
 		_drag = ""
 		return
 	get_viewport().gui_release_focus()
+	if attach_picking:
+		finish_attach_pick(world)
+		return
 	_drag_changed = false
 	var element := selected()
 	if not element.is_empty():
@@ -460,7 +674,10 @@ func _key(event: InputEventKey) -> void:
 		KEY_DELETE, KEY_BACKSPACE:
 			delete_selected()
 		KEY_ESCAPE:
-			select(-1)
+			if attach_picking:
+				finish_attach_pick(null)
+			else:
+				select(-1)
 		KEY_R:
 			rotate_selected(-ROTATE_STEP if event.shift_pressed else ROTATE_STEP)
 		KEY_G:
@@ -500,10 +717,7 @@ func _nudge(key: Key, fine: bool) -> void:
 	var step := 1.0 if fine or not snap_on else float(grid_size)
 	var dir := {KEY_LEFT: Vector2.LEFT, KEY_RIGHT: Vector2.RIGHT, KEY_UP: Vector2.UP, KEY_DOWN: Vector2.DOWN}[key] as Vector2
 	_push_undo()
-	MapData.set_vec(element, "pos", MapData.vec(element, "pos") + dir * step)
-	if not fine:
-		_snap(element)
-	_refresh(element)
+	_move_with_children(element, MapData.vec(element, "pos") + dir * step, not fine)
 	_show_props()
 
 
@@ -546,7 +760,7 @@ func _handles(element: Dictionary) -> Array:
 	elif element.has("size"):
 		var half := MapData.vec(element, "size") / 2.0
 		list.append(["resize", pos + half.rotated(MapData.rotation(element))])
-	if element.type == "mobile":
+	if element.has("travel") and (MapData.vec(element, "travel") != Vector2.ZERO or element.type == "mobile"):
 		list.append(["travel", pos + MapData.vec(element, "travel")])
 	return list
 
@@ -632,10 +846,13 @@ func _refresh(element: Dictionary, changed := true) -> void:
 				index += 1
 		_preview.move_child(node, index)
 		_nodes[element.id] = node
-		if old != null and _juice != null:
+		if old != null and _juice != null and not playing:
 			_juice.glide(element.id, old)  # il glisse de l'ancienne place à la nouvelle
 	if changed:
 		_dirty = true
+	if playing:
+		_motion.setup(data, _nodes)
+		_motion.set_time(_motion.time)
 	_overlay.queue_redraw()
 
 
@@ -657,6 +874,8 @@ func _push_undo() -> void:
 
 
 func _save_draft() -> void:
+	if _name_edit != null and _name_edit.text.strip_edges() != "":
+		data.name = _name_edit.text.strip_edges()
 	MapData.save(data, MapData.DRAFT_NAME)
 	_dirty = false
 	_autosave_left = AUTOSAVE_TIME
@@ -706,11 +925,28 @@ func _draw_overlay() -> void:
 			"spawn_objet":
 				_overlay.draw_rect(Rect2(pos - Vector2(16, 16), Vector2(32, 32)), Color(0.85, 0.65, 0.3), false, 3.0)
 				_overlay.draw_string(font, pos + Vector2(-6, 8), "?", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.85, 0.65, 0.3))
-			"mobile":
-				var travel := MapData.vec(element, "travel")
-				var size := MapData.vec(element, "size")
-				_overlay.draw_dashed_line(pos, pos + travel, Color(0.62, 0.55, 0.85, 0.8), 2.0 * px, 12.0 * px)
-				_overlay.draw_rect(Rect2(pos + travel - size / 2.0, size), Color(0.62, 0.55, 0.85, 0.5), false, 2.0 * px)
+			_:
+				var travel := MapData.vec(element, "travel") if element.has("travel") else Vector2.ZERO
+				if travel != Vector2.ZERO and not playing:  # le trajet : un pointillé et la place au bout
+					var center := MapData.center_of(element)
+					_overlay.draw_dashed_line(center, center + travel, Color(0.62, 0.55, 0.85, 0.8), 2.0 * px, 12.0 * px)
+					_overlay.draw_set_transform(center + travel, MapData.rotation(element))
+					var ghost_half := MapData.size_of(element) / 2.0
+					_overlay.draw_rect(Rect2(-ghost_half, ghost_half * 2.0), Color(0.62, 0.55, 0.85, 0.5), false, 2.0 * px)
+					_overlay.draw_set_transform(Vector2.ZERO)
+	if not playing:  # les liens « attaché à » : une chaîne orange de l'élément vers celui qu'il suit
+		var found := MapData.by_id(data)
+		for element in data.elements:
+			var parent: Dictionary = found.get(int(element.get("attach", 0)), {})
+			if parent.is_empty():
+				continue
+			var from := MapData.center_of(element)
+			var to := MapData.center_of(parent)
+			var strong: bool = element.id == selected_id or parent.id == selected_id
+			var color := Color(LINK_COLOR, 0.95 if strong else 0.55)
+			_overlay.draw_dashed_line(from, to, color, (3.0 if strong else 2.0) * px, 8.0 * px)
+			_overlay.draw_circle(from, 5.0 * px, color)
+			_overlay.draw_arc(to, 8.0 * px, 0.0, TAU, 16, color, 2.0 * px)
 	if _pad != null and _pad.active:
 		var hover := _pick(_pad.cursor)
 		if not hover.is_empty() and hover.id != selected_id:
@@ -799,13 +1035,20 @@ func _top_bar() -> PanelContainer:
 	panel.add_child(bar)
 	bar.add_child(_button("Nouvelle", new_map))
 	_open_button = MenuButton.new()
-	_open_button.text = "Ouvrir ▾"
+	_open_button.text = "Ouvrir..."
 	_open_button.flat = false
 	_open_button.about_to_popup.connect(_fill_open_menu)
 	_open_button.get_popup().index_pressed.connect(func(i: int) -> void:
-		open_map(_open_button.get_popup().get_item_metadata(i)))
+		var picked: Variant = _open_button.get_popup().get_item_metadata(i)
+		if picked == IMPORT_ITEM:
+			import_map()
+		elif picked is String:
+			open_map(picked))
 	bar.add_child(_open_button)
 	bar.add_child(_button("Sauver", save_map))
+	var export := _button("Exporter", export_map)
+	export.tooltip_text = "Télécharge la map dans un fichier .json (pour la garder, l'ouvrir dans un autre navigateur ou l'envoyer)."
+	bar.add_child(export)
 	bar.add_child(VSeparator.new())
 	bar.add_child(_text("Nom"))
 	_name_edit = LineEdit.new()
@@ -832,10 +1075,16 @@ func _top_bar() -> PanelContainer:
 	_snap_check.focus_mode = Control.FOCUS_NONE
 	_snap_check.toggled.connect(func(on: bool) -> void: snap_on = on)
 	bar.add_child(_snap_check)
+	_play_check = CheckButton.new()
+	_play_check.text = "Voir bouger"
+	_play_check.tooltip_text = "L'aperçu bouge comme pendant la partie."
+	_play_check.focus_mode = Control.FOCUS_NONE
+	_play_check.toggled.connect(set_playing)
+	bar.add_child(_play_check)
 	var push := Control.new()
 	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(push)
-	var test := _button("▶ TESTER", test_map)
+	var test := _button("TESTER", test_map)
 	test.add_theme_color_override("font_color", UiKit.HIGHLIGHT)
 	bar.add_child(test)
 	bar.add_child(_button("Quitter", quit_editor))
@@ -846,13 +1095,15 @@ func _fill_open_menu() -> void:
 	var popup := _open_button.get_popup()
 	popup.clear()
 	var names := MapData.list_saved()
+	for map_name in names:
+		popup.add_item(map_name.replace("_", " "))
+		popup.set_item_metadata(popup.item_count - 1, map_name)
 	if names.is_empty():
 		popup.add_item("(aucune map sauvée)")
 		popup.set_item_disabled(0, true)
-		return
-	for i in names.size():
-		popup.add_item(names[i])
-		popup.set_item_metadata(i, names[i])
+	popup.add_separator()
+	popup.add_item("Importer un fichier...")
+	popup.set_item_metadata(popup.item_count - 1, IMPORT_ITEM)
 
 
 func _catalog_panel() -> PanelContainer:
@@ -923,24 +1174,38 @@ func _make_prop_rows(element: Dictionary) -> Array[Dictionary]:
 			func(v: float) -> void: _set_field(element, "rot", v))
 		rot.wrap = true
 		rows.append(rot)
+	if element.has("travel"):
+		var travel := MapData.vec(element, "travel")
+		var angle := fposmod(rad_to_deg(atan2(-travel.y, travel.x)), 360.0)
+		rows.append({"label": "Direction", "kind": "choice", "options": DIRECTION_NAMES, "index": roundi(angle / 30.0) % 12,
+			"set": func(i: int) -> void:
+				var length := MapData.vec(element, "travel").length()
+				if is_zero_approx(length):  # il ne bougeait pas : on lui donne un trajet de 5 cases
+					length = grid_size * 5.0
+				var dir := Vector2(cos(deg_to_rad(i * 30.0)), -sin(deg_to_rad(i * 30.0)))
+				_set_field(element, "travel", [snappedf(dir.x * length, 0.01), snappedf(dir.y * length, 0.01)])})
+		rows.append(_num("Distance", travel.length(), 0, 20000, 1, g, func(v: float) -> void:
+			var dir := MapData.vec(element, "travel").normalized()
+			if dir == Vector2.ZERO:
+				dir = Vector2.RIGHT
+			_set_field(element, "travel", [snappedf(dir.x * v, 0.01), snappedf(dir.y * v, 0.01)])))
+		rows.append(_num("Aller-retour (s)", float(element.period), 0.2, 120, 0.1, 0.5,
+			func(v: float) -> void: _set_field(element, "period", v)))
+		rows.append(_num("Arrêt aux bouts (s)", float(element.pause), 0, 30, 0.1, 0.5,
+			func(v: float) -> void: _set_field(element, "pause", v)))
+	if element.has("attach"):
+		# Attaché à : « rien » ou un autre élément (pas ceux qui feraient une boucle).
+		var options: Array = ["rien"]
+		var ids: Array = [0]
+		for other in data.elements:
+			if other.id != element.id and MapData.movable(other.type) and not MapData.attach_loops(data, element.id, other.id):
+				options.append(_element_name(other))
+				ids.append(other.id)
+		rows.append({"label": "Attaché à", "kind": "choice", "options": options,
+			"index": maxi(ids.find(int(element.attach)), 0),
+			"set": func(i: int) -> void: attach_selected(ids[i])})
+		rows.append({"label": "Attacher à... (le montrer)", "kind": "button", "press": start_attach_pick})
 	match element.type:
-		"mobile":
-			var travel := MapData.vec(element, "travel")
-			var angle := fposmod(rad_to_deg(atan2(-travel.y, travel.x)), 360.0)
-			rows.append({"label": "Direction", "kind": "choice", "options": DIRECTION_NAMES, "index": roundi(angle / 30.0) % 12,
-				"set": func(i: int) -> void:
-					var length := MapData.vec(element, "travel").length()
-					var dir := Vector2(cos(deg_to_rad(i * 30.0)), -sin(deg_to_rad(i * 30.0)))
-					_set_field(element, "travel", [snappedf(dir.x * length, 0.01), snappedf(dir.y * length, 0.01)])})
-			rows.append(_num("Distance", travel.length(), 0, 20000, 1, g, func(v: float) -> void:
-				var dir := MapData.vec(element, "travel").normalized()
-				if dir == Vector2.ZERO:
-					dir = Vector2.RIGHT
-				_set_field(element, "travel", [snappedf(dir.x * v, 0.01), snappedf(dir.y * v, 0.01)])))
-			rows.append(_num("Aller-retour (s)", float(element.period), 0.2, 120, 0.1, 0.5,
-				func(v: float) -> void: _set_field(element, "period", v)))
-			rows.append(_num("Arrêt aux bouts (s)", float(element.pause), 0, 30, 0.1, 0.5,
-				func(v: float) -> void: _set_field(element, "pause", v)))
 		"liane":
 			rows.append(_num("Longueur", float(element.length), 40, 3000, 1, g, func(v: float) -> void: _set_field(element, "length", v)))
 		"spawn_joueur":
@@ -1016,6 +1281,9 @@ func _show_props() -> void:
 			"choice":
 				var options := OptionButton.new()
 				options.focus_mode = Control.FOCUS_NONE
+				options.fit_to_longest_item = false  # le panneau garde sa largeur
+				options.clip_text = true
+				options.custom_minimum_size = Vector2(120, 0)
 				for option in row.options:
 					options.add_item(option)
 				options.select(row.index)
@@ -1035,7 +1303,7 @@ func _show_props() -> void:
 				line.add_child(button)
 		_props.add_child(box)
 		_prop_boxes.append(box)
-	if element.type == "mobile":
+	if element.has("travel") and MapData.vec(element, "travel") != Vector2.ZERO:
 		var hint := _text("Ou tire le rond violet sur la map.")
 		hint.add_theme_color_override("font_color", UiKit.TEXT_DIM)
 		_props.add_child(hint)
@@ -1052,6 +1320,14 @@ func highlight_prop(index: int) -> void:
 		style.border_color = UiKit.HIGHLIGHT
 		style.set_border_width_all(2 if i == index else 0)
 		_prop_boxes[i].add_theme_stylebox_override("panel", style)
+	if index >= 0 and index < _prop_boxes.size() and _props.get_parent() is ScrollContainer:
+		_scroll_to.call_deferred(_prop_boxes[index])
+
+
+## Fait défiler les réglages jusqu'à la ligne allumée (si elle est encore là).
+func _scroll_to(box: Control) -> void:
+	if is_instance_valid(box) and box.is_inside_tree() and _props.get_parent() is ScrollContainer:
+		(_props.get_parent() as ScrollContainer).ensure_control_visible(box)
 
 
 func _set_field(element: Dictionary, key: String, value: Variant) -> void:
@@ -1064,8 +1340,11 @@ func _set_vec_part(element: Dictionary, key: String, axis: int, value: float) ->
 	var v := MapData.vec(element, key)
 	v[axis] = value
 	_push_undo()
-	MapData.set_vec(element, key, v)
-	_refresh(element)
+	if key == "pos":
+		_move_with_children(element, v, false)  # ce qui y est attaché suit
+	else:
+		MapData.set_vec(element, key, v)
+		_refresh(element)
 
 
 func _spin(min_value: float, max_value: float, step: float, value: float, on_change: Callable) -> SpinBox:

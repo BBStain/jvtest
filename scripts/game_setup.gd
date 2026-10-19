@@ -5,8 +5,11 @@ extends RefCounted
 ## (Les "static var" gardent leur valeur quand on change de scène.)
 
 ## Toutes les maps du jeu. Pour en ajouter une : crée sa scène dans scenes/maps/ et ajoute-la ici.
+## Une map du jeu est une scène (.tscn) ou une map faite avec l'éditeur et livrée avec le jeu (.json
+## de maps_editeur/) : les deux se jouent pareil, aussi en ligne.
 const MAPS := [
 	"res://scenes/maps/arene.tscn",
+	"res://maps_editeur/La_Tour.json",
 ]
 const SAVED_MAP_PREFIX := "carte:"
 const EDITOR_MAP := "editeur"
@@ -76,7 +79,10 @@ static func all_maps() -> Array[String]:
 	var maps: Array[String] = []
 	maps.assign(MAPS)
 	for saved in MapData.list_saved():
-		maps.append(SAVED_MAP_PREFIX + saved)
+		# Une map de l'éditeur devenue map du jeu n'apparaît qu'une fois (sauf si on en a sauvé sa version).
+		var official := "%s/%s.json" % [MapData.BUNDLED_DIR, saved] in MAPS
+		if not official or FileAccess.file_exists(MapData.file_path(saved)):
+			maps.append(SAVED_MAP_PREFIX + saved)
 	return maps
 
 
@@ -91,6 +97,11 @@ static func make_map(path: String) -> GameMap:
 			return MapBuilder.build(data)
 		path = MAPS[0]
 	if not path.begins_with("res://"):
+		path = MAPS[0]
+	if path.ends_with(".json"):
+		var data := MapData.from_json(FileAccess.get_file_as_string(path))
+		if not data.is_empty():
+			return MapBuilder.build(data)
 		path = MAPS[0]
 	return (load(path) as PackedScene).instantiate() as GameMap
 
