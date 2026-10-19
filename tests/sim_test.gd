@@ -952,7 +952,7 @@ func _ready() -> void:
 		check(description.get_line_count() <= 3, "Contenu : la description de %s tient en 3 lignes (%d)" % [c.display_name, description.get_line_count()])
 		description.queue_free()
 	for path in GameSetup.MAPS:
-		var m := (load(path) as PackedScene).instantiate() as GameMap
+		var m := GameSetup.make_map(path)
 		var problems: Array[String] = []
 		if m == null:
 			problems.append("ce n'est pas une GameMap")
@@ -2481,7 +2481,7 @@ func _ready() -> void:
 	editor.delete_selected()
 	editor.delete_selected()
 	epad.press(JOY_BUTTON_START)
-	for i in 8:
+	for i in 10:
 		epad.nav(Vector2i(0, 1))
 	epad.nav(Vector2i(1, 0))
 	check(epad.focus == EditorPad.Focus.MENU and not editor.grid_on, "Éditeur manette : Start ouvre le menu, la grille s'y éteint")
@@ -2501,6 +2501,88 @@ func _ready() -> void:
 	epad.set_active(false)
 	editor.select(target.id)
 	editor.delete_selected()
+	# 14c) Tout peut bouger, et s'attacher à un autre élément (structures animées)
+	var base_block := editor.add_from_catalog("sol", Vector2(2000, 400))
+	check(base_block.has("travel") and MapData.vec(base_block, "travel") == Vector2.ZERO and int(base_block.attach) == 0,
+		"Éditeur mouvement : un bloc posé ne bouge pas (trajet nul, attaché à rien)")
+	var arm := editor.add_from_catalog("plateforme", Vector2(2000, 200))
+	check(editor.attach_selected(base_block.id) and int(arm.attach) == base_block.id, "Éditeur mouvement : la plateforme s'attache au bloc")
+	editor.select(base_block.id)
+	check(not editor.attach_selected(arm.id), "Éditeur mouvement : pas de boucle (le bloc ne peut pas s'attacher à sa plateforme)")
+	var arm_before := MapData.vec(arm, "pos")
+	editor.move_selected(MapData.vec(base_block, "pos") + Vector2(80, 0))
+	check(MapData.vec(arm, "pos") == arm_before + Vector2(80, 0), "Éditeur mouvement : déplacer le bloc emmène ce qui y est attaché")
+	var rows_motion := editor.prop_rows()
+	var distance_row: Dictionary = rows_motion.filter(func(row): return row.label == "Distance")[0]
+	var direction_row: Dictionary = rows_motion.filter(func(row): return row.label == "Direction")[0]
+	direction_row.set.call(3)  # vers le haut
+	check(MapData.vec(base_block, "travel").is_equal_approx(Vector2(0, -200)), "Éditeur mouvement : choisir une direction fait bouger un bloc immobile (5 cases) (%s)" % [base_block.travel])
+	editor.select(arm.id)
+	editor.start_attach_pick()
+	editor.finish_attach_pick(null)
+	check(int(arm.attach) == base_block.id and not editor.attach_picking, "Éditeur mouvement : annuler « Attacher à... » ne change rien")
+	editor.set_playing(true)
+	editor._process(1.0)  # la moitié de l'aller-retour (4 s) : en haut
+	editor._process(1.0)
+	var arm_node: Node2D = editor._nodes[arm.id]
+	check(arm_node.position.is_equal_approx(MapData.vec(arm, "pos") + Vector2(0, -200)), "Éditeur mouvement : « Voir bouger » fait monter le bloc et sa plateforme (%s)" % [arm_node.position])
+	editor.set_playing(false)
+	check(arm_node.position == MapData.vec(arm, "pos"), "Éditeur mouvement : éteint, tout revient à sa place")
+	editor.select(base_block.id)
+	editor.delete_selected()
+	check(int(arm.attach) == 0, "Éditeur mouvement : effacer le bloc détache sa plateforme")
+	editor.select(arm.id)
+	editor.delete_selected()
+	var loose := MapData.normalized({"elements": [{"id": 1, "type": "sol", "pos": [0, 0], "attach": 7},
+		{"id": 2, "type": "sol", "pos": [0, 0], "attach": 3}, {"id": 3, "type": "sol", "pos": [0, 0], "attach": 2}]})
+	check(int(loose.elements[0].attach) == 0 and (int(loose.elements[1].attach) == 0 or int(loose.elements[2].attach) == 0),
+		"Éditeur mouvement : un fichier avec un lien vers rien ou une boucle est réparé")
+	# Check-up de l'éditeur (2026-10-19)
+	var cu_parent := editor.add_from_catalog("sol", Vector2(400, 300))
+	var cu_child := editor.add_from_catalog("plateforme", Vector2(400, 200))
+	editor.attach_selected(cu_parent.id)
+	cu_child.travel = [100, 0]
+	editor.copy_selected()
+	editor.select(cu_parent.id)
+	editor.delete_selected()
+	var cu_pasted := editor.paste()
+	check(int(cu_pasted.attach) == 0 and MapData.offset_at(MapData.by_id(editor.data), cu_pasted, 2.0).x <= 100.5,
+		"Check-up éditeur : coller une copie d'un élément dont le parent est effacé ne l'attache pas (ni à lui-même)")
+	var cu_base := editor.add_from_catalog("sol", Vector2(1000, 300))
+	var cu_top := editor.add_from_catalog("plateforme", Vector2(1000, 200))
+	editor.attach_selected(cu_base.id)
+	editor.select(cu_base.id)
+	var cu_before := MapData.vec(cu_top, "pos")
+	editor._nudge(KEY_RIGHT, true)
+	editor._set_vec_part(cu_base, "pos", 1, 260.0)
+	check(MapData.vec(cu_top, "pos") == cu_before + Vector2(1, -40),
+		"Check-up éditeur : les flèches et les cases X / Y emmènent aussi ce qui est attaché")
+	for e in [cu_pasted, cu_base, cu_top]:
+		editor.select(e.id)
+		editor.delete_selected()
+	var cu_name: String = editor._name_edit.text
+	editor._name_edit.text = "_test_nom_quitter"
+	editor._save_draft()
+	check(MapData.load_saved(MapData.DRAFT_NAME).name == "_test_nom_quitter", "Check-up éditeur : le nom tapé est gardé en quittant")
+	editor._name_edit.text = cu_name
+	editor.data.name = cu_name
+	# 14d) Exporter / importer : la map passe dans un fichier, et revient (dans un autre navigateur)
+	editor._name_edit.text = "_test_export"
+	var exported := editor.export_map()
+	var exported_text := FileAccess.get_file_as_string(MapEditor.EXPORT_DIR + "/" + exported)
+	check(exported == "_test_export.json" and MapData.from_json(exported_text) == MapData.normalized(editor.data),
+		"Éditeur : Exporter écrit la map dans un fichier .json")
+	var count_before_import: int = editor.data.elements.size()
+	editor.new_map()
+	check(not editor.import_text("pas une map") and editor.data.elements.size() != count_before_import,
+		"Éditeur : Importer refuse un fichier qui n'est pas une map")
+	check(editor.import_text(exported_text) and editor.data.elements.size() == count_before_import
+		and "_test_export" in MapData.list_saved(), "Éditeur : Importer ouvre la map du fichier et la sauve dans le navigateur")
+	check(editor.import_text(exported_text) and editor.data.name == "_test_export (2)" and "_test_export_(2)" in MapData.list_saved(),
+		"Check-up éditeur : importer une map du même nom ne remplace pas celle déjà sauvée")
+	MapData.delete_saved("_test_export")
+	MapData.delete_saved("_test_export (2)")
+	DirAccess.remove_absolute(MapEditor.EXPORT_DIR + "/" + exported)
 	editor._name_edit.text = "_test_editeur"
 	check(editor.save_map() and "_test_editeur" in MapData.list_saved(), "Éditeur : la map est sauvée et listée")
 	check(MapData.load_saved("_test_editeur") == MapData.normalized(editor.data), "Éditeur : la map sauvée se relit pareil")
@@ -2516,7 +2598,7 @@ func _ready() -> void:
 	await step(90)
 	var landed_custom: int = game.fighters.filter(func(fi): return fi.is_on_floor() and fi.lives == GameSetup.lives).size()
 	check(landed_custom == 3, "Éditeur : sur la map de l'éditeur, les 3 joueurs atterrissent (%d/3)" % landed_custom)
-	var moving: Array = game.map.moving_platforms()
+	var moving: Array = game.map.get_node("Decor").get_children().filter(func(n): return n.name.begins_with("mobile_"))
 	var start_x: float = moving[0].position.x if moving.size() == 1 else 0.0
 	await step(30)
 	check(moving.size() == 1 and moving[0].position.x != start_x and game.map.windows().size() == 1
@@ -2527,6 +2609,56 @@ func _ready() -> void:
 	check(saved_map.map_name == "_test_editeur", "Éditeur : une map sauvée se charge par son nom")
 	saved_map.free()
 	MapData.delete_saved("_test_editeur")
+	# La Tour : une grande map verticale faite avec l'éditeur, livrée avec le jeu
+	var tower_path := "res://maps_editeur/La_Tour.json"
+	check(tower_path in GameSetup.MAPS and GameSetup.all_maps().count(tower_path) == 1 and not "carte:La_Tour" in GameSetup.all_maps(),
+		"La Tour : une map officielle du jeu, une seule fois dans le choix des maps (aussi en ligne)")
+	var tower_data := MapData.load_saved("La_Tour")
+	var tower_area := MapData.bounds(tower_data)
+	check(tower_data.elements.size() > 100 and tower_area.size.y > 5000 and tower_area.size.x > 2500,
+		"La Tour : une très grande map verticale (%d éléments, %.0f x %.0f px)" % [tower_data.elements.size(), tower_area.size.x, tower_area.size.y])
+	var tower_map := GameSetup.make_map(tower_path)
+	var host_times := tower_map.moving_state()
+	var guest_map := GameSetup.make_map(tower_path)
+	host_times[-1] = 3.7
+	guest_map.apply_moving_state(host_times)
+	check(host_times.size() == 1 and is_equal_approx(guest_map.get_node("Mouvements").time, 3.7),
+		"La Tour : en ligne, les éléments qui bougent sont calés sur ceux de l'hôte")
+	tower_map.free()
+	guest_map.free()
+	GameSetup.map_path = tower_path
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}], [{"type": "joypad", "id": 6}]]
+	await new_game()
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	await step(90)
+	var tower_landed: int = game.fighters.filter(func(fi): return fi.is_on_floor() and fi.lives == GameSetup.lives).size()
+	check(tower_landed == 4 and game.map.has_node("Mouvements"), "La Tour : les 4 joueurs atterrissent, les ascenseurs et la tour bougent (%d/4)" % tower_landed)
+	GameSetup.player_devices = []
+	# Une structure animée en partie : un bloc qui va à droite, une plateforme attachée ; J1 posé dessus est emmené
+	var anim_map := MapData.new_map("Anim")
+	var carrier := MapData.add_element(anim_map, "sol", Vector2(640, 300))
+	carrier.size = [200, 40]
+	carrier.travel = [400, 0]
+	carrier.period = 4.0
+	var rider_pf := MapData.add_element(anim_map, "plateforme", Vector2(640, 200))
+	rider_pf.attach = carrier.id
+	GameSetup.editor_map = anim_map
+	GameSetup.map_path = GameSetup.EDITOR_MAP
+	GameSetup.player_devices = []
+	await new_game()
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	var pf_node: Node2D = game.map.get_node("Decor/plateforme_%d" % rider_pf.id)
+	game.fighters[0].position = pf_node.position + Vector2(0, -40)
+	await step(10)
+	var ride_from: float = game.fighters[0].position.x
+	var pf_from: float = pf_node.position.x
+	await step(40)
+	var pf_moved: float = pf_node.position.x - pf_from
+	check(game.map.has_node("Mouvements") and game.map.get_node("Decor/sol_%d" % carrier.id) is AnimatableBody2D
+		and pf_moved > 40 and game.fighters[0].is_on_floor() and absf((game.fighters[0].position.x - ride_from) - pf_moved) < 8,
+		"Éditeur mouvement : en partie, la plateforme attachée suit le bloc et emmène J1 (plateforme %.0f px, J1 %.0f px)" % [pf_moved, game.fighters[0].position.x - ride_from])
 	GameSetup.map_path = GameSetup.MAPS[0]
 	GameSetup.editor_map = {}
 	GameSetup.return_scene = ""

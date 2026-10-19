@@ -434,7 +434,7 @@ func _character_slot(index: int) -> PanelContainer:
 func _weapon_rows(weapon: WeaponStats, can_change: bool) -> VBoxContainer:
 	var rows := VBoxContainer.new()
 	rows.add_theme_constant_override("separation", 2)
-	var name_text := ("▲  %s  ▼" if can_change else "%s") % weapon.display_name
+	var name_text := ("^  %s  v" if can_change else "%s") % weapon.display_name
 	rows.add_child(_fixed_row(UiKit.label(name_text, 18, weapon.color), 26))
 	var description_box := Control.new()
 	description_box.custom_minimum_size = Vector2(200, 36)

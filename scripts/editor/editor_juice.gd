@@ -175,6 +175,16 @@ func bump(element: Dictionary) -> void:
 	rumble(0.12, 0.0, 0.04)
 
 
+## Attaché : une petite onde orange court de l'élément à celui qu'il suit.
+func link(child: Dictionary, parent: Dictionary) -> void:
+	var from := MapData.center_of(child)
+	var to := MapData.center_of(parent)
+	_fx.append({"kind": "link", "from": from, "to": to, "color": MapEditor.LINK_COLOR, "t": 0.0, "dur": 0.45})
+	_fx.append({"kind": "ring", "rect": MapData.bounds_of(parent), "color": MapEditor.LINK_COLOR, "t": 0.0, "dur": 0.4})
+	_anim(parent.id, BUMP_TIME, Vector2.ONE * 1.08, true)
+	rumble(0.3, 0.1, 0.08)
+
+
 ## Effacé : il part en morceaux.
 func puff(element: Dictionary) -> void:
 	_anims.erase(element.id)
@@ -239,6 +249,10 @@ func _draw() -> void:
 			"ring":
 				var rect: Rect2 = fx.rect
 				draw_rect(rect.grow((6.0 + 40.0 * k) * px), Color(color, 1.0 - k), false, 3.0 * px)
+			"link":
+				var head: Vector2 = (fx.from as Vector2).lerp(fx.to, minf(k * 1.6, 1.0))
+				draw_line(fx.from, head, Color(color, 1.0 - k * 0.7), 5.0 * px)
+				draw_circle(head, 9.0 * px * (1.0 - k * 0.5), Color(color, 1.0 - k))
 			"bits":
 				for bit in fx.bits:
 					var size := 9.0 * (1.0 - k * 0.6) * px
