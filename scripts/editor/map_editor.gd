@@ -58,6 +58,7 @@ var change_scene := true              ## false dans les tests : TESTER et Quitte
 
 var _nodes := {}                      ## id -> le nœud d'aperçu de l'élément
 var _clipboard: Dictionary = {}
+var _clipboard_parent: Dictionary = {}   ## l'élément auquel était attaché celui qu'on a copié
 var _undo: Array[String] = []
 var _redo: Array[String] = []
 var _drag := ""                       ## "", "move", "resize", "travel", "length", "pan"
@@ -204,6 +205,7 @@ func copy_selected() -> void:
 	var element := selected()
 	if not element.is_empty():
 		_clipboard = element.duplicate(true)
+		_clipboard_parent = MapData.by_id(data).get(int(element.get("attach", 0)), {})
 		_say("Copié")
 
 
@@ -214,6 +216,11 @@ func paste(where: Variant = null) -> Dictionary:
 	_push_undo()
 	var element := _clipboard.duplicate(true)
 	element.id = MapData.next_id(data)
+	# Attaché à un élément qui n'est plus là (ou dont un autre a repris le numéro) : plus attaché.
+	if int(element.get("attach", 0)) != 0:
+		var parent: Dictionary = MapData.by_id(data).get(int(element.attach), {})
+		if not is_same(parent, _clipboard_parent) or MapData.attach_loops(data, element.id, int(element.attach)):
+			element.attach = 0
 	if element.type == "spawn_joueur":
 		element.player = _free_player_number()
 	var pos: Vector2 = where if where != null else MapData.vec(element, "pos") + Vector2(grid_size, grid_size)
@@ -236,9 +243,15 @@ func move_selected(pos: Vector2) -> void:
 	var element := selected()
 	if element.is_empty():
 		return
+	_move_with_children(element, pos, true)
+
+
+## Pose un élément ailleurs (calé sur la grille si snap) ; ce qui y est attaché suit du même décalage.
+func _move_with_children(element: Dictionary, pos: Vector2, snap: bool) -> void:
 	var before := MapData.vec(element, "pos")
 	MapData.set_vec(element, "pos", pos)
-	_snap(element)
+	if snap:
+		_snap(element)
 	_refresh(element)
 	var shift := MapData.vec(element, "pos") - before
 	if shift != Vector2.ZERO:
@@ -527,6 +540,15 @@ func import_text(text: String) -> bool:
 	if loaded.is_empty():
 		_say("Ce fichier n'est pas une map de l'éditeur")
 		return false
+	# Jamais par-dessus une map déjà sauvée (ni le brouillon) : « Nom (2) », « Nom (3) »...
+	var base_name := str(loaded.name).strip_edges()
+	if base_name == "":
+		base_name = "Ma map"
+	loaded.name = base_name
+	var n := 2
+	while MapData.file_name(str(loaded.name)) == MapData.DRAFT_NAME or FileAccess.file_exists(MapData.file_path(str(loaded.name))):
+		loaded.name = "%s (%d)" % [base_name, n]
+		n += 1
 	MapData.save(loaded)
 	_push_undo()
 	data = loaded
@@ -545,7 +567,7 @@ func test_map() -> bool:
 		return false
 	data.name = _name_edit.text.strip_edges() if _name_edit.text.strip_edges() != "" else "Ma map"
 	_save_draft()
-	GameSetup.editor_map = data.duplicate(true)
+	GameSetup.editor_map = MapData.normalized(data)  # (liens cassés réparés, comme après une relecture)
 	GameSetup.map_path = GameSetup.EDITOR_MAP
 	GameSetup.return_scene = EDITOR_SCENE
 	GameSetup.player_devices = []
@@ -695,10 +717,7 @@ func _nudge(key: Key, fine: bool) -> void:
 	var step := 1.0 if fine or not snap_on else float(grid_size)
 	var dir := {KEY_LEFT: Vector2.LEFT, KEY_RIGHT: Vector2.RIGHT, KEY_UP: Vector2.UP, KEY_DOWN: Vector2.DOWN}[key] as Vector2
 	_push_undo()
-	MapData.set_vec(element, "pos", MapData.vec(element, "pos") + dir * step)
-	if not fine:
-		_snap(element)
-	_refresh(element)
+	_move_with_children(element, MapData.vec(element, "pos") + dir * step, not fine)
 	_show_props()
 
 
@@ -855,6 +874,8 @@ func _push_undo() -> void:
 
 
 func _save_draft() -> void:
+	if _name_edit != null and _name_edit.text.strip_edges() != "":
+		data.name = _name_edit.text.strip_edges()
 	MapData.save(data, MapData.DRAFT_NAME)
 	_dirty = false
 	_autosave_left = AUTOSAVE_TIME
@@ -1319,8 +1340,11 @@ func _set_vec_part(element: Dictionary, key: String, axis: int, value: float) ->
 	var v := MapData.vec(element, key)
 	v[axis] = value
 	_push_undo()
-	MapData.set_vec(element, key, v)
-	_refresh(element)
+	if key == "pos":
+		_move_with_children(element, v, false)  # ce qui y est attaché suit
+	else:
+		MapData.set_vec(element, key, v)
+		_refresh(element)
 
 
 func _spin(min_value: float, max_value: float, step: float, value: float, on_change: Callable) -> SpinBox:

@@ -1,5 +1,5 @@
 class_name BreakableWindow
-extends StaticBody2D
+extends AnimatableBody2D
 ## Une fenêtre : un bloc plein qu'on peut casser. Empilées, elles forment les deux grandes colonnes
 ## au milieu des hauteurs de l'Arène.
 ## Elle casse quand :
@@ -9,7 +9,8 @@ extends StaticBody2D
 ##   - une balle, une lance lancée ou une explosion la touche.
 ## Une fenêtre cassée revient toute seule au bout de RESPAWN_TIME (si personne n'est à sa place).
 ## En ligne, seul l'hôte décide ; les copains reçoivent quelles fenêtres sont cassées (voir game_map.gd).
-## La position de la fenêtre est son centre.
+## La position de la fenêtre est son centre. C'est un AnimatableBody2D : dans une map de l'éditeur, elle peut bouger
+## et emmène alors les joueurs posés dessus (immobile, elle se comporte comme un bloc plein).
 
 const RESPAWN_TIME := 15.0
 const SHATTER_TIME := 0.45   ## les éclats volent ce temps

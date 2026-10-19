@@ -1443,149 +1443,149 @@ color = Color(0.36, 0.4, 0.5, 1)
 
 [node name="ColonneGauche" type="Node2D" parent="Toit/Hauteurs"]
 
-[node name="Fenetre1" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre1" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -755)
 script = ExtResource("7_window")
 
-[node name="Fenetre2" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre2" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -865)
 script = ExtResource("7_window")
 
-[node name="Fenetre3" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre3" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -975)
 script = ExtResource("7_window")
 
-[node name="Fenetre4" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre4" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -1085)
 script = ExtResource("7_window")
 
-[node name="Fenetre5" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre5" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -1195)
 script = ExtResource("7_window")
 
-[node name="Fenetre6" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre6" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -1305)
 script = ExtResource("7_window")
 
-[node name="Fenetre7" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre7" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -1415)
 script = ExtResource("7_window")
 
-[node name="Fenetre8" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre8" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -1525)
 script = ExtResource("7_window")
 
-[node name="Fenetre9" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre9" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -1635)
 script = ExtResource("7_window")
 
-[node name="Fenetre10" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre10" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -1745)
 script = ExtResource("7_window")
 
-[node name="Fenetre11" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre11" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -1855)
 script = ExtResource("7_window")
 
-[node name="Fenetre12" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre12" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -1965)
 script = ExtResource("7_window")
 
-[node name="Fenetre13" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre13" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -2075)
 script = ExtResource("7_window")
 
-[node name="Fenetre14" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre14" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -2185)
 script = ExtResource("7_window")
 
-[node name="Fenetre15" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre15" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -2295)
 script = ExtResource("7_window")
 
-[node name="Fenetre16" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre16" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -2405)
 script = ExtResource("7_window")
 
-[node name="Fenetre17" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre17" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -2515)
 script = ExtResource("7_window")
 
-[node name="Fenetre18" type="StaticBody2D" parent="Toit/Hauteurs/ColonneGauche"]
+[node name="Fenetre18" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneGauche"]
 position = Vector2(190, -2625)
 script = ExtResource("7_window")
 
 [node name="ColonneDroite" type="Node2D" parent="Toit/Hauteurs"]
 
-[node name="Fenetre1" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre1" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -755)
 script = ExtResource("7_window")
 
-[node name="Fenetre2" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre2" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -865)
 script = ExtResource("7_window")
 
-[node name="Fenetre3" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre3" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -975)
 script = ExtResource("7_window")
 
-[node name="Fenetre4" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre4" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -1085)
 script = ExtResource("7_window")
 
-[node name="Fenetre5" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre5" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -1195)
 script = ExtResource("7_window")
 
-[node name="Fenetre6" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre6" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -1305)
 script = ExtResource("7_window")
 
-[node name="Fenetre7" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre7" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -1415)
 script = ExtResource("7_window")
 
-[node name="Fenetre8" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre8" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -1525)
 script = ExtResource("7_window")
 
-[node name="Fenetre9" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre9" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -1635)
 script = ExtResource("7_window")
 
-[node name="Fenetre10" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre10" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -1745)
 script = ExtResource("7_window")
 
-[node name="Fenetre11" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre11" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -1855)
 script = ExtResource("7_window")
 
-[node name="Fenetre12" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre12" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -1965)
 script = ExtResource("7_window")
 
-[node name="Fenetre13" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre13" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -2075)
 script = ExtResource("7_window")
 
-[node name="Fenetre14" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre14" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -2185)
 script = ExtResource("7_window")
 
-[node name="Fenetre15" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre15" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -2295)
 script = ExtResource("7_window")
 
-[node name="Fenetre16" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre16" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -2405)
 script = ExtResource("7_window")
 
-[node name="Fenetre17" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre17" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -2515)
 script = ExtResource("7_window")
 
-[node name="Fenetre18" type="StaticBody2D" parent="Toit/Hauteurs/ColonneDroite"]
+[node name="Fenetre18" type="AnimatableBody2D" parent="Toit/Hauteurs/ColonneDroite"]
 position = Vector2(590, -2625)
 script = ExtResource("7_window")
 

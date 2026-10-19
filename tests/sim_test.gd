@@ -2458,6 +2458,35 @@ func _ready() -> void:
 		{"id": 2, "type": "sol", "pos": [0, 0], "attach": 3}, {"id": 3, "type": "sol", "pos": [0, 0], "attach": 2}]})
 	check(int(loose.elements[0].attach) == 0 and (int(loose.elements[1].attach) == 0 or int(loose.elements[2].attach) == 0),
 		"Éditeur mouvement : un fichier avec un lien vers rien ou une boucle est réparé")
+	# Check-up de l'éditeur (2026-10-19)
+	var cu_parent := editor.add_from_catalog("sol", Vector2(400, 300))
+	var cu_child := editor.add_from_catalog("plateforme", Vector2(400, 200))
+	editor.attach_selected(cu_parent.id)
+	cu_child.travel = [100, 0]
+	editor.copy_selected()
+	editor.select(cu_parent.id)
+	editor.delete_selected()
+	var cu_pasted := editor.paste()
+	check(int(cu_pasted.attach) == 0 and MapData.offset_at(MapData.by_id(editor.data), cu_pasted, 2.0).x <= 100.5,
+		"Check-up éditeur : coller une copie d'un élément dont le parent est effacé ne l'attache pas (ni à lui-même)")
+	var cu_base := editor.add_from_catalog("sol", Vector2(1000, 300))
+	var cu_top := editor.add_from_catalog("plateforme", Vector2(1000, 200))
+	editor.attach_selected(cu_base.id)
+	editor.select(cu_base.id)
+	var cu_before := MapData.vec(cu_top, "pos")
+	editor._nudge(KEY_RIGHT, true)
+	editor._set_vec_part(cu_base, "pos", 1, 260.0)
+	check(MapData.vec(cu_top, "pos") == cu_before + Vector2(1, -40),
+		"Check-up éditeur : les flèches et les cases X / Y emmènent aussi ce qui est attaché")
+	for e in [cu_pasted, cu_base, cu_top]:
+		editor.select(e.id)
+		editor.delete_selected()
+	var cu_name: String = editor._name_edit.text
+	editor._name_edit.text = "_test_nom_quitter"
+	editor._save_draft()
+	check(MapData.load_saved(MapData.DRAFT_NAME).name == "_test_nom_quitter", "Check-up éditeur : le nom tapé est gardé en quittant")
+	editor._name_edit.text = cu_name
+	editor.data.name = cu_name
 	# 14d) Exporter / importer : la map passe dans un fichier, et revient (dans un autre navigateur)
 	editor._name_edit.text = "_test_export"
 	var exported := editor.export_map()
@@ -2470,7 +2499,10 @@ func _ready() -> void:
 		"Éditeur : Importer refuse un fichier qui n'est pas une map")
 	check(editor.import_text(exported_text) and editor.data.elements.size() == count_before_import
 		and "_test_export" in MapData.list_saved(), "Éditeur : Importer ouvre la map du fichier et la sauve dans le navigateur")
+	check(editor.import_text(exported_text) and editor.data.name == "_test_export (2)" and "_test_export_(2)" in MapData.list_saved(),
+		"Check-up éditeur : importer une map du même nom ne remplace pas celle déjà sauvée")
 	MapData.delete_saved("_test_export")
+	MapData.delete_saved("_test_export (2)")
 	DirAccess.remove_absolute(MapEditor.EXPORT_DIR + "/" + exported)
 	editor._name_edit.text = "_test_editeur"
 	check(editor.save_map() and "_test_editeur" in MapData.list_saved(), "Éditeur : la map est sauvée et listée")
