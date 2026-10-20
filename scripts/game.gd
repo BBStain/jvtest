@@ -69,6 +69,7 @@ const GRENADE_SHIELD_DAMAGE := 3
 const KNOCKED_SPEED_MIN := 550.0           ## jauge de contre vide : elle tombe à quelques pas...
 const KNOCKED_SPEED_MAX := 1400.0          ## ... jauge pleine (berserk) : elle part très loin
 const KNOCKED_LIFT := 0.9                  ## elle part en cloche, vers l'arrière de celui qui frappait
+const ARROW_CLOSE_COUNTER := 220.0         ## flèche contrée à moins de cette distance du tireur : l'arc s'use (comme une lourde contrée)
 const KNOCKED_PICKUP_DELAY := 0.4          ## on ne peut pas la rattraper tout de suite en vol
 
 # --- Armes qui apparaissent sur la map (points WeaponSpawns, voir GameMap.weapon_spawn_points) ---
@@ -113,6 +114,7 @@ var pickups: Array[ItemPickup] = []        ## les objets tombés sur la map, pas
 var rng := RandomNumberGenerator.new()     ## où et quel objet tombe (seul l'hôte tire au sort)
 var _item_spawn_timer := ITEM_SPAWN_TIME
 var _weapon_spawn_timer := WEAPON_SPAWN_TIME
+var _bow_count := 0                     ## pour donner un numéro à chaque arc (voir _new_bow_id)
 @onready var _end_screen: Control = $UI/EndScreen
 @onready var _winner_label: Label = $UI/EndScreen/Winner
 @onready var _camera: Camera2D = $Camera
@@ -151,9 +153,11 @@ func _ready() -> void:
 		add_child(fighter)
 		fighter.life_lost.connect(_on_life_lost)
 		fighter.weapon_thrown.connect(_on_weapon_thrown)
+		fighter.arrow_shot.connect(_on_arrow_shot)
 		fighter.weapon_tossed.connect(_on_weapon_tossed)
 		fighter.item_used.connect(_on_item_used)
 		fighter.grapple_parried.connect(_on_grapple_parried)
+		fighter.bow_id = _new_bow_id()
 		fighter.show_lives()
 		fighters.append(fighter)
 	var gauge_bar := CounterGaugeBar.new()
@@ -628,6 +632,7 @@ func spawn_weapon(new_weapon: WeaponStats, where: Vector2) -> Projectile:
 	loose.color = new_weapon.color
 	loose.length = new_weapon.held_length * Projectile.KNOCKED_SCALE
 	loose.head = new_weapon.held_head * Projectile.KNOCKED_SCALE
+	loose.bow_id = _new_bow_id()  # un arc neuf, avec toutes ses flèches
 	_add_projectile(loose)
 	return loose
 
@@ -640,6 +645,8 @@ func _add_loose_weapon(holder: Fighter, velocity: Vector2, angle: float) -> void
 	loose.owner_index = holder.player_index
 	loose.weapon = holder.weapon
 	loose.counters = holder.weapon_counters
+	loose.ammo = holder.arrows
+	loose.bow_id = holder.bow_id
 	loose.position = holder.global_position
 	loose.velocity = velocity
 	loose.rotation = angle
@@ -756,9 +763,7 @@ func _resolve_hits() -> void:
 			if reached.has(other) and attacker in reached[other]:
 				victim = other
 				break
-		var hit_dir: Vector2 = (victim.global_position - attacker.global_position).normalized()
-		if not attacker.is_heavy_attack():
-			hit_dir = attacker.attack_direction()
+		var hit_dir: Vector2 = attacker.hit_push_direction((victim.global_position - attacker.global_position).normalized())
 		landed.append({"attacker": attacker, "victim": victim, "dir": hit_dir,
 			"knockback": attacker.attack_knockback(), "heavy": attacker.is_heavy_attack()})
 	# Deux joueurs qui se touchent l'un l'autre : choc, leurs deux coups sont annulés.
@@ -908,6 +913,72 @@ func _on_weapon_thrown(fighter: Fighter, direction: Vector2, speed: float) -> vo
 	_add_projectile(spear)
 
 
+## Arc : la flèche part vers l'adversaire. Elle tombe un peu en volant et fait mal comme une
+## balle (un coup peut la renvoyer, le bouclier ramassé aussi).
+func _on_arrow_shot(fighter: Fighter, direction: Vector2, speed: float, knockback: float) -> void:
+	var arrow := Projectile.new()
+	arrow.kind = "fleche"
+	arrow.owner_index = fighter.player_index
+	arrow.position = fighter.global_position + direction * 24.0
+	arrow.velocity = direction * speed
+	arrow.rotation = direction.angle()
+	arrow.knockback = knockback
+	arrow.color = fighter.weapon.color
+	arrow.length = Projectile.ARROW_LENGTH
+	arrow.bow_id = fighter.bow_id
+	_add_projectile(arrow)
+
+
+## Chaque arc a son numéro : ses flèches ne se ramassent qu'avec lui.
+func _new_bow_id() -> int:
+	_bow_count += 1
+	return _bow_count
+
+
+## Une flèche : sortie de la map, elle est détruite ; un coup ou un blocage parfait la contre
+## (elle casse) ; elle tombe après avoir touché quelqu'un ; posée ou plantée, celui qui tient
+## son arc la ramasse en passant dessus (s'il lui manque des flèches). Contrée de très près
+## (tireur à moins de ARROW_CLOSE_COUNTER), l'arc s'use comme n'importe quelle arme contrée.
+func _resolve_arrow(arrow: Projectile) -> void:
+	if not map.blast_zone.has_point(arrow.position):
+		_remove_projectile(arrow)
+		return
+	if arrow.state != Projectile.State.FLYING:
+		for fighter in fighters:
+			if not fighter.eliminated and fighter.has_weapon_in_hand() and fighter.bow_id == arrow.bow_id \
+					and fighter.arrows < Fighter.ARROWS_MAX and fighter.body_rect().grow(12.0).has_point(arrow.position):
+				fighter.arrows += 1
+				_remove_projectile(arrow)
+				return
+		return
+	for fighter in fighters:
+		if fighter.player_index != arrow.owner_index and fighter.is_attack_active() and _projectile_in_attack(arrow, fighter):
+			fighter.mark_attack_hit()
+			fighter.reset_cooldown()
+			gauge.add_counter(false)
+			_spawn_clash_mark(arrow.position, false)
+			_wear_bow_close(arrow, fighter)
+			_remove_projectile(arrow)
+			return
+	var victim := _projectile_victim(arrow)
+	if victim == null:
+		return
+	if victim.is_parrying():
+		_projectile_hits(arrow, victim, 1)  # blocage parfait : un contre, la flèche casse
+		_wear_bow_close(arrow, victim)
+		_remove_projectile(arrow)
+		return
+	if not victim.is_item_shielded() and victim.can_be_hit():
+		_projectile_hits(arrow, victim, 1)
+	arrow.drop()
+
+
+func _wear_bow_close(arrow: Projectile, counterer: Fighter) -> void:
+	var shooter: Fighter = fighters[arrow.owner_index]
+	if shooter.bow_id == arrow.bow_id and shooter.global_position.distance_to(counterer.global_position) <= ARROW_CLOSE_COUNTER:
+		_wear_weapon(shooter, counterer)
+
+
 func _add_projectile(projectile: Projectile) -> void:
 	projectiles.append(projectile)
 	add_child(projectile)
@@ -929,6 +1000,8 @@ func _resolve_projectiles() -> void:
 		match projectile.kind:
 			"balle":
 				_resolve_bullet(projectile)
+			"fleche":
+				_resolve_arrow(projectile)
 			"grenade":
 				_resolve_grenade(projectile)
 			_:
@@ -980,7 +1053,7 @@ func _resolve_loose_weapon(loose: Projectile) -> void:
 ## Un joueur à mains nues prend l'arme (la sienne ou celle d'un autre, avec son usure).
 func _pick_up_weapon(fighter: Fighter, loose: Projectile) -> void:
 	if loose.weapon != null:
-		fighter.equip(loose.weapon, loose.counters)
+		fighter.equip(loose.weapon, loose.counters, loose.ammo, loose.bow_id)
 	_remove_projectile(loose)
 
 

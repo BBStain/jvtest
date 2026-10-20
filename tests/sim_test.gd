@@ -2212,6 +2212,168 @@ func _ready() -> void:
 	p1.input_source = Scripted.new(func(s, f): pass)
 	p1.item = ""
 	await step(30)
+	# 19k) Nunchaku : coups vers le bas puis vers le haut, lourde = rafale de 3 coups
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.equip(load("res://weapons/nunchaku.tres"), 0)
+	p1.position = Vector2(600, 540); p2.position = Vector2(670, 540)
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
+	var nun_vy := [0.0, 0.0]
+	for i in 30:
+		await step(1)
+		if touched(p2):
+			nun_vy[0] = p2.velocity.y
+			break
+	p2._stun_timer = 0.0; p2._invincible_timer = 0.0
+	await step(40)
+	p2._stun_timer = 0.0; p2._invincible_timer = 0.0
+	p1.position = Vector2(600, 540); p2.position = Vector2(670, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
+	for i in 30:
+		await step(1)
+		if touched(p2):
+			nun_vy[1] = p2.velocity.y
+			break
+	check(nun_vy[0] > 100.0 and nun_vy[1] < -500.0, "Nunchaku : 1er coup projette vers le bas, 2e vers le haut (vy %.0f puis %.0f)" % [nun_vy[0], nun_vy[1]])
+	# Lourde : on avance normalement en chargeant, puis 3 coups (bas / haut / bas)
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.equip(load("res://weapons/nunchaku.tres"), 0)
+	p1.position = Vector2(500, 540); p2.position = Vector2(1100, 540)
+	await step(2)
+	var nun_x := p1.position.x
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 70
+		s.stick.x = 1.0 if f < 40 else 0.0)
+	await step(40)
+	var nun_moved := p1.position.x - nun_x
+	check(p1.is_charging_heavy() and nun_moved > 0.6 * p1.stats.run_speed * 39.0 / 60.0, "Nunchaku : on avance normalement en chargeant la lourde (%.0f px)" % nun_moved)
+	var nun_index := {}
+	var nun_ups := {}
+	var nun_reach := 0.0
+	for i in 60:
+		await step(1)
+		if p1.is_attack_active():
+			nun_index[p1._burst_index] = true
+			nun_ups[p1._hit_dir().y < 0.0] = true
+			nun_reach = maxf(nun_reach, p1.attack_center().distance_to(p1.global_position))
+	check(nun_index.size() == Fighter.BURST_HITS and nun_ups.size() == 2, "Nunchaku : la lourde est une rafale de %d coups, vers le bas et vers le haut" % Fighter.BURST_HITS)
+	check(nun_reach > p1.stats.attack_reach * 1.3, "Nunchaku : chargée, la rafale va plus loin (%.0f px)" % nun_reach)
+	await shot("19_nunchaku")
+	# 19l) Arc : petit couteau rapide au coup léger, flèche à la lourde (on garde l'arc)
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.equip(load("res://weapons/arc.tres"), 0)
+	check(p1.stats.attack_reach < base.attack_reach * 0.6 and p1.stats.attack_cooldown < base.attack_cooldown * 0.5,
+		"Arc : coup léger très court et très rapide (portée %.0f, recharge %.2f s)" % [p1.stats.attack_reach, p1.stats.attack_cooldown])
+	p1.position = Vector2(500, 540); p2.position = Vector2(900, 540)
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 50)
+	var arrow_seen := false
+	for i in 120:
+		await step(1)
+		for pr in game.projectiles:
+			if pr.kind == "fleche":
+				arrow_seen = true
+		if touched(p2):
+			break
+	check(arrow_seen and touched(p2) and p1.has_weapon_in_hand() and p1.arrows == Fighter.ARROWS_MAX - 1,
+		"Arc : la lourde tire une flèche qui touche, on garde l'arc (%d flèches)" % p1.arrows)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(60)
+	var arrows_lying: Array = game.projectiles.filter(func(pr): return pr.kind == "fleche")
+	check(arrows_lying.size() == 1 and arrows_lying[0].state != Projectile.State.FLYING, "Arc : la flèche retombe après avoir touché")
+	# Un autre joueur (même avec un arc) ne ramasse pas cette flèche ; celui qui tient l'arc oui
+	p2.equip(load("res://weapons/arc.tres"), 0, 2, 99)
+	p2.position = arrows_lying[0].position + Vector2(0, -10); p2.velocity = Vector2.ZERO
+	await step(3)
+	check(arrows_lying[0] in game.projectiles and p2.arrows == 2, "Arc : la flèche d'un autre arc ne se ramasse pas")
+	p2.position = Vector2(1200, 540)
+	p1.position = arrows_lying[0].position + Vector2(0, -10); p1.velocity = Vector2.ZERO
+	await step(3)
+	check(not arrows_lying[0] in game.projectiles and p1.arrows == Fighter.ARROWS_MAX, "Arc : celui qui tient l'arc ramasse sa flèche")
+	# Arc vide : Y ne tire rien
+	p1.arrows = 0
+	p1.position = Vector2(500, 540); p2.position = Vector2(900, 540)
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 20)
+	await step(40)
+	check(game.projectiles.filter(func(pr): return pr.kind == "fleche").is_empty(), "Arc : sans flèche, la lourde ne tire rien")
+	# Une flèche frappée par un coup est contrée : elle casse
+	p1.arrows = 3
+	p2._stun_timer = 0.0; p2._invincible_timer = 0.0
+	p2.equip(load(GameSetup.WEAPONS[0]), 0)
+	p1.position = Vector2(400, 540); p2.position = Vector2(800, 540)
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 30)
+	var arrow_cut := false
+	for i in 90:
+		await step(1)
+		var flying: Array = game.projectiles.filter(func(pr): return pr.kind == "fleche")
+		if not flying.is_empty() and flying[0].position.distance_to(p2.global_position) < 140.0 and not p2.is_attacking():
+			light_now(p2, Vector2.LEFT)
+		if p1.arrows == 2 and flying.is_empty():
+			arrow_cut = true
+			break
+	check(arrow_cut and untouched(p2), "Arc : une flèche frappée par un coup casse")
+	check(p1.weapon_counters == 0, "Arc : contrée de loin, l'arc ne s'use pas")
+	# Contrée de très près : l'arc s'use comme une arme contrée
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(60)
+	p2._stun_timer = 0.0; p2._invincible_timer = 0.0
+	p1.position = Vector2(500, 540); p2.position = Vector2(620, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	var bow_arrows := p1.arrows
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 20)
+	for i in 60:
+		await step(1)
+		if not p2.is_attacking() and not game.projectiles.filter(func(pr): return pr.kind == "fleche").is_empty():
+			light_now(p2, Vector2.LEFT)
+		if p1.arrows < bow_arrows and game.projectiles.filter(func(pr): return pr.kind == "fleche").is_empty():
+			break
+	check(p1.weapon_counters == 1 and untouched(p2), "Arc : une flèche contrée de très près abîme l'arc")
+	p1.weapon_counters = 0
+	# L'arc lancé (RB) et rattrapé : le nouveau porteur a les flèches qui restaient
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	var bow_before := p1.bow_id
+	var arrows_before := p1.arrows
+	p1.position = Vector2(500, 540); p2.position = Vector2(700, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f): s.throw_pressed = f == 1)
+	for i in 60:
+		await step(1)
+		if p2.has_weapon_in_hand():
+			break
+	check(p2.has_weapon_in_hand() and p2.weapon.heavy == WeaponStats.Heavy.SHOOT and p2.arrows == arrows_before and p2.bow_id == bow_before,
+		"Arc : rattrapé par un autre, il garde ses flèches (%d) et ses flèches par terre sont à lui" % p2.arrows)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.equip(load(GameSetup.WEAPONS[0]), 0)  # la suite des tests est à mains nues
+	p2.equip(load(GameSetup.WEAPONS[0]), 0)
+	await step(30)
 	# 19j) Un objet tombe toutes les 10 s, au plus 2 par terre
 	for pickup in game.pickups.duplicate():
 		game._remove_pickup(pickup)

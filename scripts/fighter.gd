@@ -12,6 +12,7 @@ extends CharacterBody2D
 
 signal life_lost(fighter: Fighter)
 signal weapon_thrown(fighter: Fighter, direction: Vector2, speed: float)  ## lance : game.gd crée la lance qui vole
+signal arrow_shot(fighter: Fighter, direction: Vector2, speed: float, knockback: float)  ## arc : game.gd crée la flèche
 signal weapon_tossed(fighter: Fighter)  ## RB : on lance son arme (sans dégâts), game.gd la fait voler
 ## Un objet utilisé (balle tirée, grenade lancée ou lâchée) : game.gd crée ce qui vole.
 ## power : 0 à 1 (distance de la grenade) ; fuse : temps restant avant que la grenade explose.
@@ -86,6 +87,13 @@ const WEAPON_SHRINK := 0.2              ## chaque contre rapetisse l'arme de 20 
 const WEAPON_REPAIR_COUNTERS := 2       ## contrer 2 fois avec le coup léger de son arme la répare d'un cran
 const WEAPON_REPAIR_FLASH := 0.5        ## arme réparée : un anneau de sa couleur apparaît ce temps
 const THROW_CHARGE_SPEED := 1.5         ## lance / dash du katana : à pleine charge, 1,5 fois plus vite
+const SWING_TILT := 25.0                ## nunchaku : le coup part 25° plus bas (ou plus haut) que l'adversaire...
+const SWING_PUSH_SIDE := 0.5            ## ... et projette surtout vers le bas (ou le haut), un peu vers l'avant
+const BURST_HITS := 3                   ## nunchaku : la lourde est une rafale de 3 coups...
+const BURST_HIT_TIME := 0.12            ## ... un toutes les 0,12 s (chacun peut toucher)
+const BURST_CHARGE_REACH := 1.8         ## ... à pleine charge, ils vont 1,8 fois plus loin
+const ARROW_CHARGE_SPEED := 1.8         ## arc : à pleine charge, la flèche part 1,8 fois plus vite (donc plus loin)
+const ARROWS_MAX := 5                   ## arc : 5 flèches ; il faut aller les ramasser (seul celui qui tient cet arc le peut)
 
 # --- Objets ramassés sur la map (un seul à la fois, utilisé avec RT ; voir item_pickup.gd) ---
 const PISTOL_AMMO := 5                  ## balles du pistolet (une par appui)
@@ -156,7 +164,7 @@ const NET_VARS := [
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
 	"_stun_timer", "_block_hold_time", "weapon_id", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
-	"_swinging", "_swing_anchor", "grapple_mode", "grapple_point", "_item_flash_timer", "_item_flash_kind", "_repair_flash_timer",
+	"_swinging", "_swing_anchor", "_swing_up", "arrows", "grapple_mode", "grapple_point", "_item_flash_timer", "_item_flash_kind", "_repair_flash_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -230,6 +238,10 @@ var _dash_dir := Vector2.RIGHT
 var _attack_time := -1.0                ## temps écoulé depuis le début de l'attaque (-1 = pas d'attaque)
 var _attack_dir := Vector2.RIGHT
 var _attack_has_hit := false
+var _swing_up := true                   ## nunchaku : le dernier coup allait vers le haut (le prochain ira vers le bas)
+var arrows := ARROWS_MAX                ## arc : flèches qui restent dans l'arc (elles suivent l'arc s'il change de main)
+var bow_id := 0                         ## arc : de quel arc il s'agit (ses flèches ne se ramassent qu'avec lui)
+var _burst_index := 0                   ## nunchaku : quel coup de la rafale est en cours
 var _attack_heavy := false              ## true = attaque lourde en cours
 var _attack_cooldown_timer := 0.0
 var _attack_buffer_timer := 0.0
@@ -492,8 +504,8 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 		speed *= stats.sprint_speed_mult
 	if _blocking:
 		speed *= BLOCK_SPEED_MULT
-	elif _heavy_charging:
-		speed *= stats.heavy_charge_move_mult
+	elif _heavy_charging and heavy_kind() != WeaponStats.Heavy.BURST:
+		speed *= stats.heavy_charge_move_mult  # (le nunchaku avance normalement en chargeant)
 	velocity.x = move_toward(velocity.x, input.stick.x * speed, accel * delta)
 
 	# Gravité (plus forte si on a lâché le saut pendant la montée d'un saut = petit saut).
@@ -879,10 +891,14 @@ func _tick_dash(delta: float) -> void:
 func _try_start_attack(heavy: bool) -> void:
 	if not can_attack():
 		return
+	if heavy and heavy_kind() == WeaponStats.Heavy.SHOOT and arrows <= 0:
+		return  # arc vide : il faut ramasser ses flèches
 	_aim_at_target()
 	if not heavy and _aimed_dir != Vector2.ZERO:
 		_aim_towards(_aimed_dir)  # coup visé au stick droit
 	_aimed_dir = Vector2.ZERO
+	if not heavy:
+		_swing_up = not _swing_up  # nunchaku : vers le bas, puis vers le haut, et ainsi de suite
 	_attack_heavy = heavy
 	_attack_time = 0.0
 	_attack_has_hit = false
@@ -926,10 +942,22 @@ func _tick_attack(input: InputState, delta: float) -> void:
 			_attack_time = stats.heavy_startup
 			_attack_cooldown_timer = _cooldown(true)
 			velocity = Vector2.ZERO  # la frappe commence : on s'arrête net
+			_burst_index = 0
+			_swing_up = not _swing_up  # nunchaku : 1er coup de la rafale (vers le bas, puis haut, puis bas)
 			if heavy_kind() == WeaponStats.Heavy.THROW:
 				_throw_weapon()
+			elif heavy_kind() == WeaponStats.Heavy.SHOOT:
+				_shoot_arrow()
 		return
 	_attack_time += delta * _attack_speed()
+	if _attack_heavy and heavy_kind() == WeaponStats.Heavy.BURST and _attack_time >= stats.heavy_startup:
+		# Rafale du nunchaku : chaque coup peut toucher, vise à nouveau et change de sens.
+		var index := mini(int((_attack_time - stats.heavy_startup) / BURST_HIT_TIME), BURST_HITS - 1)
+		if index != _burst_index:
+			_burst_index = index
+			_attack_has_hit = false
+			_swing_up = not _swing_up
+			_aim_at_target()
 	if _attack_time >= _attack_startup() + _attack_active():
 		if is_katana_dashing():
 			velocity *= KATANA_DASH_END_KEEP
@@ -942,6 +970,15 @@ func _throw_weapon() -> void:
 	_cancel_attack()
 	weapon_away = true
 	weapon_thrown.emit(self, _attack_dir, speed)
+
+
+## Arc : la flèche part vers l'adversaire ; on garde l'arc.
+func _shoot_arrow() -> void:
+	var speed := weapon.heavy_speed * lerpf(1.0, ARROW_CHARGE_SPEED, _heavy_charge)
+	var knockback := attack_knockback()
+	_cancel_attack()
+	arrows -= 1
+	arrow_shot.emit(self, _attack_dir, speed, knockback)
 
 
 ## On ramasse sa lance. Arme cassée : on reste à mains nues.
@@ -963,9 +1000,12 @@ func has_weapon_in_hand() -> bool:
 
 
 ## On ramasse une arme (la sienne ou celle d'un autre), usée de "counters" contres.
-func equip(new_weapon: WeaponStats, counters: int) -> void:
+## Arc : il garde ses flèches ("ammo") et son numéro ("id") en changeant de main.
+func equip(new_weapon: WeaponStats, counters: int, ammo := ARROWS_MAX, id := 0) -> void:
 	weapon = new_weapon
 	weapon_counters = counters
+	arrows = ammo
+	bow_id = id
 	_repair_counters = 0
 	_update_armed_stats()
 	weapon_away = false
@@ -1056,6 +1096,8 @@ func _attack_startup() -> float:
 func _attack_active() -> float:
 	if _attack_heavy and heavy_kind() == WeaponStats.Heavy.SLAM:
 		return stats.heavy_active + SLAM_WAVE_TIME
+	if _attack_heavy and heavy_kind() == WeaponStats.Heavy.BURST:
+		return BURST_HITS * BURST_HIT_TIME
 	return stats.heavy_active if _attack_heavy else stats.attack_active
 
 
@@ -1170,9 +1212,11 @@ func attack_start() -> Vector2:
 		return _feet() - Vector2(_slam_wave_reach(), 0.0)
 	if is_katana_dashing():
 		return global_position
+	if _is_burst():
+		return global_position + _hit_dir() * stats.attack_radius
 	if _attack_heavy:
 		return attack_center()
-	return global_position + _attack_dir * clampf(_light_reach() - stats.attack_radius, 0.0, stats.attack_radius)
+	return global_position + _hit_dir() * clampf(_light_reach() - stats.attack_radius, 0.0, stats.attack_radius)
 
 
 ## Le bout de la zone qui touche.
@@ -1181,9 +1225,43 @@ func attack_center() -> Vector2:
 		return _feet() + Vector2(_slam_wave_reach(), 0.0)
 	if is_katana_dashing():
 		return global_position + _attack_dir * stats.heavy_arc_radius * KATANA_DASH_REACH * _range_mult()
+	if _is_burst():
+		return global_position + _hit_dir() * maxf(_burst_reach() - stats.attack_radius, 0.0)
 	if _attack_heavy:
 		return global_position + _heavy_tip(_heavy_angle())
-	return global_position + _attack_dir * maxf(_light_reach() - stats.attack_radius, 0.0)
+	return global_position + _hit_dir() * maxf(_light_reach() - stats.attack_radius, 0.0)
+
+
+## Nunchaku : en pleine rafale (après la charge).
+func _is_burst() -> bool:
+	return heavy_kind() == WeaponStats.Heavy.BURST and is_heavy_swinging()
+
+
+## Longueur des coups de la rafale : plus on a chargé, plus ils vont loin.
+func _burst_reach() -> float:
+	return stats.attack_reach * _range_mult() * lerpf(1.0, BURST_CHARGE_REACH, _heavy_charge)
+
+
+## Le nunchaku en main : ses coups alternent vers le bas et vers le haut.
+func _swings() -> bool:
+	return not weapon_away and weapon.light_swing
+
+
+## Direction du coup : vers l'adversaire, penchée vers le bas ou le haut pour le nunchaku.
+func _hit_dir() -> Vector2:
+	if not _swings():
+		return _attack_dir
+	var side := signf(_attack_dir.x) if absf(_attack_dir.x) > 0.01 else facing
+	return _attack_dir.rotated(deg_to_rad(SWING_TILT) * side * (-1.0 if _swing_up else 1.0))
+
+
+## Le sens dans lequel notre coup projette celui qu'il touche ("toward" : de nous vers lui).
+## Nunchaku : vers le bas ou vers le haut, selon le sens du coup.
+func hit_push_direction(toward: Vector2) -> Vector2:
+	if _swings():
+		var side := signf(toward.x) if absf(toward.x) > 0.01 else facing
+		return Vector2(side * SWING_PUSH_SIDE, -1.0 if _swing_up else 1.0).normalized()
+	return toward if _attack_heavy else _attack_dir
 
 
 ## Longueur actuelle du coup léger : la barre sort du perso et s'allonge pendant LIGHT_DEPLOY_TIME.
@@ -1205,6 +1283,8 @@ func _slam_wave_reach() -> float:
 func attack_radius() -> float:
 	if _is_slam_wave():
 		return SLAM_WAVE_RADIUS
+	if _is_burst():
+		return stats.attack_radius
 	return stats.heavy_tip_radius * lerpf(1.0, HEAVY_CHARGE_TIP_GROWTH, _heavy_charge) if _attack_heavy else stats.attack_radius
 
 
@@ -1527,6 +1607,21 @@ func _draw() -> void:
 				Color(weapon_color, 0.25 + 0.5 * fade))
 			draw_rect(Rect2(feet + Vector2(-reach, SLAM_WAVE_RADIUS - 3.0), Vector2(reach * 2.0, 3.0)), Color(1, 1, 1, 0.8 * fade))
 
+	# Nunchaku et arc : pendant la charge, un trait vers l'adversaire qui s'allonge avec la charge ;
+	# puis la rafale du nunchaku (une barre de sa couleur, vers le bas puis vers le haut).
+	elif is_attacking() and _attack_heavy and heavy_kind() in [WeaponStats.Heavy.BURST, WeaponStats.Heavy.SHOOT]:
+		if _heavy_charging:
+			var aim := _attack_dir if target == null else (target.global_position - global_position).normalized()
+			var reach := (_burst_reach() if heavy_kind() == WeaponStats.Heavy.BURST else 60.0 + 80.0 * _heavy_charge)
+			draw_line(aim * 12.0, aim * reach, Color(weapon_color, lerpf(0.3, 0.8, _heavy_charge)), 3.0)
+			if _heavy_charge >= 1.0 and int(_blink_clock / 0.05) % 2 == 0:
+				draw_circle(aim * reach, 6.0, Color(1, 1, 1, 0.9))
+		else:
+			var dir := _hit_dir()
+			var reach := _burst_reach()
+			draw_line(dir * 10.0, dir * reach, Color(weapon_color, 0.95), stats.attack_radius * 0.6)
+			draw_circle(dir * reach, stats.attack_radius * 0.6, color.lightened(0.6))
+
 	# L'attaque lourde : l'arme levée au-dessus de la tête, puis un arc jusqu'aux pieds
 	elif is_attacking() and _attack_heavy:
 		var angle := _heavy_angle()
@@ -1554,7 +1649,7 @@ func _draw() -> void:
 	# L'attaque légère : une barre blanche orientée vers l'adversaire
 	# (sa longueur et son épaisseur suivent la zone qui touche, pour chaque perso)
 	elif is_attacking():
-		draw_set_transform(Vector2.ZERO, _attack_dir.angle())
+		draw_set_transform(Vector2.ZERO, _hit_dir().angle())
 		var length := stats.attack_reach * _range_mult()
 		var bar := stats.attack_radius * 0.5625   # 9 px pour la Barre
 		var tip := stats.attack_radius * 0.875    # 14 px pour la Barre
@@ -1581,6 +1676,11 @@ func _draw() -> void:
 		if weapon.held_head > 0.0:
 			var head := weapon.held_head * weapon_length()
 			draw_rect(Rect2(end - Vector2.ONE * head / 2.0, Vector2.ONE * head), weapon_color)
+		if weapon.heavy == WeaponStats.Heavy.SHOOT:
+			# Les flèches qui restent : des petits traits à côté de l'arc
+			for i in arrows:
+				var x := hand.x - facing * (6.0 + i * 4.0)
+				draw_line(Vector2(x, -6.0), Vector2(x, -18.0), Color(weapon_color, 0.9), 2.0)
 
 	_draw_item(body)
 
