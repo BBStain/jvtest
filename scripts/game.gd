@@ -172,7 +172,7 @@ func _ready() -> void:
 	_update_camera(1.0, true)
 
 
-## Pour essayer l'ultime sans faire 30 contres : https://bbstain.github.io/jvtest/?ultime=plein
+## Pour essayer l'ultime sans faire 20 contres : https://bbstain.github.io/jvtest/?ultime=plein
 ## (hors ligne, les jauges d'ultime sont toujours pleines).
 func _ultimate_full_for_tests() -> bool:
 	if online or not OS.has_feature("web"):
