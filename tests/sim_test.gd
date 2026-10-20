@@ -3141,6 +3141,56 @@ func _ready() -> void:
 	GameSetup.return_scene = ""
 	GameSetup.player_devices = []
 
+	# Attaque ultime, étape 1 : jauge perso remplie par SES contres, X + Y quand elle est pleine
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position = Vector2(600, 500); p2.position = Vector2(650, 500)
+	await step(30)
+	game._clash(p1, p2, p1.position, p1)
+	check(p1.ultimate_points == 1 and p2.ultimate_points == 0, "Ultime : un contre remplit la jauge de celui qui contre seulement (%d / %d)" % [p1.ultimate_points, p2.ultimate_points])
+	p1.ultimate_points = 0
+	light_now(p1, Vector2.RIGHT)
+	p2._attack_heavy = true; p2._attack_time = p2.stats.heavy_startup; p2._heavy_charging = false
+	game._clash(p1, p2, p1.position)
+	check(p1.ultimate_points == Fighter.ULTIMATE_HEAVY_POINTS and p2.ultimate_points == 0, "Ultime : contrer une lourde compte double (%d / %d)" % [p1.ultimate_points, p2.ultimate_points])
+	p1._cancel_attack(); p2._cancel_attack()
+	game._parry(p1, p2)
+	check(p2.ultimate_points == 1, "Ultime : un blocage parfait remplit la jauge de celui qui bloque")
+	var round_trip := InputState.from_dict(InputState.new().to_dict())
+	var ult_in := InputState.new(); ult_in.ultimate_pressed = true
+	check(not round_trip.ultimate_pressed and InputState.from_dict(ult_in.to_dict()).ultimate_pressed, "Ultime : X + Y passe par le réseau")
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position = Vector2(500, 500); p2.position = Vector2(900, 500)
+	var ult_used := [0]
+	p1.ultimate_used.connect(func(_f): ult_used[0] += 1)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS - 1
+	p1.input_source = Scripted.new(func(s, f):
+		s.attack_pressed = f == 1; s.heavy_pressed = f == 3; s.heavy_held = f >= 3 and f < 6)
+	await step(6)
+	check(ult_used[0] == 0 and p1.ultimate_points == Fighter.ULTIMATE_POINTS - 1, "Ultime : jauge pas pleine, X + Y ne lance rien")
+	await step(60)
+	p1._attack_cooldown_timer = 0.0
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f):
+		s.attack_pressed = f == 1; s.heavy_pressed = f == 3; s.heavy_held = f >= 3 and f < 6
+		s.ultimate_pressed = f == 3)
+	await step(5)
+	check(ult_used[0] == 1 and p1.ultimate_points == 0 and not p1.is_attacking() and p1._ultimate_flash_timer > 0.0,
+		"Ultime : X puis Y avec la jauge pleine lance l'ultime, vide la jauge et annule le coup léger")
+	await step(60)
+	p1._attack_cooldown_timer = 0.0
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1._stun_timer = 1.0
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(3)
+	check(ult_used[0] == 1 and p1.is_ultimate_ready(), "Ultime : pas d'ultime en étant sonné")
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 

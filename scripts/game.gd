@@ -106,6 +106,7 @@ var _shake_left := 0.0                     ## l'écran tremble encore pendant ce
 var _lives_seen: Array[int] = []           ## les vies de chacun à la frame d'avant (pour voir une vie perdue)
 var gauge := CounterGauge.new()            ## la jauge de contre, une seule pour tous les joueurs
 var online := false                        ## partie en ligne
+var _ultimate_test := false                ## ?ultime=plein dans l'adresse : jauges d'ultime toujours pleines
 var _online_state: Array = []              ## (copain) le dernier état du jeu reçu de l'hôte
 
 var map: GameMap
@@ -132,6 +133,7 @@ func _ready() -> void:
 	move_child(map, 0)  # le décor est dessiné derrière les joueurs
 	InputBindings.register_menu_actions()
 	player_devices = GameSetup.devices_or_default().duplicate(true)
+	_ultimate_test = _ultimate_full_for_tests()
 	for i in player_devices.size():
 		InputBindings.register_player(i, player_devices[i])
 		var fighter := Fighter.new()
@@ -157,6 +159,9 @@ func _ready() -> void:
 		fighter.weapon_tossed.connect(_on_weapon_tossed)
 		fighter.item_used.connect(_on_item_used)
 		fighter.grapple_parried.connect(_on_grapple_parried)
+		fighter.ultimate_used.connect(_on_ultimate_used)
+		if _ultimate_test:
+			fighter.ultimate_points = Fighter.ULTIMATE_POINTS
 		fighter.bow_id = _new_bow_id()
 		fighter.show_lives()
 		fighters.append(fighter)
@@ -165,6 +170,14 @@ func _ready() -> void:
 	$UI.add_child(gauge_bar)
 	$UI.move_child(gauge_bar, 0)  # sous l'écran de fin et le menu pause
 	_update_camera(1.0, true)
+
+
+## Pour essayer l'ultime sans faire 30 contres : https://bbstain.github.io/jvtest/?ultime=plein
+## (hors ligne, les jauges d'ultime sont toujours pleines).
+func _ultimate_full_for_tests() -> bool:
+	if online or not OS.has_feature("web"):
+		return false
+	return str(JavaScriptBridge.eval("new URLSearchParams(window.location.search).get('ultime') || ''")) == "plein"
 
 
 func _process(delta: float) -> void:
@@ -530,7 +543,12 @@ func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -
 		elif not fighter.is_heavy_attack() and (counterer == null or fighter == counterer):
 			repaired.append(fighter)
 	_spawn_clash_mark(where, heavy_countered or explosion)
-	gauge.add_counter(heavy_countered or explosion)  # contrer une lourde compte triple
+	var counterers: Array = [a, b]  # les deux attaques se sont percutées : chacun a contré l'autre
+	if counterer != null:
+		counterers = [counterer]
+	elif heavy_countered:
+		counterers = [a] if b.is_heavy_attack() else [b]  # la légère a contré la lourde
+	_count_counter(heavy_countered or explosion, counterers)  # contrer une lourde compte triple
 	for fighter in [a, b]:
 		if (counterer == null or fighter == counterer) and not (heavy_countered and fighter.is_heavy_attack()):
 			fighter.recover()
@@ -565,6 +583,21 @@ func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -
 		fighter.weapon_light_counter()
 
 
+## Un contre a eu lieu : la jauge de contre (partagée) monte, et la jauge d'ultime de chacun de ceux
+## qui ont contré aussi (voir Fighter.add_ultimate_points).
+func _count_counter(countered_heavy: bool, counterers: Array) -> void:
+	gauge.add_counter(countered_heavy)
+	for fighter: Fighter in counterers:
+		fighter.add_ultimate_points(countered_heavy)
+
+
+## X + Y avec la jauge d'ultime pleine. Pour l'instant, seule l'onde blanche autour du perso
+## (dessinée par fighter.gd) : l'attaque ultime de chaque perso arrive aux étapes suivantes.
+func _on_ultimate_used(fighter: Fighter) -> void:
+	if _ultimate_test:
+		fighter.ultimate_points = Fighter.ULTIMATE_POINTS  # mode essai : la jauge se remplit tout de suite
+
+
 ## Blocage parfait : le défenseur a appuyé sur B pile au moment du coup. C'est un contre :
 ## les deux sont repoussés, le bouclier ne craque pas, celui qui frappait ne frappe plus
 ## pendant 1 s et le défenseur peut riposter tout de suite (et n'est plus sonné).
@@ -575,7 +608,7 @@ func _parry(attacker: Fighter, defender: Fighter) -> void:
 	_spawn_clash_mark((attacker.global_position + defender.global_position) / 2.0, false, PARRY_COLOR)
 	var heavy := attacker.is_heavy_attack()
 	var armed := not attacker.weapon_away
-	gauge.add_counter(heavy)
+	_count_counter(heavy, [defender])
 	defender.recover()
 	attacker.clash(push * Fighter.CLASH_PUSH * defender.stats.mass(), Fighter.PARRY_COOLDOWN)
 	defender.clash(-push * Fighter.CLASH_PUSH * attacker.stats.mass(), 0.0)
@@ -955,7 +988,7 @@ func _resolve_arrow(arrow: Projectile) -> void:
 		if fighter.player_index != arrow.owner_index and fighter.is_attack_active() and _projectile_in_attack(arrow, fighter):
 			fighter.mark_attack_hit()
 			fighter.reset_cooldown()
-			gauge.add_counter(false)
+			_count_counter(false, [fighter])
 			_spawn_clash_mark(arrow.position, false)
 			_wear_bow_close(arrow, fighter)
 			_remove_projectile(arrow)
@@ -1068,7 +1101,7 @@ func _counter_spear(spear: Projectile, counterer: Fighter) -> void:
 			counterer.weapon_light_counter()  # contre au coup léger : l'arme se répare
 	counterer.recover()
 	counterer.reset_cooldown()
-	gauge.add_counter(true)
+	_count_counter(true, [counterer])
 	_spawn_clash_mark(spear.tip(), true, PARRY_COLOR if counterer.is_parrying() else Color.WHITE)
 	_renew_slowmo(counterer, thrower)
 	spear.counters += 1
@@ -1128,7 +1161,7 @@ func _deflect_bullet(bullet: Projectile, deflector: Fighter) -> void:
 	var perfect := error <= 0.0
 	_spawn_clash_mark(bullet.position, false, PARRY_COLOR if perfect else Color.WHITE)
 	if perfect:
-		gauge.add_counter(false)
+		_count_counter(false, [deflector])
 		deflector.recover()
 		deflector.reset_cooldown()
 
@@ -1205,7 +1238,7 @@ func _projectile_hits(projectile: Projectile, victim: Fighter, shield_damage: in
 	if victim.is_parrying():
 		victim.recover()
 		victim.reset_cooldown()
-		gauge.add_counter(false)
+		_count_counter(false, [victim])
 		_spawn_clash_mark(projectile.tip(), false, PARRY_COLOR)
 	elif victim.is_blocking() and not victim.is_stunned():
 		var push := Vector2(signf(dir.x) if dir.x != 0.0 else 1.0, 0.0)
@@ -1223,7 +1256,7 @@ func _projectile_hits(projectile: Projectile, victim: Fighter, shield_damage: in
 func _on_grapple_parried(thrower: Fighter, defender: Fighter) -> void:
 	var push := _push_dir(thrower, defender)
 	_spawn_clash_mark(defender.global_position, false, PARRY_COLOR)
-	gauge.add_counter(false)
+	_count_counter(false, [defender])
 	defender.recover()
 	defender.reset_cooldown()
 	thrower.clash(push * Fighter.CLASH_PUSH * defender.stats.mass(), Fighter.PARRY_COOLDOWN)
