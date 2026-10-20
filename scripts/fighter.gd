@@ -129,7 +129,7 @@ const PARRY_WINDOW := 0.15              ## blocage parfait : B appuyé au plus t
 const PARRY_COOLDOWN := 1.0             ## ... c'est un contre : celui qui frappait ne frappe plus pendant 1 s
 
 # --- Attaque ultime : chaque perso a sa jauge, remplie par SES contres ---
-const ULTIMATE_POINTS := 30             ## 30 contres pour remplir la jauge d'ultime...
+const ULTIMATE_POINTS := 20             ## 20 contres pour remplir la jauge d'ultime...
 const ULTIMATE_HEAVY_POINTS := 2        ## ... contrer une attaque lourde compte double
 const ULTIMATE_FLASH_TIME := 0.5        ## ultime lancée : une onde blanche part du perso
 const ULTIMATE_PARTICLES := 18          ## l'aura autour du perso : jusqu'à 18 particules (jauge pleine)
