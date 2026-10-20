@@ -5,6 +5,7 @@ extends Node2D
 ##             le premier sol ou mur, et son lanceur la ramasse en passant dessus.
 ##   balle   : une balle de pistolet, rapide et en ligne droite ; elle disparaît contre un mur.
 ##             Un coup donné au bon moment la renvoie (voir game.gd, _deflect_bullet).
+##   fleche  : la flèche de l'arc (attaque lourde). Comme une balle, mais elle tombe un peu.
 ##   grenade : collante. Elle se colle au premier élément de la map qu'elle touche (sol, mur,
 ##             plateforme qui bouge, liane, fenêtre) et explose quand sa mèche est finie. Une fenêtre
 ##             touchée trop vite casse et la grenade continue. Un coup la décolle et la repousse.
@@ -22,6 +23,8 @@ const DROP_GRAVITY := 2300.0
 const GRENADE_GRAVITY := 900.0          ## la grenade vole plus droit qu'avant (elle tombe moins vite)
 const GRENADE_WINDOW_BREAK := 900.0     ## plus vite que ça, elle casse la fenêtre au lieu de s'y coller
 const BULLET_LIFETIME := 2.5            ## une balle qui ne touche rien disparaît au bout de ce temps
+const ARROW_GRAVITY := 400.0            ## la flèche de l'arc tombe un peu en volant
+const ARROW_LENGTH := 34.0
 const RADIUS := 6.0                     ## épaisseur de la zone qui touche
 const SPEAR_LENGTH := 70.0              ## lance neuve (plus courte à chaque fois qu'elle est contrée)
 const KNOCKED_SPIN := 14.0              ## arme qui a sauté des mains : elle tourne sur elle-même en volant
@@ -57,7 +60,7 @@ func _physics_process(delta: float) -> void:
 	age += delta
 	hit_lock -= delta
 	match kind:
-		"balle":
+		"balle", "fleche":
 			_tick_bullet(delta)
 		"grenade":
 			_tick_grenade(delta)
@@ -102,6 +105,8 @@ func _follow_support() -> void:
 
 
 func _tick_bullet(delta: float) -> void:
+	if kind == "fleche":
+		velocity.y += ARROW_GRAVITY * delta
 	var step := velocity * delta
 	var hit := _ray(position, tip() + step, false)
 	if not hit.is_empty() and hit.collider is BreakableWindow:

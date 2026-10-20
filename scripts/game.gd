@@ -151,6 +151,7 @@ func _ready() -> void:
 		add_child(fighter)
 		fighter.life_lost.connect(_on_life_lost)
 		fighter.weapon_thrown.connect(_on_weapon_thrown)
+		fighter.arrow_shot.connect(_on_arrow_shot)
 		fighter.weapon_tossed.connect(_on_weapon_tossed)
 		fighter.item_used.connect(_on_item_used)
 		fighter.grapple_parried.connect(_on_grapple_parried)
@@ -756,9 +757,7 @@ func _resolve_hits() -> void:
 			if reached.has(other) and attacker in reached[other]:
 				victim = other
 				break
-		var hit_dir: Vector2 = (victim.global_position - attacker.global_position).normalized()
-		if not attacker.is_heavy_attack():
-			hit_dir = attacker.attack_direction()
+		var hit_dir: Vector2 = attacker.hit_push_direction((victim.global_position - attacker.global_position).normalized())
 		landed.append({"attacker": attacker, "victim": victim, "dir": hit_dir,
 			"knockback": attacker.attack_knockback(), "heavy": attacker.is_heavy_attack()})
 	# Deux joueurs qui se touchent l'un l'autre : choc, leurs deux coups sont annulés.
@@ -908,6 +907,21 @@ func _on_weapon_thrown(fighter: Fighter, direction: Vector2, speed: float) -> vo
 	_add_projectile(spear)
 
 
+## Arc : la flèche part vers l'adversaire. Elle tombe un peu en volant et fait mal comme une
+## balle (un coup peut la renvoyer, le bouclier ramassé aussi).
+func _on_arrow_shot(fighter: Fighter, direction: Vector2, speed: float, knockback: float) -> void:
+	var arrow := Projectile.new()
+	arrow.kind = "fleche"
+	arrow.owner_index = fighter.player_index
+	arrow.position = fighter.global_position + direction * 24.0
+	arrow.velocity = direction * speed
+	arrow.rotation = direction.angle()
+	arrow.knockback = knockback
+	arrow.color = fighter.weapon.color
+	arrow.length = Projectile.ARROW_LENGTH
+	_add_projectile(arrow)
+
+
 func _add_projectile(projectile: Projectile) -> void:
 	projectiles.append(projectile)
 	add_child(projectile)
@@ -927,7 +941,7 @@ func _resolve_projectiles() -> void:
 		if not projectile in projectiles:
 			continue  # déjà retirée (lance revenue à son lanceur)
 		match projectile.kind:
-			"balle":
+			"balle", "fleche":
 				_resolve_bullet(projectile)
 			"grenade":
 				_resolve_grenade(projectile)

@@ -28,6 +28,8 @@ const WEAPONS := [
 	"res://weapons/katana.tres",
 	"res://weapons/marteau.tres",
 	"res://weapons/lance.tres",
+	"res://weapons/nunchaku.tres",
+	"res://weapons/arc.tres",
 ]
 
 ## Un élément par joueur ; chaque élément est la liste de ses appareils (voir InputBindings).
