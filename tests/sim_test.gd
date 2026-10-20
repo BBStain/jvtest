@@ -3239,8 +3239,8 @@ func _ready() -> void:
 	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
 	await step(laser_frames + 4)
 	check(p2.is_frozen(), "Laser : un blocage normal ne protège pas")
-	# Les autres persos n'ont pas (encore) de laser
-	GameSetup.player_characters = ["res://characters/jumb.tres", ""]
+	# Les autres persos n'ont pas de laser
+	GameSetup.player_characters = ["res://characters/jib.tres", ""]
 	await new_game()
 	GameSetup.player_characters = []
 	p1 = game.fighters[0]; p2 = game.fighters[1]
@@ -3252,6 +3252,54 @@ func _ready() -> void:
 	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
 	await step(laser_frames + 4)
 	check(p1.ultimate_points == 0 and not p1.is_lasering() and not p2.is_frozen(), "Laser : seule la Barre tire le laser")
+
+	# Attaque ultime, étape 3 : l'onde de choc de Jumb
+	GameSetup.player_characters = ["res://characters/jumb.tres", "", ""]
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}]]
+	await new_game()
+	GameSetup.player_characters = []
+	GameSetup.player_devices = []
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	var wave_p3: Fighter = game.fighters[2]
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 640; p2.position.x = 840; wave_p3.position.x = 1040
+	await step(40)
+	var wave_from := p2.position.x
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(3)
+	check(p1.is_waving() and p1.wave_radius() == 0.0 and untouched(p2), "Onde : Jumb se ramasse d'abord (personne n'est touché)")
+	await step(int((Fighter.WAVE_STARTUP + Fighter.WAVE_ACTIVE) * 60.0) + 2)
+	check(p2.is_stunned() and p2.lives == p2.max_lives and untouched(wave_p3), "Onde : J2, à 200 px, est frappé (sonné) ; J3, à 400 px, est trop loin")
+	await step(20)
+	check(p2.position.x - wave_from > 250.0, "Onde : J2 est projeté très loin (%.0f px)" % (p2.position.x - wave_from))
+	# Sonné (ou gelé) puis pris dans l'onde : une vie en moins
+	await step(20)
+	p2.position.x = 840; p2.velocity = Vector2.ZERO
+	p2._invincible_timer = 0.0
+	p2.freeze()
+	p2._invincible_timer = 0.0
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1._attack_cooldown_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(int((Fighter.WAVE_STARTUP + Fighter.WAVE_ACTIVE) * 60.0) + 4)
+	check(p2.lives == p2.max_lives - 1, "Onde : gelé par un laser puis pris dans l'onde, J2 perd une vie")
+	# Blocage parfait : c'est un contre
+	GameSetup.player_characters = ["res://characters/jumb.tres", ""]
+	await new_game()
+	GameSetup.player_characters = []
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 640; p2.position.x = 760
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	var wave_frames := int(Fighter.WAVE_STARTUP * 60.0)
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= wave_frames + 3)
+	await step(wave_frames + 12)
+	check(untouched(p2) and not p1.is_waving() and p1.attack_cooldown_left() > 0.5 and p2.ultimate_points == Fighter.ULTIMATE_HEAVY_POINTS,
+		"Onde : un blocage parfait l'arrête, c'est un contre (touché %s, onde %s, recharge %.2f, J2 +%d)" % [touched(p2), p1.is_waving(), p1.attack_cooldown_left(), p2.ultimate_points])
 
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)

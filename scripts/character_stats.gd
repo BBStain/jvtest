@@ -65,7 +65,7 @@ const WEIGHT_TEMPO := 0.5  ## 1,4 fois plus lourd que la Barre = attaques 1,2 fo
 @export var heavy_charge_time: float = 1.0  ## temps pour arriver à la charge pleine (on frappe alors tout seul)
 
 @export_group("Attaque ultime")
-@export var ultimate := ""  ## l'attaque ultime du perso (X + Y, jauge pleine) : "laser" ; vide = seulement l'onde blanche
+@export var ultimate := ""  ## l'attaque ultime du perso (X + Y, jauge pleine) : "laser" (Barre), "onde" (Jumb) ; vide = seulement l'onde blanche
 
 @export_group("Blocage")
 @export var shield_max: int = 20  ## nombre de coups que le bouclier encaisse avant de casser
