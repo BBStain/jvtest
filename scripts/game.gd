@@ -238,6 +238,7 @@ func _physics_process(delta: float) -> void:
 
 	_resolve_clashes()
 	_resolve_hits()
+	_resolve_lasers()
 	_resolve_projectiles()
 	_hit_loose_objects()
 	_tick_pickups(delta)
@@ -596,6 +597,41 @@ func _count_counter(countered_heavy: bool, counterers: Array) -> void:
 func _on_ultimate_used(fighter: Fighter) -> void:
 	if _ultimate_test:
 		fighter.ultimate_points = Fighter.ULTIMATE_POINTS  # mode essai : la jauge se remplit tout de suite
+
+
+## Le laser de la Barre (son ultime) gèle chacun de ceux qu'il traverse, une fois chacun.
+## Seul un blocage parfait l'arrête : c'est alors un contre, comme un coup bloqué parfaitement.
+## Le bouclier ramassé l'arrête aussi (sans contre). Un blocage normal ne protège pas.
+func _resolve_lasers() -> void:
+	for shooter in fighters:
+		if shooter.eliminated or not shooter.is_laser_active():
+			continue
+		for victim in fighters:
+			if victim == shooter or victim.eliminated or victim in shooter.laser_frozen or not victim.can_be_hit() \
+					or not _segment_hits_rect(shooter.global_position, shooter.laser_end(), Fighter.LASER_RADIUS, victim.body_rect()):
+				continue
+			shooter.laser_frozen.append(victim)
+			if victim.is_item_shielded():
+				_spawn_clash_mark(victim.global_position, false, ItemPickup.color_of("bouclier"))
+			elif victim.is_parrying():
+				_parry_laser(shooter, victim)
+				break
+			else:
+				victim.freeze()
+				_spawn_clash_mark(victim.global_position, true, Fighter.LASER_COLOR)
+				if _alive_count() == 2:
+					_stun_focus = [shooter, victim]
+
+
+## Laser bloqué parfaitement : il s'éteint, la Barre est repoussée et ne frappe plus pendant 1 s.
+func _parry_laser(shooter: Fighter, defender: Fighter) -> void:
+	var push := _push_dir(shooter, defender)
+	_spawn_clash_mark(defender.global_position, true, PARRY_COLOR)
+	_count_counter(true, [defender])
+	defender.recover()
+	defender.reset_cooldown()
+	shooter.clash(push * Fighter.CLASH_PUSH * defender.stats.mass(), Fighter.PARRY_COOLDOWN)
+	_renew_slowmo(shooter, defender)
 
 
 ## Blocage parfait : le défenseur a appuyé sur B pile au moment du coup. C'est un contre :

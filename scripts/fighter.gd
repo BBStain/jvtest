@@ -132,6 +132,12 @@ const PARRY_COOLDOWN := 1.0             ## ... c'est un contre : celui qui frapp
 const ULTIMATE_POINTS := 30             ## 30 contres pour remplir la jauge d'ultime...
 const ULTIMATE_HEAVY_POINTS := 2        ## ... contrer une attaque lourde compte double
 const ULTIMATE_FLASH_TIME := 0.5        ## ultime lancée : une onde blanche part du perso
+const LASER_STARTUP := 0.3              ## Barre : le laser se prépare (fin trait bleu vers l'adversaire)...
+const LASER_ACTIVE := 0.25              ## ... puis tire : il gèle tous ceux qu'il traverse pendant ce temps
+const LASER_RANGE := 1400.0             ## il va jusque-là, ou jusqu'au premier mur
+const LASER_RADIUS := 10.0              ## demi-épaisseur du rayon
+const LASER_COLOR := Color(0.35, 0.7, 1.0)
+const FREEZE_TIME := 3.0                ## gelé par le laser : ni bouger ni attaquer pendant 3 s ; le coup suivant fait perdre une vie
 
 # --- Effets de la jauge de contre (une seule pour toute la partie, voir counter_gauge.gd) ---
 const PHASE_COOLDOWN := [1.0, 0.7, 0.45, 0.35]  ## recharge des attaques selon la phase (0,5 = 2 fois plus courte)
@@ -171,7 +177,7 @@ const NET_VARS := [
 	"_stun_timer", "_block_hold_time", "weapon_id", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
 	"_swinging", "_swing_anchor", "_swing_up", "arrows", "grapple_mode", "grapple_point", "_item_flash_timer", "_item_flash_kind", "_repair_flash_timer",
-	"ultimate_points", "_ultimate_flash_timer",
+	"ultimate_points", "_ultimate_flash_timer", "_laser_time", "_laser_dir", "_laser_length", "_frozen_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -295,6 +301,11 @@ var _repair_counters := 0               ## contres au coup léger depuis la dern
 var gauge := CounterGauge.new()         ## la jauge de contre de la partie (partagée, donnée par game.gd)
 var ultimate_points := 0                ## la jauge d'ultime de ce joueur (pleine à ULTIMATE_POINTS)
 var _ultimate_flash_timer := 0.0        ## > 0 juste après avoir lancé son ultime
+var _laser_time := -1.0                 ## Barre : temps depuis le début du laser (-1 = pas de laser)
+var _laser_dir := Vector2.RIGHT
+var _laser_length := LASER_RANGE        ## jusqu'au premier mur
+var laser_frozen: Array[Fighter] = []   ## ceux que ce laser a déjà touchés (une fois chacun)
+var _frozen_timer := 0.0                ## > 0 : gelé par un laser
 
 var _stun_timer := 0.0
 var _invincible_timer := 0.0
@@ -331,6 +342,15 @@ func _ready() -> void:
 func physics_tick(input: InputState, delta: float) -> void:
 	_tick_timers(delta)
 	if eliminated:
+		return
+	if is_frozen():
+		# Gelé : on ne fait plus rien, on tombe seulement si on était en l'air.
+		velocity.x = move_toward(velocity.x, 0.0, stats.ground_accel * delta)
+		velocity.y = minf(velocity.y + stats.gravity * delta, stats.max_fall_speed)
+		_blocking = false
+		_sprinting = false
+		_move()
+		queue_redraw()
 		return
 
 	if input.throw_pressed:
@@ -403,8 +423,8 @@ func physics_tick(input: InputState, delta: float) -> void:
 		_tick_dash(delta)
 	elif is_katana_dashing():
 		velocity = _attack_dir * weapon.heavy_speed * lerpf(1.0, THROW_CHARGE_SPEED, _heavy_charge) * _move_mult()
-	elif is_heavy_swinging():
-		velocity = Vector2.ZERO  # immobilisé pendant la frappe lourde
+	elif is_heavy_swinging() or is_lasering():
+		velocity = Vector2.ZERO  # immobilisé pendant la frappe lourde (et le laser de la Barre)
 	else:
 		_tick_movement(input, on_floor, delta)
 
@@ -429,6 +449,7 @@ func physics_tick(input: InputState, delta: float) -> void:
 			_heavy_buffer_timer = 0.0
 			_try_start_attack(true)
 	_tick_attack(input, delta)
+	_tick_laser(delta)
 	_tick_item(input, delta)
 	_apply_grapple_pull()
 
@@ -458,6 +479,7 @@ func _tick_timers(delta: float) -> void:
 	_item_flash_timer -= delta
 	_repair_flash_timer -= delta
 	_ultimate_flash_timer -= delta
+	_frozen_timer -= delta
 	item_shield_timer -= delta
 	_blink_clock += delta
 
@@ -924,7 +946,7 @@ func _try_start_attack(heavy: bool) -> void:
 ## léger se prépare ou qu'une lourde se charge (X puis Y, ou Y puis X, un peu décalés) : ce coup est annulé.
 func can_use_ultimate() -> bool:
 	return is_ultimate_ready() and not eliminated and not is_dashing() and not is_invincible() \
-		and not _blocking and not is_stunned() \
+		and not _blocking and not is_stunned() and not is_lasering() \
 		and (_heavy_charging or (not _attack_heavy and is_attacking() and _attack_time < stats.light_startup()) \
 			or (not is_attacking() and _attack_cooldown_timer <= 0.0))  # privé d'attaque (contré...) : pas d'ultime non plus
 
@@ -944,7 +966,73 @@ func _use_ultimate() -> void:
 	_heavy_buffer_timer = 0.0
 	ultimate_points = 0
 	_ultimate_flash_timer = ULTIMATE_FLASH_TIME
+	if stats.ultimate == "laser":
+		_laser_time = 0.0
+		laser_frozen.clear()
+		_aim_laser()
 	ultimate_used.emit(self)
+
+
+## Barre : le laser vise l'adversaire pendant qu'il se prépare, puis part tout droit.
+func _tick_laser(delta: float) -> void:
+	if _laser_time < 0.0:
+		return
+	var was_startup := _laser_time < LASER_STARTUP
+	_laser_time += delta
+	if was_startup:
+		_aim_laser()
+	if _laser_time >= LASER_STARTUP + LASER_ACTIVE:
+		_laser_time = -1.0
+
+
+func _aim_laser() -> void:
+	if target != null and not target.eliminated and target.global_position.distance_to(global_position) > 1.0:
+		_laser_dir = (target.global_position - global_position).normalized()
+	else:
+		_laser_dir = Vector2(facing, 0.0)
+	if absf(_laser_dir.x) > 0.1:
+		facing = signf(_laser_dir.x)
+	# Le rayon s'arrête au premier mur (ou sol) qu'il rencontre.
+	_laser_length = LASER_RANGE
+	if is_inside_tree():
+		var query := PhysicsRayQueryParameters2D.create(global_position, global_position + _laser_dir * LASER_RANGE, 1)
+		var hit := get_world_2d().direct_space_state.intersect_ray(query)
+		if not hit.is_empty():
+			_laser_length = global_position.distance_to(hit.position)
+
+
+func is_lasering() -> bool:
+	return _laser_time >= 0.0
+
+
+## Le laser peut-il geler en ce moment ? Il touche tout ce qu'il y a entre ces deux points.
+func is_laser_active() -> bool:
+	return _laser_time >= LASER_STARTUP
+
+
+func laser_end() -> Vector2:
+	return global_position + _laser_dir * _laser_length
+
+
+## Touché par le laser de la Barre : gelé (ni bouger, ni attaquer, ni bloquer) pendant FREEZE_TIME.
+## Comme quand on est sonné, le coup suivant fait perdre une vie.
+func freeze() -> void:
+	_cancel_attack()
+	if _grenade_fuse >= 0.0:
+		_release_grenade(Vector2.ZERO, 0.0)
+	_leave_ladder()
+	_leave_vine()
+	if grapple_mode != Grapple.NONE:
+		_end_grapple(false)
+	_dash_timer = 0.0
+	velocity = Vector2(0.0, maxf(velocity.y, 0.0))
+	_frozen_timer = FREEZE_TIME
+	_stun_timer = maxf(_stun_timer, FREEZE_TIME)
+	_invincible_timer = STUN_GRACE
+
+
+func is_frozen() -> bool:
+	return _frozen_timer > 0.0
 
 
 ## Recharge d'une attaque (comptée depuis son départ) : plus courte quand la jauge de contre est haute.
@@ -1159,6 +1247,7 @@ func heavy_scale() -> float:
 func _cancel_attack() -> void:
 	_attack_time = -1.0
 	_heavy_charging = false
+	_laser_time = -1.0
 
 
 # --- Questions que game.gd pose au combattant ---
@@ -1219,7 +1308,7 @@ func attack_cooldown_left() -> float:
 
 func can_attack() -> bool:
 	return not eliminated and not is_dashing() and not is_invincible() and not _blocking \
-		and not is_attacking() and _attack_cooldown_timer <= 0.0
+		and not is_attacking() and not is_lasering() and _attack_cooldown_timer <= 0.0
 
 
 ## Le coup peut-il toucher en ce moment ?
@@ -1423,6 +1512,7 @@ func take_hit(hit_dir: Vector2, knockback := -1.0) -> bool:
 	if knockback < 0.0:
 		knockback = stats.hit_knockback
 	_cancel_attack()
+	_frozen_timer = 0.0  # gelé puis frappé : on perd une vie (voir plus bas) et on n'est plus gelé
 	if _grenade_fuse >= 0.0:
 		_release_grenade(Vector2.ZERO, 0.0)  # touché : la grenade dégoupillée tombe des mains
 	_leave_ladder()
@@ -1446,6 +1536,7 @@ func is_stunned() -> bool:
 ## On a contré (ou fait un blocage parfait) : on n'est plus sonné.
 func recover() -> void:
 	_stun_timer = 0.0
+	_frozen_timer = 0.0
 
 
 ## Phase de la jauge de contre de la partie : de 1 (normale) à 4 (berserk).
@@ -1503,6 +1594,7 @@ func fall_out(respawn_position: Vector2) -> void:
 func _lose_life() -> void:
 	lives -= 1
 	_stun_timer = 0.0
+	_frozen_timer = 0.0
 	_invincible_timer = INVINCIBLE_TIME
 	show_lives()
 	if lives <= 0:
@@ -1843,6 +1935,22 @@ func _draw_ultimate(body: Rect2) -> void:
 	if _ultimate_flash_timer > 0.0:
 		var t := 1.0 - _ultimate_flash_timer / ULTIMATE_FLASH_TIME
 		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.5, body.size.y * 2.2, t), 0.0, TAU, 40, Color(1, 1, 1, 1.0 - t), 4.0)
+	if is_lasering():
+		# Barre : un fin trait bleu vers l'adversaire, puis le rayon bleu (épais, qui s'amincit).
+		var end := _laser_dir * _laser_length
+		if _laser_time < LASER_STARTUP:
+			var t := _laser_time / LASER_STARTUP
+			draw_line(Vector2.ZERO, end, Color(LASER_COLOR, 0.25 + 0.4 * t), 2.0)
+			draw_circle(Vector2.ZERO, 6.0 + 8.0 * t, Color(LASER_COLOR, 0.8))
+		else:
+			var fade := 1.0 - (_laser_time - LASER_STARTUP) / LASER_ACTIVE
+			draw_line(Vector2.ZERO, end, Color(LASER_COLOR, 0.5 * fade), LASER_RADIUS * 2.0 * (0.5 + 0.5 * fade) + 8.0)
+			draw_line(Vector2.ZERO, end, Color(0.85, 0.95, 1.0, fade), LASER_RADIUS)
+	if is_frozen():
+		# Gelé : un bloc de glace bleu par-dessus le perso.
+		var ice := body.grow(5.0)
+		draw_rect(ice, Color(LASER_COLOR, 0.45))
+		draw_rect(ice, Color(0.85, 0.95, 1.0, 0.9), false, 2.0)
 
 
 ## Barre verticale à côté du perso, du côté où n'est pas l'adversaire (pour ne pas gêner le combat).
