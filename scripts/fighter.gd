@@ -132,6 +132,7 @@ const PARRY_COOLDOWN := 1.0             ## ... c'est un contre : celui qui frapp
 const ULTIMATE_POINTS := 30             ## 30 contres pour remplir la jauge d'ultime...
 const ULTIMATE_HEAVY_POINTS := 2        ## ... contrer une attaque lourde compte double
 const ULTIMATE_FLASH_TIME := 0.5        ## ultime lancée : une onde blanche part du perso
+const ULTIMATE_PARTICLES := 18          ## l'aura autour du perso : jusqu'à 18 particules (jauge pleine)
 const LASER_STARTUP := 0.3              ## Barre : le laser se prépare (fin trait bleu vers l'adversaire)...
 const LASER_ACTIVE := 0.25              ## ... puis tire : il gèle tous ceux qu'il traverse pendant ce temps
 const LASER_RANGE := 1400.0             ## il va jusque-là, ou jusqu'au premier mur
@@ -2012,18 +2013,26 @@ func _make_cracks() -> void:
 		_cracks.append(crack)
 
 
-## La jauge d'ultime : un trait fin sous les pieds, qui se remplit de la couleur du joueur.
-## Pleine, le perso est entouré d'un contour blanc qui pulse : X + Y pour lancer l'ultime.
-## Lancée, une onde blanche part du perso.
+## La jauge d'ultime : une aura de particules autour du perso, de sa couleur. Plus la jauge est
+## remplie, plus il y en a. Pleine, elles sont plus grosses, blanches et tournent plus vite :
+## X + Y pour lancer l'ultime. Lancée, une onde blanche part du perso.
+## (Tout est calculé à partir de _blink_clock : les copains en ligne voient la même aura.)
 func _draw_ultimate(body: Rect2) -> void:
 	if ultimate_points > 0:
 		var ratio := float(ultimate_points) / ULTIMATE_POINTS
-		var bar := Rect2(body.position.x, body.end.y + 4.0, body.size.x, 3.0)
-		draw_rect(bar, Color(0, 0, 0, 0.35))
-		draw_rect(Rect2(bar.position, Vector2(bar.size.x * ratio, bar.size.y)), Color(color.lightened(0.3), 0.9))
-	if is_ultimate_ready():
-		var pulse := 0.5 + 0.5 * sin(_blink_clock * TAU * 2.0)
-		draw_rect(body.grow(4.0 + 2.0 * pulse), Color(1, 1, 1, 0.45 + 0.45 * pulse), false, 2.0)
+		var ready := is_ultimate_ready()
+		var count := ULTIMATE_PARTICLES if ready else maxi(2, int(ceil(ULTIMATE_PARTICLES * ratio * 0.7)))
+		var speed := 1.8 if ready else 0.7
+		for i in count:
+			# Chaque particule monte le long du corps en tournant autour, puis recommence en bas.
+			var phase := fposmod(_blink_clock * speed * 0.45 + i * 0.618034, 1.0)
+			var angle := i * TAU / count + _blink_clock * speed
+			var spread := body.size.x / 2.0 + (14.0 if ready else 10.0) + 6.0 * sin(i * 1.7)
+			var pos := Vector2(cos(angle) * spread, body.end.y + 4.0 - phase * (body.size.y + 24.0))
+			var size := (6.0 if ready else 4.0) * (1.0 - 0.45 * phase)
+			var alpha := (1.0 if ready else 0.45 + 0.45 * ratio) * sin(phase * PI)
+			var tint := Color(1, 1, 1).lerp(color.lightened(0.4), phase) if ready else color.lightened(0.45)
+			draw_rect(Rect2(pos - Vector2.ONE * size / 2.0, Vector2.ONE * size), Color(tint, alpha))
 	if _ultimate_flash_timer > 0.0:
 		var t := 1.0 - _ultimate_flash_timer / ULTIMATE_FLASH_TIME
 		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.5, body.size.y * 2.2, t), 0.0, TAU, 40, Color(1, 1, 1, 1.0 - t), 4.0)
