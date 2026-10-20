@@ -1664,3 +1664,20 @@ position = Vector2(760, 410)
 
 [node name="RespawnPoint" type="Marker2D" parent="."]
 position = Vector2(640, 150)
+
+[node name="WeaponSpawns" type="Node2D" parent="."]
+
+[node name="Milieu" type="Marker2D" parent="WeaponSpawns"]
+position = Vector2(640, 100)
+
+[node name="Duel" type="Marker2D" parent="WeaponSpawns"]
+position = Vector2(2130, 200)
+
+[node name="Pylones" type="Marker2D" parent="WeaponSpawns"]
+position = Vector2(-940, -300)
+
+[node name="Toit" type="Marker2D" parent="WeaponSpawns"]
+position = Vector2(950, -900)
+
+[node name="Hauteurs" type="Marker2D" parent="WeaponSpawns"]
+position = Vector2(300, -2000)

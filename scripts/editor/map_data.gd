@@ -68,11 +68,15 @@ const CATALOG := {
 		"label": "Apparition d'objet", "tab": "Apparitions", "rotatable": false,
 		"defaults": {},
 	},
+	"spawn_arme": {
+		"label": "Spawn d'arme", "tab": "Apparitions", "rotatable": false,
+		"defaults": {},
+	},
 }
 ## Les familles du catalogue, dans l'ordre.
 const TABS := ["Décor", "Mouvement", "Apparitions"]
 ## Ces types sont des points (pas de taille) : on les attrape par un rond autour de "pos".
-const POINT_TYPES := ["spawn_joueur", "reapparition", "spawn_objet"]
+const POINT_TYPES := ["spawn_joueur", "reapparition", "spawn_objet", "spawn_arme"]
 const POINT_RADIUS := 26.0
 ## Les réglages de mouvement de tout ce qui n'est pas un point (la plateforme mobile a les siens).
 const MOTION_DEFAULTS := {"travel": [0, 0], "period": 4.0, "pause": 0.0, "attach": 0}
@@ -258,7 +262,7 @@ static func center_of(element: Dictionary) -> Vector2:
 	var pos := vec(element, "pos")
 	if element.type == "liane":
 		return pos + Vector2(0.0, float(element.length) / 2.0)
-	if element.type in POINT_TYPES and element.type != "spawn_objet":
+	if element.type in ["spawn_joueur", "reapparition"]:
 		return pos + Vector2(0.0, -POINT_RADIUS)  # les départs sont posés par les pieds
 	return pos
 

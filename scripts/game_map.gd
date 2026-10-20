@@ -10,7 +10,8 @@ extends Node2D
 ## Une map doit garder ces deux nœuds :
 ##   SpawnPoints   -> 4 Marker2D : où apparaissent les joueurs 1 à 4 au début (le marqueur = les pieds)
 ##   RespawnPoint  -> un Marker2D : où l'on réapparaît après une chute (le marqueur = les pieds)
-## Et si on veut, ItemSpawns -> des Marker2D : où apparaissent (puis tombent) les objets à ramasser.
+## Et si on veut, ItemSpawns -> des Marker2D : où apparaissent (puis tombent) les objets à ramasser,
+## et WeaponSpawns -> des Marker2D : où apparaissent (puis tombent) les armes à ramasser.
 ## Les tests automatiques vérifient chaque map de MAPS (points présents, dans la zone de jeu,
 ## joueurs qui atterrissent bien) : s'il manque quelque chose, la mise en ligne s'arrête.
 
@@ -39,6 +40,18 @@ func item_spawn_points() -> Array[Vector2]:
 			points.append((marker as Node2D).position)
 	if points.is_empty():
 		points.append(respawn_position() - Vector2(0.0, 200.0))
+	return points
+
+
+## Où les armes apparaissent (les Marker2D du nœud WeaponSpawns). Sans ce nœud, aux mêmes
+## endroits que les objets.
+func weapon_spawn_points() -> Array[Vector2]:
+	var points: Array[Vector2] = []
+	if has_node("WeaponSpawns"):
+		for marker in $WeaponSpawns.get_children():
+			points.append((marker as Node2D).position)
+	if points.is_empty():
+		points = item_spawn_points()
 	return points
 
 
