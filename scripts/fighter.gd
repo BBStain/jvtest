@@ -18,6 +18,7 @@ signal weapon_tossed(fighter: Fighter)  ## RB : on lance son arme (sans dégâts
 ## power : 0 à 1 (distance de la grenade) ; fuse : temps restant avant que la grenade explose.
 signal item_used(fighter: Fighter, kind: String, direction: Vector2, power: float, fuse: float)
 signal grapple_parried(fighter: Fighter, by: Fighter)  ## notre grappin arrive sur un blocage parfait
+signal ultimate_used(fighter: Fighter)  ## X + Y avec la jauge d'ultime pleine : game.gd lance l'attaque ultime du perso
 
 const PLATFORM_LAYER := 3  ## numéro de la couche "plateformes_traversables"
 
@@ -127,6 +128,11 @@ const SHIELD_BLOCKER_PUSH := 120.0      ## celui qui bloque recule un tout petit
 const PARRY_WINDOW := 0.15              ## blocage parfait : B appuyé au plus tant de secondes avant le coup...
 const PARRY_COOLDOWN := 1.0             ## ... c'est un contre : celui qui frappait ne frappe plus pendant 1 s
 
+# --- Attaque ultime : chaque perso a sa jauge, remplie par SES contres ---
+const ULTIMATE_POINTS := 30             ## 30 contres pour remplir la jauge d'ultime...
+const ULTIMATE_HEAVY_POINTS := 2        ## ... contrer une attaque lourde compte double
+const ULTIMATE_FLASH_TIME := 0.5        ## ultime lancée : une onde blanche part du perso
+
 # --- Effets de la jauge de contre (une seule pour toute la partie, voir counter_gauge.gd) ---
 const PHASE_COOLDOWN := [1.0, 0.7, 0.45, 0.35]  ## recharge des attaques selon la phase (0,5 = 2 fois plus courte)
 const PHASE_SHIELD_DAMAGE := [1, 2, 3, 3]       ## les coups abîment les boucliers 1, 2 ou 3 fois plus
@@ -165,6 +171,7 @@ const NET_VARS := [
 	"_stun_timer", "_block_hold_time", "weapon_id", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
 	"_swinging", "_swing_anchor", "_swing_up", "arrows", "grapple_mode", "grapple_point", "_item_flash_timer", "_item_flash_kind", "_repair_flash_timer",
+	"ultimate_points", "_ultimate_flash_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -286,6 +293,8 @@ var _grappled_by: Fighter               ## celui dont la corde nous tire vers lu
 var _repair_counters := 0               ## contres au coup léger depuis la dernière réparation (voir weapon_light_counter)
 
 var gauge := CounterGauge.new()         ## la jauge de contre de la partie (partagée, donnée par game.gd)
+var ultimate_points := 0                ## la jauge d'ultime de ce joueur (pleine à ULTIMATE_POINTS)
+var _ultimate_flash_timer := 0.0        ## > 0 juste après avoir lancé son ultime
 
 var _stun_timer := 0.0
 var _invincible_timer := 0.0
@@ -409,6 +418,8 @@ func physics_tick(input: InputState, delta: float) -> void:
 		_aimed_dir = input.aim.normalized()
 	if input.heavy_pressed:
 		_heavy_buffer_timer = ATTACK_BUFFER
+	if input.ultimate_pressed and can_use_ultimate():
+		_use_ultimate()
 	if not _blocking and can_attack():  # pas d'attaque en bloquant
 		if _attack_buffer_timer > 0.0:
 			_attack_buffer_timer = 0.0
@@ -446,6 +457,7 @@ func _tick_timers(delta: float) -> void:
 	_item_cooldown -= delta
 	_item_flash_timer -= delta
 	_repair_flash_timer -= delta
+	_ultimate_flash_timer -= delta
 	item_shield_timer -= delta
 	_blink_clock += delta
 
@@ -906,6 +918,33 @@ func _try_start_attack(heavy: bool) -> void:
 	_charge_time = 0.0
 	_heavy_charge = 0.0
 	_attack_cooldown_timer = _cooldown(heavy)
+
+
+## X + Y : la jauge d'ultime est pleine et on n'est pas occupé. On peut la lancer pendant qu'un coup
+## léger se prépare ou qu'une lourde se charge (X puis Y, ou Y puis X, un peu décalés) : ce coup est annulé.
+func can_use_ultimate() -> bool:
+	return is_ultimate_ready() and not eliminated and not is_dashing() and not is_invincible() \
+		and not _blocking and not is_stunned() \
+		and (_heavy_charging or (not _attack_heavy and is_attacking() and _attack_time < stats.light_startup()) \
+			or (not is_attacking() and _attack_cooldown_timer <= 0.0))  # privé d'attaque (contré...) : pas d'ultime non plus
+
+
+func is_ultimate_ready() -> bool:
+	return ultimate_points >= ULTIMATE_POINTS
+
+
+## On vient de contrer : la jauge d'ultime monte (contrer une lourde compte double).
+func add_ultimate_points(countered_heavy: bool) -> void:
+	ultimate_points = mini(ultimate_points + (ULTIMATE_HEAVY_POINTS if countered_heavy else 1), ULTIMATE_POINTS)
+
+
+func _use_ultimate() -> void:
+	_cancel_attack()
+	_attack_buffer_timer = 0.0
+	_heavy_buffer_timer = 0.0
+	ultimate_points = 0
+	_ultimate_flash_timer = ULTIMATE_FLASH_TIME
+	ultimate_used.emit(self)
 
 
 ## Recharge d'une attaque (comptée depuis son départ) : plus courte quand la jauge de contre est haute.
@@ -1683,6 +1722,7 @@ func _draw() -> void:
 				draw_line(Vector2(x, -6.0), Vector2(x, -18.0), Color(weapon_color, 0.9), 2.0)
 
 	_draw_item(body)
+	_draw_ultimate(body)
 
 	# La jauge d'endurance, sur le côté opposé à l'adversaire
 	if _stamina_show_timer > 0.0:
@@ -1786,6 +1826,23 @@ func _make_cracks() -> void:
 			point += dir * rng.randf_range(5.0, 10.0)
 			crack.append(point)
 		_cracks.append(crack)
+
+
+## La jauge d'ultime : un trait fin sous les pieds, qui se remplit de la couleur du joueur.
+## Pleine, le perso est entouré d'un contour blanc qui pulse : X + Y pour lancer l'ultime.
+## Lancée, une onde blanche part du perso.
+func _draw_ultimate(body: Rect2) -> void:
+	if ultimate_points > 0:
+		var ratio := float(ultimate_points) / ULTIMATE_POINTS
+		var bar := Rect2(body.position.x, body.end.y + 4.0, body.size.x, 3.0)
+		draw_rect(bar, Color(0, 0, 0, 0.35))
+		draw_rect(Rect2(bar.position, Vector2(bar.size.x * ratio, bar.size.y)), Color(color.lightened(0.3), 0.9))
+	if is_ultimate_ready():
+		var pulse := 0.5 + 0.5 * sin(_blink_clock * TAU * 2.0)
+		draw_rect(body.grow(4.0 + 2.0 * pulse), Color(1, 1, 1, 0.45 + 0.45 * pulse), false, 2.0)
+	if _ultimate_flash_timer > 0.0:
+		var t := 1.0 - _ultimate_flash_timer / ULTIMATE_FLASH_TIME
+		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.5, body.size.y * 2.2, t), 0.0, TAU, 40, Color(1, 1, 1, 1.0 - t), 4.0)
 
 
 ## Barre verticale à côté du perso, du côté où n'est pas l'adversaire (pour ne pas gêner le combat).
