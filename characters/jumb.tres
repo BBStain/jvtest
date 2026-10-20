@@ -6,6 +6,7 @@
 script = ExtResource("1_stats")
 display_name = "Jumb"
 description = "Grand et lourd : lent à frapper, mais il frappe loin et recule moins."
+ultimate = "onde"
 body_size = Vector2(30, 78)
 run_speed = 470.0
 ground_accel = 7500.0

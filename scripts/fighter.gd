@@ -137,6 +137,13 @@ const LASER_ACTIVE := 0.25              ## ... puis tire : il gèle tous ceux qu
 const LASER_RANGE := 1400.0             ## il va jusque-là, ou jusqu'au premier mur
 const LASER_RADIUS := 10.0              ## demi-épaisseur du rayon
 const LASER_COLOR := Color(0.35, 0.7, 1.0)
+const WAVE_STARTUP := 0.25              ## Jumb : il se ramasse, un cercle se forme autour de lui...
+const WAVE_ACTIVE := 0.3                ## ... puis le cercle s'ouvre : il frappe tous ceux qu'il atteint...
+const WAVE_START_RADIUS := 40.0
+const WAVE_RADIUS := 280.0              ## ... jusqu'à cette distance du centre de Jumb
+const WAVE_KNOCKBACK := 1700.0          ## ... et les projette très loin (vers l'extérieur, un peu vers le haut)
+const WAVE_LIFT := 0.35
+const WAVE_COLOR := Color(1.0, 0.62, 0.25)
 const FREEZE_TIME := 3.0                ## gelé par le laser : ni bouger ni attaquer pendant 3 s ; le coup suivant fait perdre une vie
 
 # --- Effets de la jauge de contre (une seule pour toute la partie, voir counter_gauge.gd) ---
@@ -177,7 +184,7 @@ const NET_VARS := [
 	"_stun_timer", "_block_hold_time", "weapon_id", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
 	"_swinging", "_swing_anchor", "_swing_up", "arrows", "grapple_mode", "grapple_point", "_item_flash_timer", "_item_flash_kind", "_repair_flash_timer",
-	"ultimate_points", "_ultimate_flash_timer", "_laser_time", "_laser_dir", "_laser_length", "_frozen_timer",
+	"ultimate_points", "_ultimate_flash_timer", "_laser_time", "_laser_dir", "_laser_length", "_frozen_timer", "_wave_time",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -306,6 +313,8 @@ var _laser_dir := Vector2.RIGHT
 var _laser_length := LASER_RANGE        ## jusqu'au premier mur
 var laser_frozen: Array[Fighter] = []   ## ceux que ce laser a déjà touchés (une fois chacun)
 var _frozen_timer := 0.0                ## > 0 : gelé par un laser
+var _wave_time := -1.0                  ## Jumb : temps depuis le début de l'onde de choc (-1 = pas d'onde)
+var wave_hit: Array[Fighter] = []       ## ceux que cette onde a déjà frappés (une fois chacun)
 
 var _stun_timer := 0.0
 var _invincible_timer := 0.0
@@ -423,7 +432,7 @@ func physics_tick(input: InputState, delta: float) -> void:
 		_tick_dash(delta)
 	elif is_katana_dashing():
 		velocity = _attack_dir * weapon.heavy_speed * lerpf(1.0, THROW_CHARGE_SPEED, _heavy_charge) * _move_mult()
-	elif is_heavy_swinging() or is_lasering():
+	elif is_heavy_swinging() or is_lasering() or is_waving():
 		velocity = Vector2.ZERO  # immobilisé pendant la frappe lourde (et le laser de la Barre)
 	else:
 		_tick_movement(input, on_floor, delta)
@@ -450,6 +459,10 @@ func physics_tick(input: InputState, delta: float) -> void:
 			_try_start_attack(true)
 	_tick_attack(input, delta)
 	_tick_laser(delta)
+	if _wave_time >= 0.0:
+		_wave_time += delta
+		if _wave_time >= WAVE_STARTUP + WAVE_ACTIVE:
+			_wave_time = -1.0
 	_tick_item(input, delta)
 	_apply_grapple_pull()
 
@@ -946,7 +959,7 @@ func _try_start_attack(heavy: bool) -> void:
 ## léger se prépare ou qu'une lourde se charge (X puis Y, ou Y puis X, un peu décalés) : ce coup est annulé.
 func can_use_ultimate() -> bool:
 	return is_ultimate_ready() and not eliminated and not is_dashing() and not is_invincible() \
-		and not _blocking and not is_stunned() and not is_lasering() \
+		and not _blocking and not is_stunned() and not is_lasering() and not is_waving() \
 		and (_heavy_charging or (not _attack_heavy and is_attacking() and _attack_time < stats.light_startup()) \
 			or (not is_attacking() and _attack_cooldown_timer <= 0.0))  # privé d'attaque (contré...) : pas d'ultime non plus
 
@@ -970,6 +983,9 @@ func _use_ultimate() -> void:
 		_laser_time = 0.0
 		laser_frozen.clear()
 		_aim_laser()
+	elif stats.ultimate == "onde":
+		_wave_time = 0.0
+		wave_hit.clear()
 	ultimate_used.emit(self)
 
 
@@ -1008,6 +1024,17 @@ func is_lasering() -> bool:
 ## Le laser peut-il geler en ce moment ? Il touche tout ce qu'il y a entre ces deux points.
 func is_laser_active() -> bool:
 	return _laser_time >= LASER_STARTUP
+
+
+func is_waving() -> bool:
+	return _wave_time >= 0.0
+
+
+## Jumb : rayon actuel du cercle de l'onde de choc (0 = elle ne frappe pas encore).
+func wave_radius() -> float:
+	if _wave_time < WAVE_STARTUP:
+		return 0.0
+	return lerpf(WAVE_START_RADIUS, WAVE_RADIUS, clampf((_wave_time - WAVE_STARTUP) / WAVE_ACTIVE, 0.0, 1.0))
 
 
 func laser_end() -> Vector2:
@@ -1248,6 +1275,7 @@ func _cancel_attack() -> void:
 	_attack_time = -1.0
 	_heavy_charging = false
 	_laser_time = -1.0
+	_wave_time = -1.0
 
 
 # --- Questions que game.gd pose au combattant ---
@@ -1308,7 +1336,7 @@ func attack_cooldown_left() -> float:
 
 func can_attack() -> bool:
 	return not eliminated and not is_dashing() and not is_invincible() and not _blocking \
-		and not is_attacking() and not is_lasering() and _attack_cooldown_timer <= 0.0
+		and not is_attacking() and not is_lasering() and not is_waving() and _attack_cooldown_timer <= 0.0
 
 
 ## Le coup peut-il toucher en ce moment ?
@@ -1946,6 +1974,16 @@ func _draw_ultimate(body: Rect2) -> void:
 			var fade := 1.0 - (_laser_time - LASER_STARTUP) / LASER_ACTIVE
 			draw_line(Vector2.ZERO, end, Color(LASER_COLOR, 0.5 * fade), LASER_RADIUS * 2.0 * (0.5 + 0.5 * fade) + 8.0)
 			draw_line(Vector2.ZERO, end, Color(0.85, 0.95, 1.0, fade), LASER_RADIUS)
+	if is_waving():
+		# Jumb : un cercle qui se resserre autour de lui, puis s'ouvre d'un coup (l'onde de choc).
+		if _wave_time < WAVE_STARTUP:
+			var t := _wave_time / WAVE_STARTUP
+			draw_arc(Vector2.ZERO, lerpf(WAVE_START_RADIUS * 2.0, WAVE_START_RADIUS, t), 0.0, TAU, 40, Color(WAVE_COLOR, 0.3 + 0.6 * t), 3.0)
+		else:
+			var fade := 1.0 - (_wave_time - WAVE_STARTUP) / WAVE_ACTIVE
+			var radius := wave_radius()
+			draw_circle(Vector2.ZERO, radius, Color(WAVE_COLOR, 0.18 * fade))
+			draw_arc(Vector2.ZERO, radius, 0.0, TAU, 64, Color(WAVE_COLOR, 0.9 * fade), 10.0 * fade + 2.0)
 	if is_frozen():
 		# Gelé : un bloc de glace bleu par-dessus le perso.
 		var ice := body.grow(5.0)

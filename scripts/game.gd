@@ -239,6 +239,7 @@ func _physics_process(delta: float) -> void:
 	_resolve_clashes()
 	_resolve_hits()
 	_resolve_lasers()
+	_resolve_waves()
 	_resolve_projectiles()
 	_hit_loose_objects()
 	_tick_pickups(delta)
@@ -614,7 +615,7 @@ func _resolve_lasers() -> void:
 			if victim.is_item_shielded():
 				_spawn_clash_mark(victim.global_position, false, ItemPickup.color_of("bouclier"))
 			elif victim.is_parrying():
-				_parry_laser(shooter, victim)
+				_parry_ultimate(shooter, victim)
 				break
 			else:
 				victim.freeze()
@@ -623,8 +624,40 @@ func _resolve_lasers() -> void:
 					_stun_focus = [shooter, victim]
 
 
-## Laser bloqué parfaitement : il s'éteint, la Barre est repoussée et ne frappe plus pendant 1 s.
-func _parry_laser(shooter: Fighter, defender: Fighter) -> void:
+## L'onde de choc de Jumb (son ultime) : un cercle qui s'ouvre autour de lui et frappe chacun de
+## ceux qu'il atteint (sonné, ou une vie en moins si on l'était déjà ou si on était gelé), en les
+## projetant très loin. Comme pour le laser : seul un blocage parfait l'arrête (un contre), le
+## bouclier ramassé la bloque, un blocage normal ne protège pas.
+func _resolve_waves() -> void:
+	for jumb in fighters:
+		if jumb.eliminated or jumb.wave_radius() <= 0.0:
+			continue
+		for victim in fighters:
+			if victim == jumb or victim.eliminated or victim in jumb.wave_hit or not victim.can_be_hit():
+				continue
+			var rect := victim.body_rect()
+			var closest := Vector2(clampf(jumb.global_position.x, rect.position.x, rect.end.x),
+				clampf(jumb.global_position.y, rect.position.y, rect.end.y))
+			if closest.distance_to(jumb.global_position) > jumb.wave_radius():
+				continue
+			jumb.wave_hit.append(victim)
+			if victim.is_item_shielded():
+				_spawn_clash_mark(victim.global_position, false, ItemPickup.color_of("bouclier"))
+			elif victim.is_parrying():
+				_parry_ultimate(jumb, victim)
+				break
+			else:
+				var side := signf(victim.global_position.x - jumb.global_position.x)
+				if side == 0.0:
+					side = jumb.facing
+				victim.take_hit(Vector2(side, -Fighter.WAVE_LIFT).normalized(), Fighter.WAVE_KNOCKBACK)
+				_spawn_clash_mark(victim.global_position, true, Fighter.WAVE_COLOR)
+				if victim.is_stunned() and _alive_count() == 2:
+					_stun_focus = [jumb, victim]
+
+
+## Ultime (laser ou onde) bloqué parfaitement : il s'éteint, son lanceur est repoussé et ne frappe plus pendant 1 s.
+func _parry_ultimate(shooter: Fighter, defender: Fighter) -> void:
 	var push := _push_dir(shooter, defender)
 	_spawn_clash_mark(defender.global_position, true, PARRY_COLOR)
 	_count_counter(true, [defender])
