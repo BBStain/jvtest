@@ -12,6 +12,7 @@ extends CharacterBody2D
 
 signal life_lost(fighter: Fighter)
 signal weapon_thrown(fighter: Fighter, direction: Vector2, speed: float)  ## lance : game.gd crée la lance qui vole
+signal weapon_tossed(fighter: Fighter)  ## RB : on lance son arme (sans dégâts), game.gd la fait voler
 ## Un objet utilisé (balle tirée, grenade lancée ou lâchée) : game.gd crée ce qui vole.
 ## power : 0 à 1 (distance de la grenade) ; fuse : temps restant avant que la grenade explose.
 signal item_used(fighter: Fighter, kind: String, direction: Vector2, power: float, fuse: float)
@@ -142,7 +143,7 @@ const NET_VARS := [
 	"stamina", "_exhausted", "_sprinting", "_stamina_show_timer",
 	"shield", "shield_broken", "_blocking", "_shield_broken_timer", "_shield_flash_timer",
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
-	"_stun_timer", "_block_hold_time", "weapon_away", "weapon_counters",
+	"_stun_timer", "_block_hold_time", "weapon_id", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
 	"_swinging", "_swing_anchor", "_item_flash_timer", "_repair_flash_timer",
 ]
@@ -150,6 +151,17 @@ const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus
 
 var stats: CharacterStats = CharacterStats.new()  ## le personnage joué, avec son arme en main (choisi par game.gd)
 var weapon: WeaponStats = WeaponStats.new()       ## l'arme choisie (choisie par game.gd ; mains nues par défaut)
+## L'arme en jeu en ligne : son fichier (l'hôte l'envoie, un copain la change s'il en a ramassé une autre).
+var weapon_id: String:
+	get:
+		return weapon.resource_path
+	set(value):
+		if value == "" or value == weapon.resource_path:
+			return
+		weapon = load(value) as WeaponStats
+		if _armed_stats != null:
+			_update_armed_stats()
+			stats = _bare_stats if weapon_away else _armed_stats
 ## Lance lancée et pas encore ramassée : on se bat à mains nues en attendant.
 var weapon_away := false:
 	set(value):
@@ -279,6 +291,9 @@ func physics_tick(input: InputState, delta: float) -> void:
 	_tick_timers(delta)
 	if eliminated:
 		return
+
+	if input.throw_pressed:
+		_toss_weapon()
 
 	var on_floor := is_on_floor()
 	if on_floor:
@@ -792,9 +807,33 @@ func _throw_weapon() -> void:
 	weapon_thrown.emit(self, _attack_dir, speed)
 
 
-## On ramasse sa lance (ou elle revient quand on réapparaît). Arme cassée : elle revient à la vie suivante.
+## On ramasse sa lance. Arme cassée : on reste à mains nues.
 func get_weapon_back() -> void:
 	weapon_away = is_weapon_broken()
+
+
+## RB : on lance l'arme qu'on a en main (pas pendant une attaque). Elle ne fait mal à personne ;
+## game.gd la fait voler vers l'adversaire le plus proche.
+func _toss_weapon() -> void:
+	if is_attacking() or not knock_weapon_away():
+		return
+	weapon_tossed.emit(self)
+
+
+## Une arme en main ? (pas à mains nues, pas lancée, pas cassée)
+func has_weapon_in_hand() -> bool:
+	return not weapon.is_bare_hands() and not weapon_away
+
+
+## On ramasse une arme (la sienne ou celle d'un autre), usée de "counters" contres.
+func equip(new_weapon: WeaponStats, counters: int) -> void:
+	weapon = new_weapon
+	weapon_counters = counters
+	_repair_counters = 0
+	_update_armed_stats()
+	weapon_away = false
+	stats = _armed_stats
+	_repair_flash_timer = WEAPON_REPAIR_FLASH  # un anneau de sa couleur : on voit qu'on l'a prise
 
 
 ## Le perso avec son arme en main ; une arme contrée est plus petite (coup léger et lourde).
@@ -814,7 +853,7 @@ func weapon_length() -> float:
 ## contre (mains nues : il faut trouver une autre arme). Renvoie true si elle vient de casser.
 ## À mains nues (ou lance lancée et pas en main) : rien ne s'use.
 func weapon_countered() -> bool:
-	if weapon.is_bare_hands() or is_weapon_broken():
+	if not has_weapon_in_hand():
 		return false
 	weapon_counters += 1
 	if not is_weapon_broken():

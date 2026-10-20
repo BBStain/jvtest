@@ -708,7 +708,7 @@ func _ready() -> void:
 	menu.handle(pad, "confirm")
 	check(menu.screen == menu.Screen.CONTROLS, "Menu : COMMANDES s'ouvre")
 	menu.handle(pad, "confirm")
-	check(menu.screen == menu.Screen.CONTROLS and menu._pad_test_cells.size() == 10,
+	check(menu.screen == menu.Screen.CONTROLS and menu._pad_test_cells.size() == 11,
 		"COMMANDES : A ne fait pas revenir (on y teste ses boutons, une case manette par commande)")
 	menu.handle(pad, "back")
 	menu.handle(pad, "up")
@@ -1815,13 +1815,13 @@ func _ready() -> void:
 	var slow_speed: float = game.projectiles[0].velocity.length()
 	await step(2)
 	check(p1.weapon_away and game.projectiles.size() == 1, "Arme projetée : on ne la rattrape pas dans la seconde")
-	game._return_weapon(p1)
+	game._pick_up_weapon(p1, game.projectiles[0])
 	check(not p1.weapon_away and game.projectiles.is_empty(), "Arme projetée : ramassée, on l'a de nouveau en main")
 	game.gauge.points = CounterGauge.MAX_POINTS
 	game._knock_weapon(p1, Vector2.LEFT)
 	check(game.projectiles[0].velocity.length() > slow_speed * 2.0,
 		"Arme projetée : jauge berserk, elle part bien plus loin (%.0f contre %.0f)" % [game.projectiles[0].velocity.length(), slow_speed])
-	game._return_weapon(p1)
+	game._pick_up_weapon(p1, game.projectiles[0])
 	game.gauge.points = 0.0
 	# ... à mains nues rien ne s'envole, et une lourde qui casse l'arme ne la fait pas voler
 	game._knock_weapon(p2, Vector2.RIGHT)
@@ -1831,6 +1831,44 @@ func _ready() -> void:
 	p1._attack_time = 0.0
 	game._parry(p1, p2)
 	check(p1.is_weapon_broken() and game.projectiles.is_empty(), "Arme projetée : une arme qui casse sur le blocage ne s'envole pas")
+	# 18j) RB : on lance son arme vers l'adversaire, sans dégâts. Un joueur armé la fait rebondir ;
+	# un joueur à mains nues l'attrape (usée comme avant)
+	GameSetup.player_weapons = [GameSetup.WEAPONS[1], GameSetup.WEAPONS[2]]
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 400; p2.position.x = 800
+	p1.input_source = Scripted.new(func(s, f): s.throw_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	for i in 60:
+		await step(1)
+		if p1.weapon_away:
+			break
+	check(p1.weapon_away and not p1.has_weapon_in_hand() and game.projectiles.size() == 1 and game.projectiles[0].kind == "arme"
+		and game.projectiles[0].velocity.x > 0.0, "RB : on lance son arme vers l'adversaire")
+	var tossed: Projectile = game.projectiles[0]
+	var bounced := false
+	for i in 60:
+		await step(1)
+		if tossed.velocity.x < 0.0:
+			bounced = true
+			break
+	check(bounced and untouched(p2) and p2.weapon == hammer and p2.has_weapon_in_hand(), "RB : elle rebondit sur un joueur armé, sans lui faire mal")
+	game._remove_projectile(tossed)
+	p1.equip(katana, 1)
+	p2.weapon_away = true  # p2 à mains nues
+	p1.input_source = Scripted.new(func(s, f): s.throw_pressed = f == 1)
+	await step(2)
+	check(p1.weapon_away and game.projectiles.size() == 1, "RB : relancée")
+	for i in 60:
+		await step(1)
+		if p2.has_weapon_in_hand():
+			break
+	check(p2.has_weapon_in_hand() and p2.weapon == katana and p2.weapon_counters == 1 and game.projectiles.is_empty() and untouched(p2)
+		and is_equal_approx(p2.stats.attack_reach, p2._bare_stats.attack_reach * katana.light_reach_mult * 0.8),
+		"RB : à mains nues, l'adversaire l'attrape en vol, usée comme avant")
+	p1.input_source = Scripted.new(func(s, f): s.throw_pressed = f == 1)
+	await step(3)
+	check(game.projectiles.is_empty(), "RB : à mains nues, rien à lancer")
 	GameSetup.player_weapons = []
 
 	# 19) Les objets qui tombent sur la map : pistolet, grenade, bouclier (RT pour les utiliser)

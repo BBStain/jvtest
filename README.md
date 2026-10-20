@@ -94,6 +94,8 @@ La caméra suit les joueurs : elle dézoome quand ils s'éloignent et zoome quan
 | Dash (dans la direction du stick) | LB | G | J |
 | Courir (maintenir) | Gâchette gauche LT | Shift gauche | Shift droit |
 | Bloquer (maintenir) | B | C | U |
+| Utiliser l'objet ramassé | Gâchette droite RT | E | O |
+| Lancer son arme (sans dégâts ; à mains nues, on ramasse une arme en passant dessus) | RB | A (Q en QWERTY) | H |
 | Descendre d'une plateforme | Bas (même en diagonale) | S | Flèche bas |
 | Rejouer à la fin | Start ou A | Entrée | Entrée |
 | Revenir au menu à la fin | B | Échap | Échap |
