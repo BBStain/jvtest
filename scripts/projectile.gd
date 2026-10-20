@@ -5,7 +5,8 @@ extends Node2D
 ##             le premier sol ou mur, et son lanceur la ramasse en passant dessus.
 ##   balle   : une balle de pistolet, rapide et en ligne droite ; elle disparaît contre un mur.
 ##             Un coup donné au bon moment la renvoie (voir game.gd, _deflect_bullet).
-##   fleche  : la flèche de l'arc (attaque lourde). Comme une balle, mais elle tombe un peu.
+##   fleche  : la flèche de l'arc (attaque lourde). Elle vole comme la lance et se plante dans le
+##             décor ; seul celui qui tient l'arc d'où elle vient peut la ramasser. Contrée, elle casse.
 ##   grenade : collante. Elle se colle au premier élément de la map qu'elle touche (sol, mur,
 ##             plateforme qui bouge, liane, fenêtre) et explose quand sa mèche est finie. Une fenêtre
 ##             touchée trop vite casse et la grenade continue. Un coup la décolle et la repousse.
@@ -45,6 +46,8 @@ var age := 0.0
 var finished := false                   ## à retirer (balle arrivée dans un mur, grenade qui explose)
 var weapon: WeaponStats                 ## lance ou arme : l'arme qu'on récupère en la ramassant...
 var counters := 0                       ## ... et son usure (voir Fighter.weapon_counters)
+var ammo := Fighter.ARROWS_MAX          ## arc par terre : ses flèches ; flèche : l'arc auquel elle revient (bow_id)
+var bow_id := 0
 var body := LooseBody.new()             ## arme posée ou plantée : elle suit ce qui la porte (plateforme qui bouge)
 var stuck_vine: Vine                    ## grenade collée à une liane...
 var stuck_on_vine := 0.0                ## ... à cette distance de son point d'accroche
@@ -60,7 +63,7 @@ func _physics_process(delta: float) -> void:
 	age += delta
 	hit_lock -= delta
 	match kind:
-		"balle", "fleche":
+		"balle":
 			_tick_bullet(delta)
 		"grenade":
 			_tick_grenade(delta)
@@ -75,7 +78,8 @@ func _tick_spear(delta: float) -> void:
 	if state == State.STUCK:
 		_follow_support()
 		return
-	velocity.y += (FLY_GRAVITY if state == State.FLYING else DROP_GRAVITY) * delta
+	var gravity := ARROW_GRAVITY if kind == "fleche" else FLY_GRAVITY
+	velocity.y += (gravity if state == State.FLYING else DROP_GRAVITY) * delta
 	var step := velocity * delta
 	var hit := _ray(position, tip() + step, velocity.y > 0.0)
 	if state == State.FLYING and not hit.is_empty() and hit.collider is BreakableWindow:
@@ -105,8 +109,6 @@ func _follow_support() -> void:
 
 
 func _tick_bullet(delta: float) -> void:
-	if kind == "fleche":
-		velocity.y += ARROW_GRAVITY * delta
 	var step := velocity * delta
 	var hit := _ray(position, tip() + step, false)
 	if not hit.is_empty() and hit.collider is BreakableWindow:

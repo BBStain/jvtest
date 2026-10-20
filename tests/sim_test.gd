@@ -2292,9 +2292,66 @@ func _ready() -> void:
 				arrow_seen = true
 		if touched(p2):
 			break
-	check(arrow_seen and touched(p2) and p1.has_weapon_in_hand(), "Arc : la lourde tire une flèche qui touche, et on garde l'arc")
+	check(arrow_seen and touched(p2) and p1.has_weapon_in_hand() and p1.arrows == Fighter.ARROWS_MAX - 1,
+		"Arc : la lourde tire une flèche qui touche, on garde l'arc (%d flèches)" % p1.arrows)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(60)
+	var arrows_lying: Array = game.projectiles.filter(func(pr): return pr.kind == "fleche")
+	check(arrows_lying.size() == 1 and arrows_lying[0].state != Projectile.State.FLYING, "Arc : la flèche retombe après avoir touché")
+	# Un autre joueur (même avec un arc) ne ramasse pas cette flèche ; celui qui tient l'arc oui
+	p2.equip(load("res://weapons/arc.tres"), 0, 2, 99)
+	p2.position = arrows_lying[0].position + Vector2(0, -10); p2.velocity = Vector2.ZERO
+	await step(3)
+	check(arrows_lying[0] in game.projectiles and p2.arrows == 2, "Arc : la flèche d'un autre arc ne se ramasse pas")
+	p2.position = Vector2(1200, 540)
+	p1.position = arrows_lying[0].position + Vector2(0, -10); p1.velocity = Vector2.ZERO
+	await step(3)
+	check(not arrows_lying[0] in game.projectiles and p1.arrows == Fighter.ARROWS_MAX, "Arc : celui qui tient l'arc ramasse sa flèche")
+	# Arc vide : Y ne tire rien
+	p1.arrows = 0
+	p1.position = Vector2(500, 540); p2.position = Vector2(900, 540)
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 20)
+	await step(40)
+	check(game.projectiles.filter(func(pr): return pr.kind == "fleche").is_empty(), "Arc : sans flèche, la lourde ne tire rien")
+	# Une flèche frappée par un coup est contrée : elle casse
+	p1.arrows = 3
+	p2._stun_timer = 0.0; p2._invincible_timer = 0.0
+	p2.equip(load(GameSetup.WEAPONS[0]), 0)
+	p1.position = Vector2(400, 540); p2.position = Vector2(800, 540)
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 30)
+	var arrow_cut := false
+	for i in 90:
+		await step(1)
+		var flying: Array = game.projectiles.filter(func(pr): return pr.kind == "fleche")
+		if not flying.is_empty() and flying[0].position.distance_to(p2.global_position) < 140.0 and not p2.is_attacking():
+			light_now(p2, Vector2.LEFT)
+		if p1.arrows == 2 and flying.is_empty():
+			arrow_cut = true
+			break
+	check(arrow_cut and untouched(p2), "Arc : une flèche frappée par un coup casse")
+	# L'arc lancé (RB) et rattrapé : le nouveau porteur a les flèches qui restaient
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	var bow_before := p1.bow_id
+	p1.position = Vector2(500, 540); p2.position = Vector2(700, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f): s.throw_pressed = f == 1)
+	for i in 60:
+		await step(1)
+		if p2.has_weapon_in_hand():
+			break
+	check(p2.has_weapon_in_hand() and p2.weapon.heavy == WeaponStats.Heavy.SHOOT and p2.arrows == 2 and p2.bow_id == bow_before,
+		"Arc : rattrapé par un autre, il garde ses flèches (%d) et ses flèches par terre sont à lui" % p2.arrows)
 	p1.input_source = Scripted.new(func(s, f): pass)
 	p1.equip(load(GameSetup.WEAPONS[0]), 0)  # la suite des tests est à mains nues
+	p2.equip(load(GameSetup.WEAPONS[0]), 0)
 	await step(30)
 	# 19j) Un objet tombe toutes les 10 s, au plus 2 par terre
 	for pickup in game.pickups.duplicate():

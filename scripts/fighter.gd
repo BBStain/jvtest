@@ -93,6 +93,7 @@ const BURST_HITS := 3                   ## nunchaku : la lourde est une rafale d
 const BURST_HIT_TIME := 0.12            ## ... un toutes les 0,12 s (chacun peut toucher)
 const BURST_CHARGE_REACH := 1.8         ## ... à pleine charge, ils vont 1,8 fois plus loin
 const ARROW_CHARGE_SPEED := 1.8         ## arc : à pleine charge, la flèche part 1,8 fois plus vite (donc plus loin)
+const ARROWS_MAX := 5                   ## arc : 5 flèches ; il faut aller les ramasser (seul celui qui tient cet arc le peut)
 
 # --- Objets ramassés sur la map (un seul à la fois, utilisé avec RT ; voir item_pickup.gd) ---
 const PISTOL_AMMO := 5                  ## balles du pistolet (une par appui)
@@ -163,7 +164,7 @@ const NET_VARS := [
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
 	"_stun_timer", "_block_hold_time", "weapon_id", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
-	"_swinging", "_swing_anchor", "_swing_up", "grapple_mode", "grapple_point", "_item_flash_timer", "_item_flash_kind", "_repair_flash_timer",
+	"_swinging", "_swing_anchor", "_swing_up", "arrows", "grapple_mode", "grapple_point", "_item_flash_timer", "_item_flash_kind", "_repair_flash_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -238,6 +239,8 @@ var _attack_time := -1.0                ## temps écoulé depuis le début de l'
 var _attack_dir := Vector2.RIGHT
 var _attack_has_hit := false
 var _swing_up := true                   ## nunchaku : le dernier coup allait vers le haut (le prochain ira vers le bas)
+var arrows := ARROWS_MAX                ## arc : flèches qui restent dans l'arc (elles suivent l'arc s'il change de main)
+var bow_id := 0                         ## arc : de quel arc il s'agit (ses flèches ne se ramassent qu'avec lui)
 var _burst_index := 0                   ## nunchaku : quel coup de la rafale est en cours
 var _attack_heavy := false              ## true = attaque lourde en cours
 var _attack_cooldown_timer := 0.0
@@ -888,6 +891,8 @@ func _tick_dash(delta: float) -> void:
 func _try_start_attack(heavy: bool) -> void:
 	if not can_attack():
 		return
+	if heavy and heavy_kind() == WeaponStats.Heavy.SHOOT and arrows <= 0:
+		return  # arc vide : il faut ramasser ses flèches
 	_aim_at_target()
 	if not heavy and _aimed_dir != Vector2.ZERO:
 		_aim_towards(_aimed_dir)  # coup visé au stick droit
@@ -972,6 +977,7 @@ func _shoot_arrow() -> void:
 	var speed := weapon.heavy_speed * lerpf(1.0, ARROW_CHARGE_SPEED, _heavy_charge)
 	var knockback := attack_knockback()
 	_cancel_attack()
+	arrows -= 1
 	arrow_shot.emit(self, _attack_dir, speed, knockback)
 
 
@@ -994,9 +1000,12 @@ func has_weapon_in_hand() -> bool:
 
 
 ## On ramasse une arme (la sienne ou celle d'un autre), usée de "counters" contres.
-func equip(new_weapon: WeaponStats, counters: int) -> void:
+## Arc : il garde ses flèches ("ammo") et son numéro ("id") en changeant de main.
+func equip(new_weapon: WeaponStats, counters: int, ammo := ARROWS_MAX, id := 0) -> void:
 	weapon = new_weapon
 	weapon_counters = counters
+	arrows = ammo
+	bow_id = id
 	_repair_counters = 0
 	_update_armed_stats()
 	weapon_away = false
@@ -1667,6 +1676,11 @@ func _draw() -> void:
 		if weapon.held_head > 0.0:
 			var head := weapon.held_head * weapon_length()
 			draw_rect(Rect2(end - Vector2.ONE * head / 2.0, Vector2.ONE * head), weapon_color)
+		if weapon.heavy == WeaponStats.Heavy.SHOOT:
+			# Les flèches qui restent : des petits traits à côté de l'arc
+			for i in arrows:
+				var x := hand.x - facing * (6.0 + i * 4.0)
+				draw_line(Vector2(x, -6.0), Vector2(x, -18.0), Color(weapon_color, 0.9), 2.0)
 
 	_draw_item(body)
 
