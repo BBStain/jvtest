@@ -2007,6 +2007,7 @@ func _ready() -> void:
 	var long_throw: float = game.projectiles[0].velocity.length() if game.projectiles.size() == 1 else 0.0
 	check(short_throw > 0.0 and long_throw > short_throw * 1.8 and p1.item == "",
 		"Grenade : plus on garde RT, plus elle part loin (%.0f -> %.0f)" % [short_throw, long_throw])
+	check(game.projectiles[0].blast > 1.3, "Grenade : chargée à fond, son explosion projette plus fort")
 	check(game.projectiles[0].fuse < Fighter.GRENADE_FUSE - 1.0, "Grenade : la mèche a commencé dès l'appui (reste %.1f s)" % game.projectiles[0].fuse)
 	# 19f) Elle explose au bout de sa mèche : ceux qui sont autour sont touchés et éjectés
 	game.projectiles[0].position = p2.position + Vector2(-40, 0); game.projectiles[0].velocity = Vector2.ZERO
@@ -2023,6 +2024,73 @@ func _ready() -> void:
 	await step(1)
 	check(grenade.velocity.x > 500, "Grenade : un coup la repousse (vx %.0f)" % grenade.velocity.x)
 	game._remove_projectile(grenade)
+	# 19g bis) Grenade collante : elle se colle au sol, à une plateforme qui bouge (et la suit), à une
+	# liane ; sur une fenêtre, elle colle si elle va doucement, la casse si elle va trop vite
+	var sticky := func(where: Vector2, vel: Vector2) -> Projectile:
+		var sg := Projectile.new()
+		sg.kind = "grenade"; sg.fuse = 30.0; sg.length = 18.0; sg.owner_index = 1
+		sg.position = where; sg.velocity = vel
+		game._add_projectile(sg)
+		return sg
+	var sg1: Projectile = sticky.call(Vector2(150, 400), Vector2(300, 400))
+	for i in 60:
+		await step(1)
+		if sg1.state == Projectile.State.STUCK:
+			break
+	var sg1_pos := sg1.position
+	await step(10)
+	check(sg1.state == Projectile.State.STUCK and sg1.position == sg1_pos and sg1.velocity == Vector2.ZERO, "Grenade collante : elle se colle au sol")
+	game._remove_projectile(sg1)
+	var sg_ride := MovingPlatform.new()
+	sg_ride.size = Vector2(200, 16); sg_ride.travel = Vector2(300, 0); sg_ride.period = 2.0
+	sg_ride.position = Vector2(50, 200)
+	game.map.add_child(sg_ride)
+	await step(1)
+	var sg2: Projectile = sticky.call(Vector2(sg_ride.position.x, 120), Vector2(0, 300))
+	for i in 60:
+		await step(1)
+		if sg2.state == Projectile.State.STUCK:
+			break
+	var sg2_gap := sg2.position.x - sg_ride.position.x
+	await step(20)
+	check(sg2.state == Projectile.State.STUCK and absf(sg2.position.x - sg_ride.position.x - sg2_gap) < 4.0 and sg_ride.position.x > 80.0,
+		"Grenade collante : collée à une plateforme qui bouge, elle la suit")
+	game._remove_projectile(sg2)
+	sg_ride.queue_free()
+	var sg_vine := Vine.new()
+	sg_vine.position = Vector2(150, 0); sg_vine.length = 260.0
+	game.map.add_child(sg_vine)
+	await step(1)
+	var sg3: Projectile = sticky.call(Vector2(60, 150), Vector2(900, -50))
+	for i in 30:
+		await step(1)
+		if sg3.state == Projectile.State.STUCK:
+			break
+	check(sg3.state == Projectile.State.STUCK and sg3.stuck_vine == sg_vine and absf(sg3.position.x - 150.0) < 3.0, "Grenade collante : elle se colle à une liane")
+	game._remove_projectile(sg3)
+	sg_vine.queue_free()
+	var sg_pane := BreakableWindow.new()
+	sg_pane.size = Vector2(20, 200)
+	sg_pane.position = Vector2(300, 150)
+	game.map.add_child(sg_pane)
+	await step(1)
+	var sg4: Projectile = sticky.call(Vector2(200, 150), Vector2(400, 0))
+	for i in 30:
+		await step(1)
+		if sg4.state == Projectile.State.STUCK:
+			break
+	check(sg4.state == Projectile.State.STUCK and not sg_pane.broken and sg4.position.x < 300.0, "Grenade collante : lancée doucement, elle se colle à la fenêtre")
+	sg_pane.smash()
+	await step(3)
+	check(sg4.state != Projectile.State.STUCK, "Grenade collante : la fenêtre casse, elle se décolle")
+	game._remove_projectile(sg4)
+	sg_pane.set_broken(false)
+	await step(2)
+	var sg5: Projectile = sticky.call(Vector2(200, 150), Vector2(1600, 0))
+	await step(10)
+	check(sg_pane.broken and sg5.position.x > 320.0, "Grenade collante : lancée trop vite, elle casse la fenêtre et continue")
+	game._remove_projectile(sg5)
+	sg_pane.queue_free()
 	# 19h) Gardée trop longtemps : elle explose en main
 	p2.recover()  # J2 sonné par la grenade d'avant : on arrête le ralenti, pour compter la mèche en vraies frames
 	await step(1)

@@ -5,7 +5,9 @@ extends Node2D
 ##             le premier sol ou mur, et son lanceur la ramasse en passant dessus.
 ##   balle   : une balle de pistolet, rapide et en ligne droite ; elle disparaît contre un mur.
 ##             Un coup donné au bon moment la renvoie (voir game.gd, _deflect_bullet).
-##   grenade : elle rebondit sur le sol et explose quand sa mèche est finie. Un coup la repousse.
+##   grenade : collante. Elle se colle au premier élément de la map qu'elle touche (sol, mur,
+##             plateforme qui bouge, liane, fenêtre) et explose quand sa mèche est finie. Une fenêtre
+##             touchée trop vite casse et la grenade continue. Un coup la décolle et la repousse.
 ##   arme    : l'arme qui a sauté des mains (blocage parfait) ou qu'on a lancée avec RB. Elle vole
 ##             en tournant, sans danger, rebondit sur les murs, se pose au sol. Un joueur à mains
 ##             nues l'attrape en vol ou la ramasse en passant dessus (voir game.gd, _resolve_spear).
@@ -17,8 +19,8 @@ enum State { FLYING, DROPPED, STUCK }  ## en vol (dangereux), qui retombe (sans 
 const FLY_GRAVITY := 500.0
 const THROW_LIFT := 120.0               ## lance lancée un peu vers le haut, pour ne pas piquer tout de suite dans le sol
 const DROP_GRAVITY := 2300.0
-const GRENADE_GRAVITY := 1600.0
-const GRENADE_BOUNCE := 0.4             ## la grenade rebondit (garde 40 % de sa vitesse)
+const GRENADE_GRAVITY := 900.0          ## la grenade vole plus droit qu'avant (elle tombe moins vite)
+const GRENADE_WINDOW_BREAK := 900.0     ## plus vite que ça, elle casse la fenêtre au lieu de s'y coller
 const BULLET_LIFETIME := 2.5            ## une balle qui ne touche rien disparaît au bout de ce temps
 const RADIUS := 6.0                     ## épaisseur de la zone qui touche
 const SPEAR_LENGTH := 70.0              ## lance neuve (plus courte à chaque fois qu'elle est contrée)
@@ -35,11 +37,15 @@ var length := SPEAR_LENGTH
 var head := 0.0                         ## arme qui a sauté : taille de son bout (tête du marteau...)
 var color := Color(1, 1, 1)
 var fuse := -1.0                        ## grenade : temps avant l'explosion
+var blast := 1.0                        ## grenade : force de l'explosion (plus elle a été chargée, plus fort)
 var age := 0.0
 var finished := false                   ## à retirer (balle arrivée dans un mur, grenade qui explose)
 var weapon: WeaponStats                 ## lance ou arme : l'arme qu'on récupère en la ramassant...
 var counters := 0                       ## ... et son usure (voir Fighter.weapon_counters)
 var body := LooseBody.new()             ## arme posée ou plantée : elle suit ce qui la porte (plateforme qui bouge)
+var stuck_vine: Vine                    ## grenade collée à une liane...
+var stuck_on_vine := 0.0                ## ... à cette distance de son point d'accroche
+var _stuck_normal := Vector2.UP         ## grenade collée : le côté d'où elle est arrivée
 var tumbling := false                   ## lance frappée par terre : elle vole pointe devant et se replante
 var hit_lock := 0.0                     ## vient d'être frappée : le même coup ne la refrappe pas
 var simulate := true                    ## false chez un copain en ligne : il ne fait qu'afficher
@@ -112,20 +118,69 @@ func _tick_grenade(delta: float) -> void:
 	if fuse <= 0.0:
 		finished = true  # game.gd fait l'explosion
 		return
+	if state == State.STUCK:
+		_follow_sticky()
+		return
 	velocity.y += GRENADE_GRAVITY * delta
 	var step := velocity * delta
+	var vine := _vine_crossed(position, position + step)
 	var hit := _ray(position, position + step + step.normalized() * RADIUS, velocity.y > 0.0)
+	if not hit.is_empty() and hit.collider is BreakableWindow and velocity.length() > GRENADE_WINDOW_BREAK:
+		(hit.collider as BreakableWindow).smash()  # trop vite : la fenêtre casse, la grenade continue
+		hit = {}
+	if not vine.is_empty() and (hit.is_empty() or position.distance_to(vine.point) < position.distance_to(hit.position)):
+		position = vine.point
+		stuck_vine = vine.vine
+		stuck_on_vine = vine.distance
+		_stick()
+		return
 	if hit.is_empty():
 		position += step
 		return
-	# Rebond : la vitesse est renvoyée par la surface touchée (et s'amortit).
-	var normal: Vector2 = hit.normal
-	velocity = velocity.bounce(normal) * GRENADE_BOUNCE
-	if normal.y < -0.5:
-		velocity.x *= 0.8  # elle roule de moins en moins sur le sol
-	if velocity.length() < 60.0:
-		velocity = Vector2.ZERO
-	position = (hit.position as Vector2) + normal * RADIUS
+	_stuck_normal = hit.normal
+	position = (hit.position as Vector2) + _stuck_normal * RADIUS
+	body.rest_on(self, hit.collider)
+	_stick()
+
+
+func _stick() -> void:
+	state = State.STUCK
+	velocity = Vector2.ZERO
+
+
+## Un coup la décolle (game.gd lui donne sa nouvelle vitesse).
+func unstick() -> void:
+	state = State.FLYING
+	stuck_vine = null
+	body.launch()
+
+
+## Grenade collée : elle suit ce sur quoi elle est collée (plateforme qui bouge, liane qui se
+## balance). S'il disparaît (fenêtre cassée), elle retombe.
+func _follow_sticky() -> void:
+	if stuck_vine != null:
+		if is_instance_valid(stuck_vine):
+			position = stuck_vine.point_at(stuck_on_vine)
+		else:
+			unstick()
+		return
+	body.follow(self)
+	if _ray(position, position - _stuck_normal * (RADIUS + 6.0), true).is_empty():
+		unstick()
+
+
+## La liane que la grenade traverse entre "from" et "to" (la plus proche) : {vine, point, distance},
+## ou vide.
+func _vine_crossed(from: Vector2, to: Vector2) -> Dictionary:
+	var best := {}
+	if from == to:
+		return best
+	for node in get_tree().get_nodes_in_group("lianes"):
+		var vine := node as Vine
+		var cross: Variant = Geometry2D.segment_intersects_segment(from, to, vine.global_position, vine.point_at(vine.length))
+		if cross != null and (best.is_empty() or from.distance_to(cross) < from.distance_to(best.point)):
+			best = {"vine": vine, "point": cross, "distance": vine.global_position.distance_to(cross)}
+	return best
 
 
 func _tick_knocked(delta: float) -> void:

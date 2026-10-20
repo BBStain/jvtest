@@ -56,8 +56,10 @@ const BULLET_KNOCKBACK := 450.0
 const DEFLECT_PERFECT := 0.04              ## balle frappée dans les 0,04 s où le coup sort : renvoyée droit sur le tireur
 const DEFLECT_MAX_ANGLE := 90.0            ## ... sinon déviée, jusqu'à 90° pour un coup donné tout à la fin
 const DEFLECT_SPEED := 1.15                ## une balle renvoyée va un peu plus vite
-const GRENADE_MIN_THROW := 350.0           ## RT juste tapé : la grenade tombe tout près...
-const GRENADE_MAX_THROW := 1100.0          ## ... RT gardé 1 s : elle part le plus loin possible
+const GRENADE_MIN_THROW := 650.0           ## RT juste tapé : la grenade part assez près...
+const GRENADE_MAX_THROW := 1800.0          ## ... RT gardé 1 s : elle part le plus loin et le plus vite possible
+const GRENADE_LOB := 0.25                  ## lancée presque droit (un peu vers le haut), elle colle là où elle touche
+const GRENADE_MAX_POWER := 1.4             ## ... et pleine charge, son explosion projette 1,4 fois plus fort
 const GRENADE_HIT_SPEED := 900.0           ## frappée par un coup, elle repart dans le sens du coup
 const GRENADE_RADIUS := 140.0              ## rayon de l'explosion
 const GRENADE_KNOCKBACK := 1150.0
@@ -1057,18 +1059,19 @@ func _deflect_bullet(bullet: Projectile, deflector: Fighter) -> void:
 		deflector.reset_cooldown()
 
 
-## Une grenade : un coup la repousse ; au bout de sa mèche, elle explose.
+## Une grenade : un coup la décolle et la repousse ; au bout de sa mèche, elle explose.
 func _resolve_grenade(grenade: Projectile) -> void:
 	if not map.blast_zone.has_point(grenade.position):
 		_remove_projectile(grenade)
 		return
 	if grenade.finished:
-		_explode(grenade.position)
+		_explode(grenade.position, GRENADE_KNOCKBACK * grenade.blast)
 		_remove_projectile(grenade)
 		return
 	for fighter in fighters:
 		if fighter.is_attack_active() and _projectile_in_attack(grenade, fighter):
 			fighter.mark_attack_hit()
+			grenade.unstick()
 			grenade.velocity = fighter.attack_direction() * GRENADE_HIT_SPEED + Vector2(0.0, -300.0)
 			return
 
@@ -1076,7 +1079,7 @@ func _resolve_grenade(grenade: Projectile) -> void:
 ## L'explosion d'une grenade : tous ceux qui sont dans le rayon (le lanceur aussi) sont touchés
 ## et éjectés loin du centre. Un bouclier la bloque (et craque beaucoup).
 ## Les objets et armes par terre dans le rayon sont soufflés.
-func _explode(where: Vector2) -> void:
+func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK) -> void:
 	_spawn_explosion(where, Color(1.0, 0.55, 0.2))
 	map.smash_windows_in(where, GRENADE_RADIUS)
 	for loose: Node2D in _loose_objects():
@@ -1097,7 +1100,7 @@ func _explode(where: Vector2) -> void:
 			if fighter.absorb_hit(push, GRENADE_SHIELD_DAMAGE):
 				fighter.shield_burst(push, true)
 			continue
-		fighter.take_hit(dir.normalized(), GRENADE_KNOCKBACK)
+		fighter.take_hit(dir.normalized(), knockback)
 		if fighter.is_stunned() and _alive_count() == 2:
 			_stun_focus = [fighter, _closest_opponent(fighter)]  # sonné par la grenade : zoom et ralenti aussi
 
@@ -1181,9 +1184,10 @@ func _on_item_used(fighter: Fighter, kind: String, direction: Vector2, power: fl
 			projectile.fuse = fuse
 			projectile.length = 18.0
 			projectile.color = ItemPickup.color_of("grenade")
+			projectile.blast = lerpf(1.0, GRENADE_MAX_POWER, power)
 			if direction != Vector2.ZERO:
-				# Lancée en cloche vers l'adversaire, plus ou moins loin selon le temps où RT a été gardé.
-				var lob := (direction + Vector2(0.0, -0.7)).normalized()
+				# Lancée vers l'adversaire : plus RT a été gardé, plus elle part loin, vite et fort.
+				var lob := (direction + Vector2(0.0, -GRENADE_LOB)).normalized()
 				projectile.velocity = lob * lerpf(GRENADE_MIN_THROW, GRENADE_MAX_THROW, power)
 	_add_projectile(projectile)
 
