@@ -240,6 +240,7 @@ func _physics_process(delta: float) -> void:
 	_resolve_hits()
 	_resolve_lasers()
 	_resolve_waves()
+	_resolve_bolts()
 	_resolve_projectiles()
 	_hit_loose_objects()
 	_tick_pickups(delta)
@@ -656,7 +657,32 @@ func _resolve_waves() -> void:
 					_stun_focus = [jumb, victim]
 
 
-## Ultime (laser ou onde) bloqué parfaitement : il s'éteint, son lanceur est repoussé et ne frappe plus pendant 1 s.
+## L'éclair de Jib (son ultime) : chaque traversée frappe ceux qu'elle touche (sonné, ou une vie en
+## moins si on l'était déjà). Comme pour les autres ultimes : seul un blocage parfait l'arrête.
+func _resolve_bolts() -> void:
+	for jib in fighters:
+		if jib.eliminated or not jib.is_bolt_passing():
+			continue
+		var reach := jib.body_rect().grow(Fighter.BOLT_REACH)
+		for victim in fighters:
+			if victim == jib or victim.eliminated or victim in jib.bolt_hit or not victim.can_be_hit() \
+					or not reach.intersects(victim.body_rect()):
+				continue
+			jib.bolt_hit.append(victim)
+			if victim.is_item_shielded():
+				_bounce_off_item_shield(jib, victim)
+				break
+			elif victim.is_parrying():
+				_parry_ultimate(jib, victim)
+				break
+			else:
+				victim.take_hit(jib._bolt_dir, Fighter.BOLT_KNOCKBACK)
+				_spawn_clash_mark(victim.global_position, false, Fighter.BOLT_COLOR)
+				if victim.is_stunned() and _alive_count() == 2:
+					_stun_focus = [jib, victim]
+
+
+## Ultime (laser, onde ou éclair) bloqué parfaitement : il s'éteint, son lanceur est repoussé et ne frappe plus pendant 1 s.
 func _parry_ultimate(shooter: Fighter, defender: Fighter) -> void:
 	var push := _push_dir(shooter, defender)
 	_spawn_clash_mark(defender.global_position, true, PARRY_COLOR)
