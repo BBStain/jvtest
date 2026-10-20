@@ -6,3 +6,4 @@
 script = ExtResource("1_stats")
 display_name = "Barre"
 description = "Le personnage de base : rapide et équilibré."
+ultimate = "laser"

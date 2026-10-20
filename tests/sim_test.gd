@@ -3191,6 +3191,68 @@ func _ready() -> void:
 	await step(3)
 	check(ult_used[0] == 1 and p1.is_ultimate_ready(), "Ultime : pas d'ultime en étant sonné")
 
+	# Attaque ultime, étape 2 : le laser gelant de la Barre
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 500; p2.position.x = 900
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(3)
+	check(p1.is_lasering() and not p1.is_laser_active() and not p2.is_frozen(), "Laser : il se prépare d'abord (personne n'est gelé)")
+	await step(int(Fighter.LASER_STARTUP * 60.0) + 3)
+	check(p2.is_frozen() and p2.is_stunned() and p2.lives == p2.max_lives, "Laser : J2, à 400 px, est gelé (et sonné), sans perdre de vie")
+	var frozen_x := p2.position.x
+	p2.input_source = Scripted.new(func(s, f): s.stick.x = -1.0; s.attack_pressed = f % 5 == 0; s.jump_pressed = f == 2)
+	await step(60)
+	check(p2.is_frozen() and absf(p2.position.x - frozen_x) < 2.0 and not p2.is_attacking(), "Laser : gelé, J2 ne bouge pas, ne saute pas et n'attaque pas")
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = p2.position.x - 50
+	p1._attack_cooldown_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
+	await step(2 + light_frames)
+	check(p2.lives == p2.max_lives - 1 and not p2.is_frozen(), "Laser : gelé puis frappé, J2 perd une vie et n'est plus gelé")
+	await step(Fighter.FREEZE_TIME * 60.0 as int)
+	# Blocage parfait : le laser s'arrête, c'est un contre (et la Barre ne frappe plus pendant 1 s)
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 500; p2.position.x = 900
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	var laser_frames := int(Fighter.LASER_STARTUP * 60.0)
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= laser_frames - 2)
+	await step(laser_frames + 4)
+	check(not p2.is_frozen() and not p1.is_lasering() and p1.attack_cooldown_left() > 0.5 and p2.ultimate_points == Fighter.ULTIMATE_HEAVY_POINTS,
+		"Laser : un blocage parfait l'arrête, c'est un contre (Barre privée d'attaque, J2 +%d)" % p2.ultimate_points)
+	# Bloquer normalement ne protège pas
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = true)
+	p1.position.x = 500; p2.position.x = 900
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(laser_frames + 4)
+	check(p2.is_frozen(), "Laser : un blocage normal ne protège pas")
+	# Les autres persos n'ont pas (encore) de laser
+	GameSetup.player_characters = ["res://characters/jumb.tres", ""]
+	await new_game()
+	GameSetup.player_characters = []
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 500; p2.position.x = 900
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(laser_frames + 4)
+	check(p1.ultimate_points == 0 and not p1.is_lasering() and not p2.is_frozen(), "Laser : seule la Barre tire le laser")
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 
