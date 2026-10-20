@@ -6,8 +6,9 @@ extends Node2D
 ##   balle   : une balle de pistolet, rapide et en ligne droite ; elle disparaît contre un mur.
 ##             Un coup donné au bon moment la renvoie (voir game.gd, _deflect_bullet).
 ##   grenade : elle rebondit sur le sol et explose quand sa mèche est finie. Un coup la repousse.
-##   arme    : l'arme qui a sauté des mains sur un blocage parfait. Elle vole en tournant, sans
-##             danger, rebondit sur les murs, se pose au sol, et son joueur la ramasse en passant dessus.
+##   arme    : l'arme qui a sauté des mains (blocage parfait) ou qu'on a lancée avec RB. Elle vole
+##             en tournant, sans danger, rebondit sur les murs, se pose au sol. Un joueur à mains
+##             nues l'attrape en vol ou la ramasse en passant dessus (voir game.gd, _resolve_spear).
 ## Seul l'hôte le fait bouger en ligne : les copains reçoivent sa position (voir net_state).
 ## Dessin très simple : à remplacer par un graphiste.
 
@@ -36,6 +37,8 @@ var color := Color(1, 1, 1)
 var fuse := -1.0                        ## grenade : temps avant l'explosion
 var age := 0.0
 var finished := false                   ## à retirer (balle arrivée dans un mur, grenade qui explose)
+var weapon: WeaponStats                 ## lance ou arme : l'arme qu'on récupère en la ramassant...
+var counters := 0                       ## ... et son usure (voir Fighter.weapon_counters)
 var body := LooseBody.new()             ## arme posée ou plantée : elle suit ce qui la porte (plateforme qui bouge)
 var tumbling := false                   ## lance frappée par terre : elle vole pointe devant et se replante
 var hit_lock := 0.0                     ## vient d'être frappée : le même coup ne la refrappe pas

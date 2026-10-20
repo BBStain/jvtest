@@ -69,6 +69,11 @@ const KNOCKED_SPEED_MAX := 1400.0          ## ... jauge pleine (berserk) : elle 
 const KNOCKED_LIFT := 0.9                  ## elle part en cloche, vers l'arrière de celui qui frappait
 const KNOCKED_PICKUP_DELAY := 0.4          ## on ne peut pas la rattraper tout de suite en vol
 
+# --- RB : on lance son arme vers l'adversaire le plus proche, sans dégâts ---
+const TOSS_SPEED := 1150.0
+const TOSS_LIFT := 220.0                   ## un peu vers le haut, pour qu'elle aille loin avant de tomber
+const WEAPON_BOUNCE_SPEED := 150.0         ## une arme qui vole plus vite que ça rebondit sur un joueur armé
+
 # --- Objets et armes qui traînent par terre (voir LooseBody) : un coup les fait valdinguer ---
 const LOOSE_HIT_SPEED := 1.2               ## vitesse = recul du coup x 1,2 (lourde, marteau : plus loin)
 const LOOSE_HIT_LIFT := 300.0              ## ... un peu vers le haut, pour qu'ils décollent du sol
@@ -139,6 +144,7 @@ func _ready() -> void:
 		add_child(fighter)
 		fighter.life_lost.connect(_on_life_lost)
 		fighter.weapon_thrown.connect(_on_weapon_thrown)
+		fighter.weapon_tossed.connect(_on_weapon_tossed)
 		fighter.item_used.connect(_on_item_used)
 		fighter.show_lives()
 		fighters.append(fighter)
@@ -574,17 +580,34 @@ func _knock_weapon(holder: Fighter, push: Vector2) -> void:
 	if not holder.knock_weapon_away():
 		return
 	var speed := lerpf(KNOCKED_SPEED_MIN, KNOCKED_SPEED_MAX, gauge.points / CounterGauge.MAX_POINTS)
-	var knocked := Projectile.new()
-	knocked.kind = "arme"
-	knocked.state = Projectile.State.DROPPED
-	knocked.owner_index = holder.player_index
-	knocked.position = holder.global_position
-	knocked.velocity = (push + Vector2(0.0, -KNOCKED_LIFT)).normalized() * speed
-	knocked.rotation = -PI / 2.0
-	knocked.color = holder.weapon.color
-	knocked.length = holder.weapon.held_length * holder.weapon_length() * Projectile.KNOCKED_SCALE
-	knocked.head = holder.weapon.held_head * holder.weapon_length() * Projectile.KNOCKED_SCALE
-	_add_projectile(knocked)
+	_add_loose_weapon(holder, (push + Vector2(0.0, -KNOCKED_LIFT)).normalized() * speed, -PI / 2.0)
+
+
+## RB : l'arme part de la main vers l'adversaire le plus proche (devant soi s'il n'y en a pas).
+## Elle ne fait mal à personne : un joueur à mains nues l'attrape, un joueur armé la fait rebondir.
+func _on_weapon_tossed(fighter: Fighter) -> void:
+	var dir := Vector2(fighter.facing, 0.0)
+	var target := _closest_opponent(fighter)
+	if target != null:
+		dir = (target.global_position - fighter.global_position).normalized()
+	_add_loose_weapon(fighter, dir * TOSS_SPEED + Vector2(0.0, -TOSS_LIFT), dir.angle())
+
+
+## L'arme de "holder" se met à voler, sans danger (elle a sauté des mains, ou il l'a lancée).
+func _add_loose_weapon(holder: Fighter, velocity: Vector2, angle: float) -> void:
+	var loose := Projectile.new()
+	loose.kind = "arme"
+	loose.state = Projectile.State.DROPPED
+	loose.owner_index = holder.player_index
+	loose.weapon = holder.weapon
+	loose.counters = holder.weapon_counters
+	loose.position = holder.global_position
+	loose.velocity = velocity
+	loose.rotation = angle
+	loose.color = holder.weapon.color
+	loose.length = holder.weapon.held_length * holder.weapon_length() * Projectile.KNOCKED_SCALE
+	loose.head = holder.weapon.held_head * holder.weapon_length() * Projectile.KNOCKED_SCALE
+	_add_projectile(loose)
 
 
 ## La lourde d'une arme a été contrée : l'arme rapetisse, et au 3e contre elle casse (voir
@@ -594,10 +617,14 @@ func _knock_weapon(holder: Fighter, push: Vector2) -> void:
 func _wear_weapon(holder: Fighter, by: Fighter) -> bool:
 	if not holder.weapon_countered():
 		return false
-	_spawn_explosion(holder.global_position, holder.weapon.color)
+	_weapon_break_effect(holder.global_position, holder.weapon.color, holder, by)
+	return true
+
+
+func _weapon_break_effect(where: Vector2, color: Color, holder: Fighter, by: Fighter) -> void:
+	_spawn_explosion(where, color)
 	_break_focus = [holder, by]
 	_break_slowmo = _time_engine.play(WEAPON_BREAK_TIME_SCALE, WEAPON_BREAK_SLOWMO, false)
-	return true
 
 
 ## Un contre relance le ralenti en cours pour toute sa durée. Pendant un micro-duel, il faut
@@ -837,6 +864,8 @@ func _on_weapon_thrown(fighter: Fighter, direction: Vector2, speed: float) -> vo
 	spear.knockback = fighter.attack_knockback()
 	spear.color = fighter.weapon.color
 	spear.length = Projectile.SPEAR_LENGTH * fighter.weapon_length()
+	spear.weapon = fighter.weapon
+	spear.counters = fighter.weapon_counters
 	_add_projectile(spear)
 
 
@@ -852,8 +881,8 @@ func _remove_projectile(projectile: Projectile) -> void:
 
 ## Ce qui vole : les lances et les balles touchent le premier joueur sur leur chemin, les
 ## grenades explosent au bout de leur mèche. Un coup peut renvoyer une balle ou repousser une grenade.
-## Une lance posée est ramassée par son lanceur quand il passe dessus ; sortie de la map, elle
-## est perdue.
+## Une lance posée est ramassée par le premier joueur à mains nues qui passe dessus ; sortie de
+## la map, elle est perdue.
 func _resolve_projectiles() -> void:
 	for projectile: Projectile in projectiles.duplicate():
 		if not projectile in projectiles:
@@ -873,10 +902,7 @@ func _resolve_spear(projectile: Projectile) -> void:
 		_remove_projectile(projectile)  # sortie de la map : perdue (il faudra trouver une autre arme)
 		return
 	if projectile.state != Projectile.State.FLYING:
-		if projectile.kind == "arme" and projectile.age < KNOCKED_PICKUP_DELAY:
-			return
-		if not thrower.eliminated and thrower.body_rect().grow(12.0).has_point(projectile.position):
-			_return_weapon(thrower)
+		_resolve_loose_weapon(projectile)
 		return
 	for fighter in fighters:
 		if fighter != thrower and fighter.is_attack_active() and _projectile_in_attack(projectile, fighter):
@@ -895,6 +921,30 @@ func _resolve_spear(projectile: Projectile) -> void:
 	projectile.drop()
 
 
+## Une arme qui traîne ou vole sans danger : le premier joueur à mains nues qui la touche la prend
+## (en vol aussi). Celui qui vient de la lâcher ou de la lancer ne la rattrape pas tout de suite.
+## Un joueur armé fait rebondir une arme qui vole vers lui.
+func _resolve_loose_weapon(loose: Projectile) -> void:
+	for fighter in fighters:
+		if fighter.eliminated or not fighter.body_rect().grow(12.0).has_point(loose.position):
+			continue
+		if fighter.player_index == loose.owner_index and loose.age < KNOCKED_PICKUP_DELAY:
+			continue
+		if not fighter.has_weapon_in_hand():
+			_pick_up_weapon(fighter, loose)
+			return
+		if not loose.body.resting and loose.hit_lock <= 0.0 and loose.velocity.length() > WEAPON_BOUNCE_SPEED:
+			var away := signf(loose.position.x - fighter.global_position.x)
+			loose.launch(Vector2((away if away != 0.0 else 1.0) * absf(loose.velocity.x) * 0.5, -250.0))
+
+
+## Un joueur à mains nues prend l'arme (la sienne ou celle d'un autre, avec son usure).
+func _pick_up_weapon(fighter: Fighter, loose: Projectile) -> void:
+	if loose.weapon != null:
+		fighter.equip(loose.weapon, loose.counters)
+	_remove_projectile(loose)
+
+
 ## Lance lancée contrée (frappée en vol, ou blocage parfait) : c'est un contre de lourde (compte
 ## triple), celui qui contre peut refrapper tout de suite. La lance retombe, plus courte ;
 ## contrée pour la 3e fois, elle se casse (voir _wear_weapon).
@@ -909,10 +959,14 @@ func _counter_spear(spear: Projectile, counterer: Fighter) -> void:
 	gauge.add_counter(true)
 	_spawn_clash_mark(spear.tip(), true, PARRY_COLOR if counterer.is_parrying() else Color.WHITE)
 	_renew_slowmo(counterer, thrower)
-	if _wear_weapon(thrower, counterer):
+	spear.counters += 1
+	if thrower.weapon_away and thrower.weapon == spear.weapon:
+		thrower.weapon_counters = spear.counters  # c'est encore son arme : elle s'use pour lui aussi
+	if spear.counters >= Fighter.WEAPON_MAX_COUNTERS:
+		_weapon_break_effect(spear.position, spear.color, thrower, counterer)
 		_remove_projectile(spear)
 		return
-	spear.length = Projectile.SPEAR_LENGTH * thrower.weapon_length()
+	spear.length = Projectile.SPEAR_LENGTH * (1.0 - Fighter.WEAPON_SHRINK * spear.counters)
 	spear.drop()
 
 
@@ -1171,15 +1225,6 @@ func _apply_pickups(list: Array) -> void:
 		pickup.simulate = false
 	for i in list.size():
 		pickups[i].apply_net_state(list[i])
-
-
-## La lance (ou l'arme qui a sauté des mains) revient à son joueur (ramassée, sortie de la map,
-## ou il a réapparu).
-func _return_weapon(fighter: Fighter) -> void:
-	for projectile: Projectile in projectiles.duplicate():
-		if projectile.kind in ["lance", "arme"] and projectile.owner_index == fighter.player_index:
-			_remove_projectile(projectile)
-	fighter.get_weapon_back()
 
 
 ## (copain) Les lances reçues de l'hôte : on en crée ou on en retire pour avoir les mêmes.

@@ -562,6 +562,7 @@ func _controls_table() -> GridContainer:
 		["Courir (garder)", "LT", "Shift gauche", "Shift droit"],
 		["Bloquer (garder)", "B", "C", "U"],
 		["Objet", "RT", "E", "O"],
+		["Lancer son arme", "RB", "A", "H"],
 		["Pause", "Start", "Échap ou P", "Échap ou P"],
 	]
 	# Ce qui allume la case "Manette" de chaque ligne (test des boutons) : [boutons, axes]
@@ -569,7 +570,7 @@ func _controls_table() -> GridContainer:
 		[], [[JOY_BUTTON_DPAD_UP, JOY_BUTTON_DPAD_DOWN, JOY_BUTTON_DPAD_LEFT, JOY_BUTTON_DPAD_RIGHT], [JOY_AXIS_LEFT_X, JOY_AXIS_LEFT_Y]],
 		[[JOY_BUTTON_A], []], [[JOY_BUTTON_X], []], [[], [JOY_AXIS_RIGHT_X, JOY_AXIS_RIGHT_Y]], [[JOY_BUTTON_Y], []],
 		[[JOY_BUTTON_LEFT_SHOULDER], []], [[], [JOY_AXIS_TRIGGER_LEFT]], [[JOY_BUTTON_B], []],
-		[[JOY_BUTTON_RIGHT_SHOULDER], [JOY_AXIS_TRIGGER_RIGHT]], [[JOY_BUTTON_START], []],
+		[[], [JOY_AXIS_TRIGGER_RIGHT]], [[JOY_BUTTON_RIGHT_SHOULDER], []], [[JOY_BUTTON_START], []],
 	]
 	for r in rows.size():
 		for c in rows[r].size():
