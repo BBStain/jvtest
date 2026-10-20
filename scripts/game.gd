@@ -69,6 +69,7 @@ const GRENADE_SHIELD_DAMAGE := 3
 const KNOCKED_SPEED_MIN := 550.0           ## jauge de contre vide : elle tombe à quelques pas...
 const KNOCKED_SPEED_MAX := 1400.0          ## ... jauge pleine (berserk) : elle part très loin
 const KNOCKED_LIFT := 0.9                  ## elle part en cloche, vers l'arrière de celui qui frappait
+const ARROW_CLOSE_COUNTER := 220.0         ## flèche contrée à moins de cette distance du tireur : l'arc s'use (comme une lourde contrée)
 const KNOCKED_PICKUP_DELAY := 0.4          ## on ne peut pas la rattraper tout de suite en vol
 
 # --- Armes qui apparaissent sur la map (points WeaponSpawns, voir GameMap.weapon_spawn_points) ---
@@ -936,7 +937,8 @@ func _new_bow_id() -> int:
 
 ## Une flèche : sortie de la map, elle est détruite ; un coup ou un blocage parfait la contre
 ## (elle casse) ; elle tombe après avoir touché quelqu'un ; posée ou plantée, celui qui tient
-## son arc la ramasse en passant dessus (s'il lui manque des flèches).
+## son arc la ramasse en passant dessus (s'il lui manque des flèches). Contrée de très près
+## (tireur à moins de ARROW_CLOSE_COUNTER), l'arc s'use comme n'importe quelle arme contrée.
 func _resolve_arrow(arrow: Projectile) -> void:
 	if not map.blast_zone.has_point(arrow.position):
 		_remove_projectile(arrow)
@@ -955,6 +957,7 @@ func _resolve_arrow(arrow: Projectile) -> void:
 			fighter.reset_cooldown()
 			gauge.add_counter(false)
 			_spawn_clash_mark(arrow.position, false)
+			_wear_bow_close(arrow, fighter)
 			_remove_projectile(arrow)
 			return
 	var victim := _projectile_victim(arrow)
@@ -962,11 +965,18 @@ func _resolve_arrow(arrow: Projectile) -> void:
 		return
 	if victim.is_parrying():
 		_projectile_hits(arrow, victim, 1)  # blocage parfait : un contre, la flèche casse
+		_wear_bow_close(arrow, victim)
 		_remove_projectile(arrow)
 		return
 	if not victim.is_item_shielded() and victim.can_be_hit():
 		_projectile_hits(arrow, victim, 1)
 	arrow.drop()
+
+
+func _wear_bow_close(arrow: Projectile, counterer: Fighter) -> void:
+	var shooter: Fighter = fighters[arrow.owner_index]
+	if shooter.bow_id == arrow.bow_id and shooter.global_position.distance_to(counterer.global_position) <= ARROW_CLOSE_COUNTER:
+		_wear_weapon(shooter, counterer)
 
 
 func _add_projectile(projectile: Projectile) -> void:

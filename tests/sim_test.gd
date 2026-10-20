@@ -2335,10 +2335,31 @@ func _ready() -> void:
 			arrow_cut = true
 			break
 	check(arrow_cut and untouched(p2), "Arc : une flèche frappée par un coup casse")
+	check(p1.weapon_counters == 0, "Arc : contrée de loin, l'arc ne s'use pas")
+	# Contrée de très près : l'arc s'use comme une arme contrée
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(60)
+	p2._stun_timer = 0.0; p2._invincible_timer = 0.0
+	p1.position = Vector2(500, 540); p2.position = Vector2(620, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	var bow_arrows := p1.arrows
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 20)
+	for i in 60:
+		await step(1)
+		if not p2.is_attacking() and not game.projectiles.filter(func(pr): return pr.kind == "fleche").is_empty():
+			light_now(p2, Vector2.LEFT)
+		if p1.arrows < bow_arrows and game.projectiles.filter(func(pr): return pr.kind == "fleche").is_empty():
+			break
+	check(p1.weapon_counters == 1 and untouched(p2), "Arc : une flèche contrée de très près abîme l'arc")
+	p1.weapon_counters = 0
 	# L'arc lancé (RB) et rattrapé : le nouveau porteur a les flèches qui restaient
 	p1.input_source = Scripted.new(func(s, f): pass)
 	await step(30)
 	var bow_before := p1.bow_id
+	var arrows_before := p1.arrows
 	p1.position = Vector2(500, 540); p2.position = Vector2(700, 540)
 	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
 	await step(2)
@@ -2347,7 +2368,7 @@ func _ready() -> void:
 		await step(1)
 		if p2.has_weapon_in_hand():
 			break
-	check(p2.has_weapon_in_hand() and p2.weapon.heavy == WeaponStats.Heavy.SHOOT and p2.arrows == 2 and p2.bow_id == bow_before,
+	check(p2.has_weapon_in_hand() and p2.weapon.heavy == WeaponStats.Heavy.SHOOT and p2.arrows == arrows_before and p2.bow_id == bow_before,
 		"Arc : rattrapé par un autre, il garde ses flèches (%d) et ses flèches par terre sont à lui" % p2.arrows)
 	p1.input_source = Scripted.new(func(s, f): pass)
 	p1.equip(load(GameSetup.WEAPONS[0]), 0)  # la suite des tests est à mains nues
