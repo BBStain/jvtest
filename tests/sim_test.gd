@@ -2120,6 +2120,18 @@ func _ready() -> void:
 	await shot("19_bouclier")
 	await step(int(Fighter.ITEM_SHIELD_TIME * 60))
 	check(not p2.is_item_shielded(), "Bouclier : il disparaît au bout de %d s" % Fighter.ITEM_SHIELD_TIME)
+	# 19i bis) Vie en plus : RT donne une vie, sans dépasser Fighter.MAX_LIVES
+	var vie_before := p2.lives
+	p2.take_item("vie")
+	p2.input_source = Scripted.new(func(s, f): s.item_pressed = f == 1)
+	await step(3)
+	check(p2.lives == vie_before + 1 and p2.item == "", "Vie en plus : RT donne une vie (%d -> %d)" % [vie_before, p2.lives])
+	p2.lives = Fighter.MAX_LIVES
+	p2.take_item("vie")
+	p2.input_source = Scripted.new(func(s, f): s.item_pressed = f == 1)
+	await step(3)
+	check(p2.lives == Fighter.MAX_LIVES and p2.item == "vie", "Vie en plus : à %d vies on la garde" % Fighter.MAX_LIVES)
+	p2.item = ""
 	# 19j) Un objet tombe toutes les 10 s, au plus 2 par terre
 	for pickup in game.pickups.duplicate():
 		game._remove_pickup(pickup)

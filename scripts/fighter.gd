@@ -134,6 +134,7 @@ const KNOCKBACK_TIME := 0.2             ## durée pendant laquelle on contrôle 
 const KNOCKBACK_ACCEL := 2000.0
 
 const START_LIVES := 3
+const MAX_LIVES := 10                  ## l'objet « vie » ne fait pas monter au-delà
 
 ## Jeu en ligne : ce que l'hôte envoie aux copains à chaque frame pour qu'ils dessinent ce joueur
 ## (voir net_state). Tout ce que _draw() utilise doit être dans cette liste.
@@ -145,7 +146,7 @@ const NET_VARS := [
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
 	"_stun_timer", "_block_hold_time", "weapon_id", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
-	"_swinging", "_swing_anchor", "_item_flash_timer", "_repair_flash_timer",
+	"_swinging", "_swing_anchor", "_item_flash_timer", "_item_flash_kind", "_repair_flash_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -243,13 +244,14 @@ var _shield_regen_timer := 0.0
 var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
 var _shield_flash_timer := 0.0          ## petit éclat quand le bouclier encaisse un coup
 
-var item := ""                          ## l'objet ramassé : "", "pistolet", "grenade" ou "bouclier"
+var item := ""                          ## l'objet ramassé : "", "pistolet", "grenade", "bouclier" ou "vie"
 var item_ammo := 0                      ## balles qui restent dans le pistolet
 var item_shield_timer := 0.0            ## bouclier ramassé levé encore ce temps
 var _item_cooldown := 0.0
 var _grenade_fuse := -1.0               ## grenade dégoupillée en main : temps avant l'explosion (-1 = non)
 var _grenade_hold := 0.0                ## depuis combien de temps RT est gardé (distance du lancer)
-var _item_flash_timer := 0.0            ## > 0 juste après avoir ramassé un objet
+var _item_flash_timer := 0.0            ## > 0 juste après avoir ramassé un objet (ou pris une vie)
+var _item_flash_kind := ""              ## l'objet de cet anneau (pour sa couleur)
 var _repair_flash_timer := 0.0          ## > 0 juste après que son arme a été réparée
 var _repair_counters := 0               ## contres au coup léger depuis la dernière réparation (voir weapon_light_counter)
 
@@ -518,11 +520,12 @@ func take_item(kind: String) -> bool:
 	item = kind
 	item_ammo = PISTOL_AMMO if kind == "pistolet" else 0
 	_item_flash_timer = ITEM_FLASH_TIME
+	_item_flash_kind = kind
 	return true
 
 
 ## RT : pistolet = une balle par appui ; grenade = dégoupillée à l'appui, lancée en lâchant
-## (plus on garde, plus elle va loin) ; bouclier = levé pour quelques secondes.
+## (plus on garde, plus elle va loin) ; bouclier = levé pour quelques secondes ; vie = une vie en plus.
 func _tick_item(input: InputState, delta: float) -> void:
 	if _grenade_fuse >= 0.0:
 		_grenade_fuse -= delta
@@ -548,6 +551,13 @@ func _tick_item(input: InputState, delta: float) -> void:
 		"bouclier":
 			item = ""
 			item_shield_timer = ITEM_SHIELD_TIME
+		"vie":
+			if lives < MAX_LIVES:
+				item = ""
+				lives += 1
+				_item_flash_timer = ITEM_FLASH_TIME
+				_item_flash_kind = "vie"
+				show_lives()
 
 
 func _release_grenade(direction: Vector2, power: float) -> void:
@@ -1454,9 +1464,10 @@ func _draw() -> void:
 		var alpha := clampf(_lives_show_timer / 0.4, 0.0, 1.0)
 		var size := 10.0
 		var gap := 5.0
-		var total := max_lives * size + (max_lives - 1) * gap
+		var pips := maxi(max_lives, lives)  # les vies en plus (objet « vie ») s'ajoutent à droite
+		var total := pips * size + (pips - 1) * gap
 		var y := head_y - 18.0
-		for i in max_lives:
+		for i in pips:
 			var pip := Rect2(-total / 2.0 + i * (size + gap), y, size, size)
 			if i < lives:
 				draw_rect(pip, Color(color, alpha))
@@ -1465,7 +1476,8 @@ func _draw() -> void:
 
 
 ## L'objet ramassé (dessin très simple, à remplacer par un graphiste) : pistolet et ses balles,
-## grenade (qui clignote de plus en plus vite une fois dégoupillée), bouclier levé devant soi.
+## grenade (qui clignote de plus en plus vite une fois dégoupillée), bouclier levé devant soi,
+## vie en plus (un petit carré rose dans la main).
 func _draw_item(body: Rect2) -> void:
 	if is_item_shielded():
 		var fade := clampf(item_shield_timer / 0.5, 0.0, 1.0)
@@ -1476,7 +1488,7 @@ func _draw_item(body: Rect2) -> void:
 		# Un objet vient d'être ramassé : un anneau de sa couleur, pour qu'on le remarque.
 		var t := 1.0 - _item_flash_timer / ITEM_FLASH_TIME
 		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.4, body.size.y * 1.1, t), 0.0, TAU, 32,
-			Color(ItemPickup.color_of(item), 1.0 - t), 3.0)
+			Color(ItemPickup.color_of(_item_flash_kind), 1.0 - t), 3.0)
 	if _repair_flash_timer > 0.0:
 		# L'arme vient d'être réparée : un anneau de sa couleur.
 		var t := 1.0 - _repair_flash_timer / WEAPON_REPAIR_FLASH
@@ -1484,6 +1496,8 @@ func _draw_item(body: Rect2) -> void:
 			Color(weapon.color, 1.0 - t), 3.0)
 	var hand := Vector2(facing * (body.size.x / 2.0 + 6.0), 6.0)
 	match item:
+		"vie":
+			draw_rect(Rect2(hand - Vector2.ONE * 6.0, Vector2.ONE * 12.0), ItemPickup.color_of("vie"))
 		"pistolet":
 			# Le pistolet pointe là où la balle partira ; les balles qui restent sont des points sur le canon.
 			var aim := _item_direction()

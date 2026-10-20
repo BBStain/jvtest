@@ -5,9 +5,10 @@ extends Node2D
 ##   pistolet : 5 balles, une par appui
 ##   grenade  : RT gardé = dégoupillée, plus on garde plus elle part loin, explose au bout de 3 s
 ##   bouclier : levé pendant 5 s, qui frappe dedans est projeté très loin
+##   vie      : RT donne une vie en plus (jusqu'à Fighter.MAX_LIVES)
 ## Dessin très simple (une caisse de couleur avec une lettre) : à remplacer par un graphiste.
 
-const KINDS := ["pistolet", "grenade", "bouclier"]
+const KINDS := ["pistolet", "grenade", "bouclier", "vie"]
 const SIZE := 26.0
 const MAX_FALL := 600.0                 ## il tombe du ciel doucement (plus vite s'il est frappé)
 
@@ -30,6 +31,8 @@ static func color_of(item_kind: String) -> Color:
 			return Color(0.45, 0.75, 0.35)
 		"bouclier":
 			return Color(0.45, 0.7, 1.0)
+		"vie":
+			return Color(1.0, 0.45, 0.6)
 	return Color.WHITE
 
 
