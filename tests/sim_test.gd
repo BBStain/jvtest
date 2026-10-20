@@ -3301,6 +3301,36 @@ func _ready() -> void:
 	check(untouched(p2) and not p1.is_waving() and p1.attack_cooldown_left() > 0.5 and p2.ultimate_points == Fighter.ULTIMATE_HEAVY_POINTS,
 		"Onde : un blocage parfait l'arrête, c'est un contre (touché %s, onde %s, recharge %.2f, J2 +%d)" % [touched(p2), p1.is_waving(), p1.attack_cooldown_left(), p2.ultimate_points])
 
+	# Attaque ultime, étape 4 : l'éclair de Jib
+	GameSetup.player_characters = ["res://characters/jib.tres", ""]
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 500; p2.position.x = 760
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(int((Fighter.BOLT_STARTUP + Fighter.BOLT_PASS_TIME) * 60.0) + 3)
+	check(p2.is_stunned() and p2.lives == p2.max_lives and p1.position.x > p2.position.x - 40,
+		"Éclair : 1re traversée, Jib passe à travers J2 et le sonne (Jib x=%.0f, J2 x=%.0f)" % [p1.position.x, p2.position.x])
+	await step(60)  # (le jeu ralentit pendant que J2 est sonné)
+	check(p2.lives == p2.max_lives - 1 and not p1.is_bolting(), "Éclair : les traversées suivantes lui font perdre une vie")
+	# Blocage parfait dès la 1re traversée : c'est un contre
+	await new_game()
+	GameSetup.player_characters = []
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 500; p2.position.x = 760
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	var bolt_frames := int(Fighter.BOLT_STARTUP * 60.0)
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= bolt_frames)
+	await step(bolt_frames + 12)
+	check(untouched(p2) and not p1.is_bolting() and p1.attack_cooldown_left() > 0.5 and p2.ultimate_points == Fighter.ULTIMATE_HEAVY_POINTS,
+		"Éclair : un blocage parfait l'arrête, c'est un contre")
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 

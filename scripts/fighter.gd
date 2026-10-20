@@ -144,6 +144,16 @@ const WAVE_RADIUS := 280.0              ## ... jusqu'à cette distance du centre
 const WAVE_KNOCKBACK := 1700.0          ## ... et les projette très loin (vers l'extérieur, un peu vers le haut)
 const WAVE_LIFT := 0.35
 const WAVE_COLOR := Color(1.0, 0.62, 0.25)
+const BOLT_STARTUP := 0.15              ## Jib : un éclair jaune l'entoure...
+const BOLT_PASSES := 3                  ## ... puis il fonce 3 fois à travers l'adversaire...
+const BOLT_PASS_TIME := 0.12            ## ... chaque traversée dure ce temps...
+const BOLT_GAP := 0.08                  ## ... avec un petit arrêt entre deux (il vise à nouveau)
+const BOLT_OVERSHOOT := 140.0           ## il ressort de l'autre côté de l'adversaire de cette distance
+const BOLT_SPEED_MIN := 1500.0
+const BOLT_SPEED_MAX := 4200.0          ## (un adversaire très loin n'est pas forcément rattrapé)
+const BOLT_REACH := 14.0                ## chaque traversée frappe ceux qu'elle touche (corps de Jib élargi de ça)
+const BOLT_KNOCKBACK := 650.0
+const BOLT_COLOR := Color(1.0, 0.92, 0.3)
 const FREEZE_TIME := 3.0                ## gelé par le laser : ni bouger ni attaquer pendant 3 s ; le coup suivant fait perdre une vie
 
 # --- Effets de la jauge de contre (une seule pour toute la partie, voir counter_gauge.gd) ---
@@ -184,7 +194,7 @@ const NET_VARS := [
 	"_stun_timer", "_block_hold_time", "weapon_id", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
 	"_swinging", "_swing_anchor", "_swing_up", "arrows", "grapple_mode", "grapple_point", "_item_flash_timer", "_item_flash_kind", "_repair_flash_timer",
-	"ultimate_points", "_ultimate_flash_timer", "_laser_time", "_laser_dir", "_laser_length", "_frozen_timer", "_wave_time",
+	"ultimate_points", "_ultimate_flash_timer", "_laser_time", "_laser_dir", "_laser_length", "_frozen_timer", "_wave_time", "_bolt_time", "_bolt_dir",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -315,6 +325,11 @@ var laser_frozen: Array[Fighter] = []   ## ceux que ce laser a déjà touchés (
 var _frozen_timer := 0.0                ## > 0 : gelé par un laser
 var _wave_time := -1.0                  ## Jumb : temps depuis le début de l'onde de choc (-1 = pas d'onde)
 var wave_hit: Array[Fighter] = []       ## ceux que cette onde a déjà frappés (une fois chacun)
+var _bolt_time := -1.0                  ## Jib : temps depuis le début de l'éclair (-1 = pas d'éclair)
+var _bolt_pass := -1                    ## quelle traversée est en cours (pour viser au début de chacune)
+var _bolt_dir := Vector2.RIGHT
+var _bolt_speed := BOLT_SPEED_MIN
+var bolt_hit: Array[Fighter] = []       ## ceux que la traversée en cours a déjà frappés
 
 var _stun_timer := 0.0
 var _invincible_timer := 0.0
@@ -432,8 +447,10 @@ func physics_tick(input: InputState, delta: float) -> void:
 		_tick_dash(delta)
 	elif is_katana_dashing():
 		velocity = _attack_dir * weapon.heavy_speed * lerpf(1.0, THROW_CHARGE_SPEED, _heavy_charge) * _move_mult()
-	elif is_heavy_swinging() or is_lasering() or is_waving():
-		velocity = Vector2.ZERO  # immobilisé pendant la frappe lourde (et le laser de la Barre)
+	elif is_bolt_passing():
+		velocity = _bolt_dir * _bolt_speed  # Jib : il fonce à travers l'adversaire
+	elif is_heavy_swinging() or is_ultimate_under_way():
+		velocity = Vector2.ZERO  # immobilisé pendant la frappe lourde (et pendant les ultimes)
 	else:
 		_tick_movement(input, on_floor, delta)
 
@@ -463,6 +480,7 @@ func physics_tick(input: InputState, delta: float) -> void:
 		_wave_time += delta
 		if _wave_time >= WAVE_STARTUP + WAVE_ACTIVE:
 			_wave_time = -1.0
+	_tick_bolt(delta)
 	_tick_item(input, delta)
 	_apply_grapple_pull()
 
@@ -959,7 +977,7 @@ func _try_start_attack(heavy: bool) -> void:
 ## léger se prépare ou qu'une lourde se charge (X puis Y, ou Y puis X, un peu décalés) : ce coup est annulé.
 func can_use_ultimate() -> bool:
 	return is_ultimate_ready() and not eliminated and not is_dashing() and not is_invincible() \
-		and not _blocking and not is_stunned() and not is_lasering() and not is_waving() \
+		and not _blocking and not is_stunned() and not is_ultimate_under_way() \
 		and (_heavy_charging or (not _attack_heavy and is_attacking() and _attack_time < stats.light_startup()) \
 			or (not is_attacking() and _attack_cooldown_timer <= 0.0))  # privé d'attaque (contré...) : pas d'ultime non plus
 
@@ -986,6 +1004,9 @@ func _use_ultimate() -> void:
 	elif stats.ultimate == "onde":
 		_wave_time = 0.0
 		wave_hit.clear()
+	elif stats.ultimate == "eclair":
+		_bolt_time = 0.0
+		_bolt_pass = -1
 	ultimate_used.emit(self)
 
 
@@ -1024,6 +1045,48 @@ func is_lasering() -> bool:
 ## Le laser peut-il geler en ce moment ? Il touche tout ce qu'il y a entre ces deux points.
 func is_laser_active() -> bool:
 	return _laser_time >= LASER_STARTUP
+
+
+## Jib : au début de chaque traversée, il vise l'adversaire et prend la vitesse qu'il faut pour
+## ressortir de l'autre côté (BOLT_OVERSHOOT).
+func _tick_bolt(delta: float) -> void:
+	if _bolt_time < 0.0:
+		return
+	_bolt_time += delta
+	var t := _bolt_time - BOLT_STARTUP
+	if t >= BOLT_PASSES * (BOLT_PASS_TIME + BOLT_GAP):
+		_bolt_time = -1.0
+		velocity *= 0.2
+		return
+	if t < 0.0:
+		return
+	var index := int(t / (BOLT_PASS_TIME + BOLT_GAP))
+	if index != _bolt_pass:
+		_bolt_pass = index
+		bolt_hit.clear()
+		var distance := 0.0
+		if target != null and not target.eliminated and target.global_position.distance_to(global_position) > 1.0:
+			_bolt_dir = (target.global_position - global_position).normalized()
+			distance = target.global_position.distance_to(global_position)
+		else:
+			_bolt_dir = Vector2(facing, 0.0)
+		_bolt_speed = clampf((distance + BOLT_OVERSHOOT) / BOLT_PASS_TIME, BOLT_SPEED_MIN, BOLT_SPEED_MAX)
+		if absf(_bolt_dir.x) > 0.1:
+			facing = signf(_bolt_dir.x)
+
+
+func is_bolting() -> bool:
+	return _bolt_time >= 0.0
+
+
+## Jib est en train de foncer (pas pendant la préparation ni les petits arrêts).
+func is_bolt_passing() -> bool:
+	var t := _bolt_time - BOLT_STARTUP
+	return _bolt_time >= 0.0 and t >= 0.0 and fmod(t, BOLT_PASS_TIME + BOLT_GAP) < BOLT_PASS_TIME
+
+
+func is_ultimate_under_way() -> bool:
+	return is_lasering() or is_waving() or is_bolting()
 
 
 func is_waving() -> bool:
@@ -1276,6 +1339,7 @@ func _cancel_attack() -> void:
 	_heavy_charging = false
 	_laser_time = -1.0
 	_wave_time = -1.0
+	_bolt_time = -1.0
 
 
 # --- Questions que game.gd pose au combattant ---
@@ -1336,7 +1400,7 @@ func attack_cooldown_left() -> float:
 
 func can_attack() -> bool:
 	return not eliminated and not is_dashing() and not is_invincible() and not _blocking \
-		and not is_attacking() and not is_lasering() and not is_waving() and _attack_cooldown_timer <= 0.0
+		and not is_attacking() and not is_ultimate_under_way() and _attack_cooldown_timer <= 0.0
 
 
 ## Le coup peut-il toucher en ce moment ?
@@ -1984,6 +2048,16 @@ func _draw_ultimate(body: Rect2) -> void:
 			var radius := wave_radius()
 			draw_circle(Vector2.ZERO, radius, Color(WAVE_COLOR, 0.18 * fade))
 			draw_arc(Vector2.ZERO, radius, 0.0, TAU, 64, Color(WAVE_COLOR, 0.9 * fade), 10.0 * fade + 2.0)
+	if is_bolting():
+		# Jib : un éclair jaune autour de lui, puis des traînées jaunes à chaque traversée.
+		if _bolt_time < BOLT_STARTUP:
+			draw_rect(body.grow(4.0 + 6.0 * _bolt_time / BOLT_STARTUP), Color(BOLT_COLOR, 0.9), false, 3.0)
+		elif is_bolt_passing():
+			for i in 4:
+				var ghost := body
+				ghost.position -= _bolt_dir * 22.0 * (i + 1)
+				draw_rect(ghost, Color(BOLT_COLOR, 0.5 - i * 0.11))
+			draw_rect(body.grow(3.0), Color(BOLT_COLOR, 0.95), false, 2.0)
 	if is_frozen():
 		# Gelé : un bloc de glace bleu par-dessus le perso.
 		var ice := body.grow(5.0)
