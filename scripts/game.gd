@@ -153,6 +153,7 @@ func _ready() -> void:
 		fighter.weapon_thrown.connect(_on_weapon_thrown)
 		fighter.weapon_tossed.connect(_on_weapon_tossed)
 		fighter.item_used.connect(_on_item_used)
+		fighter.grapple_parried.connect(_on_grapple_parried)
 		fighter.show_lives()
 		fighters.append(fighter)
 	var gauge_bar := CounterGaugeBar.new()
@@ -1142,6 +1143,18 @@ func _projectile_hits(projectile: Projectile, victim: Fighter, shield_damage: in
 		victim.take_hit(dir, projectile.knockback)
 		if victim.is_stunned() and _alive_count() == 2:
 			_stun_focus = [thrower, victim]
+
+
+## Le crochet du grappin arrive sur un blocage parfait : c'est un contre, comme pour un coup
+## (celui qui l'a lancé est repoussé et ne frappe plus pendant 1 s, l'autre n'est plus sonné).
+func _on_grapple_parried(thrower: Fighter, defender: Fighter) -> void:
+	var push := _push_dir(thrower, defender)
+	_spawn_clash_mark(defender.global_position, false, PARRY_COLOR)
+	gauge.add_counter(false)
+	defender.recover()
+	defender.reset_cooldown()
+	thrower.clash(push * Fighter.CLASH_PUSH * defender.stats.mass(), Fighter.PARRY_COOLDOWN)
+	_renew_slowmo(thrower, defender)
 
 
 ## Le coup tombe sur le bouclier ramassé : personne n'est touché, l'attaquant est projeté très loin

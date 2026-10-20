@@ -6,9 +6,10 @@ extends Node2D
 ##   grenade  : RT gardé = dégoupillée, plus on garde plus elle part loin, explose au bout de 3 s
 ##   bouclier : levé pendant 5 s, qui frappe dedans est projeté très loin
 ##   vie      : RT donne une vie en plus (jusqu'à Fighter.MAX_LIVES)
+##   grappin  : 3 lancers vers l'adversaire le plus proche (voir Fighter._tick_grapple)
 ## Dessin très simple (une caisse de couleur avec une lettre) : à remplacer par un graphiste.
 
-const KINDS := ["pistolet", "grenade", "bouclier", "vie"]
+const KINDS := ["pistolet", "grenade", "bouclier", "vie", "grappin"]
 const SIZE := 26.0
 const MAX_FALL := 600.0                 ## il tombe du ciel doucement (plus vite s'il est frappé)
 
@@ -33,6 +34,8 @@ static func color_of(item_kind: String) -> Color:
 			return Color(0.45, 0.7, 1.0)
 		"vie":
 			return Color(1.0, 0.45, 0.6)
+		"grappin":
+			return Color(0.85, 0.6, 0.3)
 	return Color.WHITE
 
 
@@ -79,5 +82,5 @@ func _draw() -> void:
 	draw_rect(box, Color(color_of(kind), 0.9))
 	draw_rect(box, Color(1, 1, 1, 0.8), false, 2.0)
 	var font := ThemeDB.fallback_font
-	var letter := kind.left(1).to_upper()
+	var letter := "Gr" if kind == "grappin" else kind.left(1).to_upper()  # grenade = G
 	draw_string(font, Vector2(-SIZE / 2.0, 6.0), letter, HORIZONTAL_ALIGNMENT_CENTER, SIZE, 16, Color(0.08, 0.09, 0.13))
