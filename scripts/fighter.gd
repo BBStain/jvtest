@@ -16,6 +16,7 @@ signal weapon_tossed(fighter: Fighter)  ## RB : on lance son arme (sans dégâts
 ## Un objet utilisé (balle tirée, grenade lancée ou lâchée) : game.gd crée ce qui vole.
 ## power : 0 à 1 (distance de la grenade) ; fuse : temps restant avant que la grenade explose.
 signal item_used(fighter: Fighter, kind: String, direction: Vector2, power: float, fuse: float)
+signal grapple_parried(fighter: Fighter, by: Fighter)  ## notre grappin arrive sur un blocage parfait
 
 const PLATFORM_LAYER := 3  ## numéro de la couche "plateformes_traversables"
 
@@ -95,6 +96,15 @@ const ITEM_SHIELD_TIME := 5.0           ## le bouclier ramassé reste levé 5 s
 const ITEM_SHIELD_PUSH := 1300.0        ## qui frappe le bouclier ramassé est projeté très loin...
 const ITEM_SHIELD_COOLDOWN := 0.5       ## ... et ne peut plus frapper un instant
 const ITEM_FLASH_TIME := 0.4            ## objet ramassé : un anneau de sa couleur apparaît ce temps
+const GRAPPLE_USES := 3                 ## le grappin sert 3 fois
+const GRAPPLE_SPEED := 2400.0           ## vitesse du crochet, qui part toujours vers l'adversaire le plus proche
+const GRAPPLE_RANGE := 900.0            ## au-delà, il revient sans rien accrocher (un mur l'arrête aussi)
+const GRAPPLE_PULL := 1300.0            ## vitesse à laquelle la corde tire
+const GRAPPLE_MAX_TIME := 1.2           ## on ne reste pas accroché plus longtemps
+const GRAPPLE_ARRIVE := 70.0            ## les deux sont arrivés l'un contre l'autre : la corde se décroche...
+const GRAPPLE_ARRIVE_KEEP := 0.4        ## ... et celui qui était tiré garde 40 % de son élan
+const GRAPPLE_FLING_TIME := 0.35        ## corde lâchée en route : celui qui était tiré garde tout son élan ce temps
+enum Grapple { NONE, FLYING, PULL_SELF, PULL_THEM }
 
 # --- Blocage (B) : un bouclier qui craque peu à peu (ses points sont dans les stats du perso) ---
 const SHIELD_REGEN_TIME := 2.0          ## 1 point regagné toutes les 2 s quand on ne bloque pas
@@ -134,6 +144,7 @@ const KNOCKBACK_TIME := 0.2             ## durée pendant laquelle on contrôle 
 const KNOCKBACK_ACCEL := 2000.0
 
 const START_LIVES := 3
+const MAX_LIVES := 10                  ## l'objet « vie » ne fait pas monter au-delà
 
 ## Jeu en ligne : ce que l'hôte envoie aux copains à chaque frame pour qu'ils dessinent ce joueur
 ## (voir net_state). Tout ce que _draw() utilise doit être dans cette liste.
@@ -145,7 +156,7 @@ const NET_VARS := [
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
 	"_stun_timer", "_block_hold_time", "weapon_id", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
-	"_swinging", "_swing_anchor", "_item_flash_timer", "_repair_flash_timer",
+	"_swinging", "_swing_anchor", "grapple_mode", "grapple_point", "_item_flash_timer", "_item_flash_kind", "_repair_flash_timer",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
@@ -243,14 +254,23 @@ var _shield_regen_timer := 0.0
 var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
 var _shield_flash_timer := 0.0          ## petit éclat quand le bouclier encaisse un coup
 
-var item := ""                          ## l'objet ramassé : "", "pistolet", "grenade" ou "bouclier"
-var item_ammo := 0                      ## balles qui restent dans le pistolet
+var item := ""                          ## l'objet ramassé : "", "pistolet", "grenade", "bouclier", "vie" ou "grappin"
+var item_ammo := 0                      ## balles qui restent dans le pistolet (ou lancers du grappin)
 var item_shield_timer := 0.0            ## bouclier ramassé levé encore ce temps
 var _item_cooldown := 0.0
 var _grenade_fuse := -1.0               ## grenade dégoupillée en main : temps avant l'explosion (-1 = non)
 var _grenade_hold := 0.0                ## depuis combien de temps RT est gardé (distance du lancer)
-var _item_flash_timer := 0.0            ## > 0 juste après avoir ramassé un objet
+var _item_flash_timer := 0.0            ## > 0 juste après avoir ramassé un objet (ou pris une vie)
+var _item_flash_kind := ""              ## l'objet de cet anneau (pour sa couleur)
 var _repair_flash_timer := 0.0          ## > 0 juste après que son arme a été réparée
+var grapple_mode := Grapple.NONE       ## grappin : crochet qui vole, ou corde qui tire (nous ou l'autre)
+var grapple_point := Vector2.ZERO       ## où est le crochet (dans la map)
+var _grapple_target: Fighter            ## celui que le crochet vise / a accroché
+var _grapple_target_lives := 0          ## s'il perd une vie, la corde se décroche
+var _grapple_tap := false               ## RT lâché avant que le crochet accroche : c'est nous qui sommes tirés
+var _grapple_time := 0.0
+var _grapple_dist := 0.0
+var _grappled_by: Fighter               ## celui dont la corde nous tire vers lui
 var _repair_counters := 0               ## contres au coup léger depuis la dernière réparation (voir weapon_light_counter)
 
 var gauge := CounterGauge.new()         ## la jauge de contre de la partie (partagée, donnée par game.gd)
@@ -387,6 +407,7 @@ func physics_tick(input: InputState, delta: float) -> void:
 			_try_start_attack(true)
 	_tick_attack(input, delta)
 	_tick_item(input, delta)
+	_apply_grapple_pull()
 
 	_move()
 	queue_redraw()
@@ -517,13 +538,19 @@ func take_item(kind: String) -> bool:
 		return false
 	item = kind
 	item_ammo = PISTOL_AMMO if kind == "pistolet" else 0
+	if kind == "grappin":
+		item_ammo = GRAPPLE_USES
 	_item_flash_timer = ITEM_FLASH_TIME
+	_item_flash_kind = kind
 	return true
 
 
 ## RT : pistolet = une balle par appui ; grenade = dégoupillée à l'appui, lancée en lâchant
-## (plus on garde, plus elle va loin) ; bouclier = levé pour quelques secondes.
+## (plus on garde, plus elle va loin) ; bouclier = levé pour quelques secondes ; vie = une vie en plus.
 func _tick_item(input: InputState, delta: float) -> void:
+	if grapple_mode != Grapple.NONE:
+		_tick_grapple(input, delta)
+		return
 	if _grenade_fuse >= 0.0:
 		_grenade_fuse -= delta
 		_grenade_hold += delta
@@ -548,6 +575,116 @@ func _tick_item(input: InputState, delta: float) -> void:
 		"bouclier":
 			item = ""
 			item_shield_timer = ITEM_SHIELD_TIME
+		"grappin":
+			if target != null and not target.eliminated:
+				item_ammo -= 1
+				grapple_mode = Grapple.FLYING
+				grapple_point = global_position
+				_grapple_target = target
+				_grapple_target_lives = target.lives
+				_grapple_tap = false
+				_grapple_time = 0.0
+				_grapple_dist = 0.0
+		"vie":
+			if lives < MAX_LIVES:
+				item = ""
+				lives += 1
+				_item_flash_timer = ITEM_FLASH_TIME
+				_item_flash_kind = "vie"
+				show_lives()
+
+
+## Grappin (RT) : le crochet file vers l'adversaire le plus proche. S'il l'accroche :
+##   RT déjà lâché (une petite pression) : la corde NOUS tire vers lui ; un 2e appui la lâche.
+##   RT encore gardé : la corde LE tire vers nous ; lâcher RT la décroche.
+## Corde lâchée en route, celui qui était tiré garde son élan (il est « jeté »). Les deux peuvent
+## frapper et bloquer pendant ce temps ; seul un blocage parfait à l'arrivée du crochet le contre.
+func _tick_grapple(input: InputState, delta: float) -> void:
+	var other := _grapple_target
+	if other == null or other.eliminated or other.lives != _grapple_target_lives:
+		_end_grapple(false)
+		return
+	_grapple_time += delta
+	match grapple_mode:
+		Grapple.FLYING:
+			if not input.item_held:
+				_grapple_tap = true
+			var next := grapple_point + (other.global_position - grapple_point).limit_length(GRAPPLE_SPEED * delta)
+			var wall := get_world_2d().direct_space_state.intersect_ray(
+				PhysicsRayQueryParameters2D.create(grapple_point, next, 1))
+			if not wall.is_empty():
+				_end_grapple(false)  # un mur entre les deux : le crochet ne passe pas
+				return
+			_grapple_dist += grapple_point.distance_to(next)
+			grapple_point = next
+			if other.body_rect().grow(8.0).has_point(grapple_point):
+				if other.is_parrying():
+					_end_grapple(false)
+					grapple_parried.emit(self, other)
+					return
+				_grapple_time = 0.0
+				if _grapple_tap:
+					grapple_mode = Grapple.PULL_SELF
+					_leave_ladder()
+					_leave_vine()
+				else:
+					grapple_mode = Grapple.PULL_THEM
+					other.grappled_by(self)
+			elif _grapple_dist > GRAPPLE_RANGE:
+				_end_grapple(false)
+		Grapple.PULL_SELF:
+			grapple_point = other.global_position
+			if input.item_pressed:
+				_end_grapple(true)  # 2e appui : on lâche la corde, on garde son élan
+				return
+			var to := other.global_position - global_position
+			if to.length() < GRAPPLE_ARRIVE or _grapple_time > GRAPPLE_MAX_TIME:
+				velocity *= GRAPPLE_ARRIVE_KEEP
+				_end_grapple(false)
+				return
+			velocity = to.normalized() * GRAPPLE_PULL
+			_jump_rising = false
+		Grapple.PULL_THEM:
+			grapple_point = other.global_position
+			if not input.item_held:
+				_end_grapple(true)  # RT lâché : la corde se décroche, il part sur son élan
+				return
+			if global_position.distance_to(other.global_position) < GRAPPLE_ARRIVE or _grapple_time > GRAPPLE_MAX_TIME:
+				other.velocity *= GRAPPLE_ARRIVE_KEEP
+				_end_grapple(false)
+
+
+## La corde se décroche. "fling" : lâchée en route, celui qui était tiré garde tout son élan.
+func _end_grapple(fling: bool) -> void:
+	if fling:
+		var pulled := self if grapple_mode == Grapple.PULL_SELF else _grapple_target
+		if pulled != null:
+			pulled._ladder_fling_timer = GRAPPLE_FLING_TIME
+	grapple_mode = Grapple.NONE
+	_grapple_target = null
+	if item == "grappin" and item_ammo <= 0:
+		item = ""
+
+
+## La corde d'un autre nous a accroché : il nous tire vers lui (voir _apply_grapple_pull).
+func grappled_by(puller: Fighter) -> void:
+	_grappled_by = puller
+	_leave_ladder()
+	_leave_vine()
+
+
+func is_grappled() -> bool:
+	return _grappled_by != null and _grappled_by.grapple_mode == Grapple.PULL_THEM and _grappled_by._grapple_target == self
+
+
+func _apply_grapple_pull() -> void:
+	if not is_grappled():
+		_grappled_by = null
+		return
+	var to := _grappled_by.global_position - global_position
+	if to.length() > 1.0:
+		velocity = to.normalized() * GRAPPLE_PULL
+		_jump_rising = false
 
 
 func _release_grenade(direction: Vector2, power: float) -> void:
@@ -1233,6 +1370,8 @@ func fall_out(respawn_position: Vector2) -> void:
 	_knockback_timer = 0.0
 	_wall_jump_timer = 0.0
 	_ladder_fling_timer = 0.0
+	if grapple_mode != Grapple.NONE:
+		_end_grapple(false)
 	if _grenade_fuse >= 0.0:
 		item = ""  # tombé avec une grenade dégoupillée : elle est perdue
 		_grenade_fuse = -1.0
@@ -1454,9 +1593,10 @@ func _draw() -> void:
 		var alpha := clampf(_lives_show_timer / 0.4, 0.0, 1.0)
 		var size := 10.0
 		var gap := 5.0
-		var total := max_lives * size + (max_lives - 1) * gap
+		var pips := maxi(max_lives, lives)  # les vies en plus (objet « vie ») s'ajoutent à droite
+		var total := pips * size + (pips - 1) * gap
 		var y := head_y - 18.0
-		for i in max_lives:
+		for i in pips:
 			var pip := Rect2(-total / 2.0 + i * (size + gap), y, size, size)
 			if i < lives:
 				draw_rect(pip, Color(color, alpha))
@@ -1465,7 +1605,8 @@ func _draw() -> void:
 
 
 ## L'objet ramassé (dessin très simple, à remplacer par un graphiste) : pistolet et ses balles,
-## grenade (qui clignote de plus en plus vite une fois dégoupillée), bouclier levé devant soi.
+## grenade (qui clignote de plus en plus vite une fois dégoupillée), bouclier levé devant soi,
+## vie en plus (un petit carré rose dans la main), grappin (et sa corde quand il est lancé).
 func _draw_item(body: Rect2) -> void:
 	if is_item_shielded():
 		var fade := clampf(item_shield_timer / 0.5, 0.0, 1.0)
@@ -1476,14 +1617,26 @@ func _draw_item(body: Rect2) -> void:
 		# Un objet vient d'être ramassé : un anneau de sa couleur, pour qu'on le remarque.
 		var t := 1.0 - _item_flash_timer / ITEM_FLASH_TIME
 		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.4, body.size.y * 1.1, t), 0.0, TAU, 32,
-			Color(ItemPickup.color_of(item), 1.0 - t), 3.0)
+			Color(ItemPickup.color_of(_item_flash_kind), 1.0 - t), 3.0)
 	if _repair_flash_timer > 0.0:
 		# L'arme vient d'être réparée : un anneau de sa couleur.
 		var t := 1.0 - _repair_flash_timer / WEAPON_REPAIR_FLASH
 		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.4, body.size.y * 1.1, t), 0.0, TAU, 32,
 			Color(weapon.color, 1.0 - t), 3.0)
 	var hand := Vector2(facing * (body.size.x / 2.0 + 6.0), 6.0)
+	if grapple_mode != Grapple.NONE:
+		# La corde, de la main jusqu'au crochet.
+		var hook := to_local(grapple_point)
+		draw_line(hand, hook, Color(ItemPickup.color_of("grappin"), 0.9), 2.0)
+		draw_rect(Rect2(hook - Vector2.ONE * 4.0, Vector2.ONE * 8.0), ItemPickup.color_of("grappin"))
 	match item:
+		"grappin":
+			if grapple_mode == Grapple.NONE:
+				draw_rect(Rect2(hand - Vector2.ONE * 4.0, Vector2.ONE * 8.0), ItemPickup.color_of("grappin"))
+			for i in item_ammo:
+				draw_circle(hand + Vector2(-6.0 + i * 6.0, -10.0), 1.8, ItemPickup.color_of("grappin"))
+		"vie":
+			draw_rect(Rect2(hand - Vector2.ONE * 6.0, Vector2.ONE * 12.0), ItemPickup.color_of("vie"))
 		"pistolet":
 			# Le pistolet pointe là où la balle partira ; les balles qui restent sont des points sur le canon.
 			var aim := _item_direction()

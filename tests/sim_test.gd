@@ -2120,6 +2120,98 @@ func _ready() -> void:
 	await shot("19_bouclier")
 	await step(int(Fighter.ITEM_SHIELD_TIME * 60))
 	check(not p2.is_item_shielded(), "Bouclier : il disparaît au bout de %d s" % Fighter.ITEM_SHIELD_TIME)
+	# 19i bis) Vie en plus : RT donne une vie, sans dépasser Fighter.MAX_LIVES
+	var vie_before := p2.lives
+	p2.take_item("vie")
+	p2.input_source = Scripted.new(func(s, f): s.item_pressed = f == 1)
+	await step(3)
+	check(p2.lives == vie_before + 1 and p2.item == "", "Vie en plus : RT donne une vie (%d -> %d)" % [vie_before, p2.lives])
+	p2.lives = Fighter.MAX_LIVES
+	p2.take_item("vie")
+	p2.input_source = Scripted.new(func(s, f): s.item_pressed = f == 1)
+	await step(3)
+	check(p2.lives == Fighter.MAX_LIVES and p2.item == "vie", "Vie en plus : à %d vies on la garde" % Fighter.MAX_LIVES)
+	p2.item = ""
+	# 19i ter) Grappin : RT gardé = il tire l'autre vers soi ; petite pression = on est tiré vers lui
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.position = Vector2(500, 540); p2.position = Vector2(800, 540)
+	await step(2)
+	p1.take_item("grappin")
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f >= 1)
+	var gr_p1x := p1.position.x
+	var gr_pulled := false
+	for i in 40:
+		await step(1)
+		if p2.is_grappled():
+			gr_pulled = true
+	check(gr_pulled and p2.position.x < 800 - 150 and absf(p1.position.x - gr_p1x) < 40 and p1.item_ammo == Fighter.GRAPPLE_USES - 1,
+		"Grappin gardé : il tire l'autre vers soi (J2 x %.0f)" % p2.position.x)
+	check(p1.grapple_mode == Fighter.Grapple.NONE, "Grappin gardé : arrivé, la corde se décroche")
+	await shot("19_grappin")
+	# Petite pression : c'est nous qui sommes tirés
+	p1.position = Vector2(500, 540); p2.position = Vector2(800, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f == 1)
+	var gr_p2x := p2.position.x
+	await step(25)
+	check(p1.position.x > 500 + 150 and absf(p2.position.x - gr_p2x) < 40 and p1.item_ammo == Fighter.GRAPPLE_USES - 2,
+		"Grappin, petite pression : on est tiré vers l'autre (J1 x %.0f)" % p1.position.x)
+	await step(30)
+	# Gardé puis lâché en route : l'autre est « jeté » (il garde son élan)
+	p1.position = Vector2(400, 540); p2.position = Vector2(1000, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	var gr_frame := [0]
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f >= 1 and (gr_frame[0] == 0 or f < gr_frame[0] + 4))
+	for i in 40:
+		await step(1)
+		if p2.is_grappled() and gr_frame[0] == 0:
+			gr_frame[0] = p1.input_source.frame
+		if gr_frame[0] != 0 and p1.grapple_mode == Fighter.Grapple.NONE:
+			break
+	await step(1)
+	check(gr_frame[0] != 0 and p2.velocity.x < -900, "Grappin lâché en route : l'autre part sur son élan (vx %.0f)" % p2.velocity.x)
+	check(p1.item == "", "Grappin : vide après %d lancers" % Fighter.GRAPPLE_USES)
+	# Blocage parfait à l'arrivée du crochet : contré
+	await step(60)
+	p1.position = Vector2(500, 540); p2.position = Vector2(800, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	p1.take_item("grappin")
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f >= 1)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= 1)
+	await step(20)
+	check(p1.grapple_mode == Fighter.Grapple.NONE and not p2.is_grappled() and p2.position.x > 780 and not p1.can_attack(),
+		"Grappin : un blocage parfait le contre (J1 ne frappe plus)")
+	p2.input_source = Scripted.new(func(s, f): s.block_held = true)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(70)
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f >= 1)
+	gr_pulled = false
+	for i in 30:
+		await step(1)
+		if p2.is_grappled():
+			gr_pulled = true
+	check(gr_pulled, "Grappin : un blocage normal ne l'arrête pas")
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.item = ""
+	await step(30)
 	# 19j) Un objet tombe toutes les 10 s, au plus 2 par terre
 	for pickup in game.pickups.duplicate():
 		game._remove_pickup(pickup)
