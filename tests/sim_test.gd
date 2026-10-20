@@ -970,6 +970,9 @@ func _ready() -> void:
 				for point in points:
 					if not m.blast_zone.has_point(point.position):
 						problems.append("%s est hors de la zone de jeu" % point.name)
+				for where in m.weapon_spawn_points():
+					if not m.blast_zone.has_point(where):
+						problems.append("une apparition d'arme est hors de la zone de jeu")
 			_check_visuals(m, problems)
 			m.free()
 		check(problems.is_empty(), "Contenu : la map %s est complète %s" % [path, problems])
@@ -988,6 +991,15 @@ func _ready() -> void:
 				if fi.is_on_floor() and fi.lives == GameSetup.lives:
 					landed += 1
 			check(landed == 4, "Contenu : sur %s, les 4 %s atterrissent (%d/4)" % [path.get_file(), c_path.get_file(), landed])
+		# ... et une arme qui apparaît à chaque point d'apparition d'arme se pose sur le décor
+		for fi in game.fighters:
+			fi.equip(load(GameSetup.WEAPONS[1]), 0)  # armés : personne ne ramasse les armes
+		var spawned: Array[Projectile] = []
+		for where in game.map.weapon_spawn_points():
+			spawned.append(game.spawn_weapon(load(GameSetup.WEAPONS[1]), where))
+		await step(180)
+		var weapons_landed := spawned.filter(func(w): return is_instance_valid(w) and w in game.projectiles and w.state == Projectile.State.STUCK).size()
+		check(weapons_landed == spawned.size(), "Contenu : sur %s, les armes apparues se posent (%d/%d)" % [path.get_file(), weapons_landed, spawned.size()])
 	GameSetup.map_path = GameSetup.MAPS[0]
 	GameSetup.player_devices = []
 	GameSetup.player_characters = []
@@ -2052,6 +2064,31 @@ func _ready() -> void:
 	for pickup in game.pickups:
 		all_landed = all_landed and pickup.landed
 	check(all_landed, "Objets : ils se posent sur le décor")
+	# 19l) Armes qui apparaissent : une toutes les 12 s (pas plus de 2 par terre), sans propriétaire ;
+	# un joueur à mains nues la prend en passant dessus
+	var weapons_before: int = game.projectiles.size()
+	game._weapon_spawn_timer = 0.0
+	await step(1)
+	var appeared: Array = game.projectiles.filter(func(w): return w.kind == "arme" and w.owner_index == -1)
+	check(game.projectiles.size() == weapons_before + 1 and appeared.size() == 1 and appeared[0].weapon != null
+		and not appeared[0].weapon.is_bare_hands(), "Armes qui apparaissent : une arme au hasard tombe")
+	for i in 120:
+		await step(1)
+		if appeared[0].state == Projectile.State.STUCK:
+			break
+	check(appeared[0].state == Projectile.State.STUCK, "Armes qui apparaissent : elle se pose")
+	for i in 3:
+		game._weapon_spawn_timer = 0.0
+		await step(1)
+	check(game.projectiles.filter(func(w): return w.kind == "arme").size() == game.MAX_LOOSE_WEAPONS,
+		"Armes qui apparaissent : au plus %d qui traînent" % game.MAX_LOOSE_WEAPONS)
+	var free_weapon: Projectile = appeared[0]
+	var free_kind: WeaponStats = free_weapon.weapon
+	p2.weapon_away = true
+	p2.position = free_weapon.position + Vector2(0, -20)
+	await step(2)
+	check(p2.has_weapon_in_hand() and p2.weapon == free_kind and not free_weapon in game.projectiles,
+		"Armes qui apparaissent : à mains nues, on la prend en passant dessus")
 	# 19k) Physique : posé sur une plateforme qui bouge, l'objet est transporté ; elle part, il retombe ;
 	# un coup le fait valdinguer dans le sens du coup ; une grenade le souffle ; une fenêtre qui casse le lâche
 	for pickup in game.pickups.duplicate():
@@ -2532,6 +2569,7 @@ func _ready() -> void:
 	editor.add_from_catalog("liane", Vector2(1100, 100))
 	editor.add_from_catalog("fenetre", Vector2(900, 300))
 	editor.add_from_catalog("spawn_objet", Vector2(640, 200))
+	editor.add_from_catalog("spawn_arme", Vector2(500, 200))
 	var resp_count: int = editor.data.elements.filter(func(e): return e.type == "reapparition").size()
 	editor.add_from_catalog("reapparition", Vector2(600, 100))
 	check(editor.data.elements.filter(func(e): return e.type == "reapparition").size() == resp_count,
@@ -2720,6 +2758,8 @@ func _ready() -> void:
 		and get_tree().get_nodes_in_group("echelles").size() == 1 and get_tree().get_nodes_in_group("lianes").size() == 1,
 		"Éditeur : la navette roule, l'échelle, la liane et la fenêtre sont là")
 	check(game.map.item_spawn_points().size() == 1, "Éditeur : les objets tombent depuis le point posé")
+	check(game.map.has_node("WeaponSpawns") and game.map.weapon_spawn_points().size() == 1,
+		"Éditeur : les armes tombent depuis le « Spawn d'arme » posé")
 	var saved_map := GameSetup.make_map("carte:_test_editeur")
 	check(saved_map.map_name == "_test_editeur", "Éditeur : une map sauvée se charge par son nom")
 	saved_map.free()

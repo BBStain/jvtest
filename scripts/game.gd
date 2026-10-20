@@ -69,6 +69,10 @@ const KNOCKED_SPEED_MAX := 1400.0          ## ... jauge pleine (berserk) : elle 
 const KNOCKED_LIFT := 0.9                  ## elle part en cloche, vers l'arrière de celui qui frappait
 const KNOCKED_PICKUP_DELAY := 0.4          ## on ne peut pas la rattraper tout de suite en vol
 
+# --- Armes qui apparaissent sur la map (points WeaponSpawns, voir GameMap.weapon_spawn_points) ---
+const WEAPON_SPAWN_TIME := 12.0            ## une arme au hasard tombe toutes les 12 s...
+const MAX_LOOSE_WEAPONS := 2               ## ... s'il n'y a pas déjà 2 armes qui traînent sur la map
+
 # --- RB : on lance son arme vers l'adversaire le plus proche, sans dégâts ---
 const TOSS_SPEED := 1150.0
 const TOSS_LIFT := 220.0                   ## un peu vers le haut, pour qu'elle aille loin avant de tomber
@@ -106,6 +110,7 @@ var projectiles: Array[Projectile] = []    ## ce qui vole : lances lancées, bal
 var pickups: Array[ItemPickup] = []        ## les objets tombés sur la map, pas encore ramassés
 var rng := RandomNumberGenerator.new()     ## où et quel objet tombe (seul l'hôte tire au sort)
 var _item_spawn_timer := ITEM_SPAWN_TIME
+var _weapon_spawn_timer := WEAPON_SPAWN_TIME
 @onready var _end_screen: Control = $UI/EndScreen
 @onready var _winner_label: Label = $UI/EndScreen/Winner
 @onready var _camera: Camera2D = $Camera
@@ -216,6 +221,7 @@ func _physics_process(delta: float) -> void:
 	_resolve_projectiles()
 	_hit_loose_objects()
 	_tick_pickups(delta)
+	_tick_weapon_spawns(delta)
 	_check_blast_zone()
 	_update_stun_slowmo()
 	_shake_on_life_loss()
@@ -593,6 +599,36 @@ func _on_weapon_tossed(fighter: Fighter) -> void:
 	_add_loose_weapon(fighter, dir * TOSS_SPEED + Vector2(0.0, -TOSS_LIFT), dir.angle())
 
 
+## Toutes les WEAPON_SPAWN_TIME secondes, une arme au hasard (pas les mains nues) tombe d'un des
+## points d'apparition d'armes, s'il n'y en a pas déjà MAX_LOOSE_WEAPONS qui traînent.
+## Personne ne la possède : le premier joueur à mains nues qui passe dessus la prend.
+func _tick_weapon_spawns(delta: float) -> void:
+	_weapon_spawn_timer -= delta
+	if _weapon_spawn_timer > 0.0:
+		return
+	_weapon_spawn_timer = WEAPON_SPAWN_TIME
+	var lying := projectiles.filter(func(p: Projectile) -> bool: return p.kind in ["lance", "arme"] and p.state != Projectile.State.FLYING)
+	if lying.size() >= MAX_LOOSE_WEAPONS:
+		return
+	var points := map.weapon_spawn_points()
+	spawn_weapon(load(GameSetup.WEAPONS[1 + rng.randi() % (GameSetup.WEAPONS.size() - 1)]), points[rng.randi() % points.size()])
+
+
+## Une arme neuve, sans propriétaire, qui apparaît à "where" et tombe.
+func spawn_weapon(new_weapon: WeaponStats, where: Vector2) -> Projectile:
+	var loose := Projectile.new()
+	loose.kind = "arme"
+	loose.state = Projectile.State.DROPPED
+	loose.owner_index = -1
+	loose.weapon = new_weapon
+	loose.position = where
+	loose.color = new_weapon.color
+	loose.length = new_weapon.held_length * Projectile.KNOCKED_SCALE
+	loose.head = new_weapon.held_head * Projectile.KNOCKED_SCALE
+	_add_projectile(loose)
+	return loose
+
+
 ## L'arme de "holder" se met à voler, sans danger (elle a sauté des mains, ou il l'a lancée).
 func _add_loose_weapon(holder: Fighter, velocity: Vector2, angle: float) -> void:
 	var loose := Projectile.new()
@@ -897,13 +933,13 @@ func _resolve_projectiles() -> void:
 
 
 func _resolve_spear(projectile: Projectile) -> void:
-	var thrower: Fighter = fighters[projectile.owner_index]
 	if not map.blast_zone.has_point(projectile.position):
 		_remove_projectile(projectile)  # sortie de la map : perdue (il faudra trouver une autre arme)
 		return
 	if projectile.state != Projectile.State.FLYING:
 		_resolve_loose_weapon(projectile)
 		return
+	var thrower: Fighter = fighters[projectile.owner_index]
 	for fighter in fighters:
 		if fighter != thrower and fighter.is_attack_active() and _projectile_in_attack(projectile, fighter):
 			_counter_spear(projectile, fighter)

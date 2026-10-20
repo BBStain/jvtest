@@ -925,6 +925,9 @@ func _draw_overlay() -> void:
 			"spawn_objet":
 				_overlay.draw_rect(Rect2(pos - Vector2(16, 16), Vector2(32, 32)), Color(0.85, 0.65, 0.3), false, 3.0)
 				_overlay.draw_string(font, pos + Vector2(-6, 8), "?", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(0.85, 0.65, 0.3))
+			"spawn_arme":
+				_overlay.draw_rect(Rect2(pos - Vector2(16, 16), Vector2(32, 32)), Color(0.55, 0.85, 1.0), false, 3.0)
+				_overlay.draw_line(pos + Vector2(-10, 10), pos + Vector2(10, -10), Color(0.55, 0.85, 1.0), 4.0)  # une arme
 			_:
 				var travel := MapData.vec(element, "travel") if element.has("travel") else Vector2.ZERO
 				if travel != Vector2.ZERO and not playing:  # le trajet : un pointillé et la place au bout

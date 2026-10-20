@@ -22,6 +22,8 @@ static func build(data: Dictionary) -> GameMap:
 	map.add_child(spawns)
 	var items := Node2D.new()
 	items.name = "ItemSpawns"
+	var weapons := Node2D.new()
+	weapons.name = "WeaponSpawns"
 	var respawn := Marker2D.new()
 	respawn.name = "RespawnPoint"
 	var has_respawn := false
@@ -35,10 +37,10 @@ static func build(data: Dictionary) -> GameMap:
 			"reapparition":
 				respawn.position = MapData.vec(element, "pos")
 				has_respawn = true
-			"spawn_objet":
+			"spawn_objet", "spawn_arme":
 				var marker := Marker2D.new()
 				marker.position = MapData.vec(element, "pos")
-				items.add_child(marker)
+				(items if element.type == "spawn_objet" else weapons).add_child(marker)
 			_:
 				var node := build_element(element, MapData.moves(found, element))
 				decor.add_child(node)
@@ -61,6 +63,10 @@ static func build(data: Dictionary) -> GameMap:
 		map.add_child(items)
 	else:
 		items.free()
+	if weapons.get_child_count() > 0:
+		map.add_child(weapons)
+	else:
+		weapons.free()
 	var motion := MapMotion.new()
 	motion.name = "Mouvements"
 	motion.setup(data, nodes)
