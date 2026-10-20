@@ -1631,8 +1631,8 @@ func _ready() -> void:
 	check(game._break_focus.is_empty() and Engine.time_scale > 0.99, "Arme cassée : le ralenti est court")
 	p1.position = Vector2(640, 2000)
 	await step(2)
-	check(not p1.weapon_away and p1.weapon_counters == 0 and p1.heavy_kind() == WeaponStats.Heavy.DASH,
-		"Arme cassée : une neuve revient à la prochaine vie perdue")
+	check(p1.weapon_away and p1.is_weapon_broken() and p1.heavy_kind() == WeaponStats.Heavy.SWING,
+		"Arme cassée : perdre une vie ne la rend pas")
 	# 18d) Marteau : le coup léger projette bien plus loin ; la lourde fait une onde de choc au sol
 	GameSetup.player_weapons = [GameSetup.WEAPONS[2], GameSetup.WEAPONS[0]]
 	await new_game()
@@ -1701,16 +1701,20 @@ func _ready() -> void:
 			break
 	check(not p1.weapon_away and game.projectiles.is_empty() and is_equal_approx(p1.stats.attack_reach, base.attack_reach * spear_weapon.light_reach_mult),
 		"Lance : on la ramasse en passant dessus")
-	# 18f) Lance lancée puis chute dans le vide : on réapparaît avec sa lance
+	# 18f) Lance lancée puis perdue : on reste à mains nues, même en perdant une vie
 	p1.input_source = Scripted.new(func(s, f):
 		s.heavy_pressed = f == 2
 		s.heavy_held = f >= 2 and f < 6)
 	p1._attack_cooldown_timer = 0.0
 	await step(14)
 	check(p1.weapon_away, "Lance : relancée")
+	game.projectiles[0].position = Vector2(640, 5000)
+	await step(1)
+	check(p1.weapon_away and game.projectiles.is_empty(), "Lance : sortie de la map, elle est perdue (on reste à mains nues)")
 	p1.position = Vector2(640, 2000)
 	await step(2)
-	check(not p1.weapon_away and game.projectiles.is_empty(), "Lance : tombé de la map, on réapparaît avec sa lance")
+	check(p1.weapon_away and game.projectiles.is_empty(), "Lance : perdre une vie ne la rend pas")
+	p1.weapon_away = false
 	# 18g) Lance lancée contrée : un coup dessus la fait retomber (plus courte), 3 contres la cassent
 	p1.input_source = Scripted.new(func(s, f): pass)
 	p2.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 3)
@@ -1746,8 +1750,8 @@ func _ready() -> void:
 		"Lance cassée : on reste à mains nues")
 	p1.position = Vector2(640, 2000)
 	await step(2)
-	check(not p1.weapon_away and p1.weapon_counters == 0 and is_equal_approx(p1.stats.attack_reach, base.attack_reach * spear_weapon.light_reach_mult),
-		"Lance cassée : une lance neuve revient à la prochaine vie perdue")
+	check(p1.weapon_away and p1.is_weapon_broken() and is_equal_approx(p1.stats.attack_reach, base.attack_reach),
+		"Lance cassée : perdre une vie ne la rend pas")
 	# 18h) Contrer 2 fois avec le coup léger de son arme la répare d'un cran (pas au-delà de 100 %)
 	GameSetup.player_weapons = [GameSetup.WEAPONS[1], GameSetup.WEAPONS[0]]
 	await new_game()
@@ -1812,7 +1816,7 @@ func _ready() -> void:
 	await step(2)
 	check(p1.weapon_away and game.projectiles.size() == 1, "Arme projetée : on ne la rattrape pas dans la seconde")
 	game._return_weapon(p1)
-	check(not p1.weapon_away and game.projectiles.is_empty(), "Arme projetée : elle revient si on tombe de la map")
+	check(not p1.weapon_away and game.projectiles.is_empty(), "Arme projetée : ramassée, on l'a de nouveau en main")
 	game.gauge.points = CounterGauge.MAX_POINTS
 	game._knock_weapon(p1, Vector2.LEFT)
 	check(game.projectiles[0].velocity.length() > slow_speed * 2.0,
@@ -2010,6 +2014,79 @@ func _ready() -> void:
 	for pickup in game.pickups:
 		all_landed = all_landed and pickup.landed
 	check(all_landed, "Objets : ils se posent sur le décor")
+	# 19k) Physique : posé sur une plateforme qui bouge, l'objet est transporté ; elle part, il retombe ;
+	# un coup le fait valdinguer dans le sens du coup ; une grenade le souffle ; une fenêtre qui casse le lâche
+	for pickup in game.pickups.duplicate():
+		game._remove_pickup(pickup)
+	game._item_spawn_timer = 999.0
+	p1.take_item("pistolet"); p2.take_item("pistolet")  # mains pleines : ils ne ramassent rien
+	p1.position = Vector2(900, 540); p2.position = Vector2(1100, 540)
+	var ride := MovingPlatform.new()
+	ride.size = Vector2(200, 16); ride.travel = Vector2(300, 0); ride.period = 2.0
+	ride.position = Vector2(50, 200)
+	game.map.add_child(ride)
+	await step(1)
+	var rider: ItemPickup = game.spawn_pickup("bouclier", Vector2(ride.position.x, 120))
+	for i in 60:
+		await step(1)
+		if rider.landed:
+			break
+	var gap := rider.position.x - ride.position.x
+	await step(20)
+	check(rider.landed and ride.position.x > 120.0 and absf(rider.position.x - ride.position.x - gap) < 4.0 and absf(rider.position.y - 179.0) < 3.0,
+		"Objets : posé sur une plateforme qui bouge, il est transporté (écart %.1f)" % (rider.position.x - ride.position.x - gap))
+	ride.queue_free()
+	await step(10)
+	check(not rider.landed and rider.position.y > 185.0, "Objets : la plateforme partie, il retombe")
+	for i in 90:
+		await step(1)
+		if rider.landed:
+			break
+	check(rider.landed, "Objets : il se repose plus bas")
+	p1.position = rider.position + Vector2(-50, 0)
+	p1._invincible_timer = 0.0
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	check(not rider.landed and rider.velocity.x > 500.0 and rider.velocity.y < 0.0, "Objets : un coup le fait valdinguer dans le sens du coup (vx %.0f)" % rider.velocity.x)
+	var light_speed := rider.velocity.length()
+	await step(1)
+	check(rider.velocity.length() < light_speed * 1.2, "Objets : le même coup ne le refrappe pas à chaque frame")
+	await step(120)
+	game._explode(rider.position + Vector2(60, 10))
+	check(rider.velocity.x < -300.0 and rider.velocity.y < 0.0, "Objets : une grenade le souffle")
+	await step(120)
+	var pane := BreakableWindow.new()
+	pane.size = Vector2(120, 20)
+	pane.position = Vector2(150, 200)
+	game.map.add_child(pane)
+	await step(1)
+	for pickup in game.pickups.duplicate():
+		game._remove_pickup(pickup)
+	rider = game.spawn_pickup("bouclier", Vector2(150, 150))
+	await step(40)
+	check(rider.landed and absf(rider.position.y - 177.0) < 3.0, "Objets : il se pose sur une fenêtre")
+	pane.smash()
+	await step(10)
+	check(not rider.landed and rider.position.y > 185.0, "Objets : la fenêtre casse, il tombe")
+	# ... pareil pour une arme qui traîne par terre
+	var lying := Projectile.new()
+	lying.kind = "arme"; lying.state = Projectile.State.DROPPED; lying.length = 40.0; lying.color = Color.RED
+	lying.position = Vector2(700, 400)
+	game._add_projectile(lying)
+	for i in 90:
+		await step(1)
+		if lying.state == Projectile.State.STUCK:
+			break
+	check(lying.state == Projectile.State.STUCK, "Arme par terre : elle se pose")
+	p1.position = lying.position + Vector2(50, -20)
+	p1._attack_cooldown_timer = 0.0
+	light_now(p1, Vector2.LEFT)
+	await step(1)
+	check(lying.state == Projectile.State.DROPPED and lying.velocity.x < -500.0, "Arme par terre : un coup la fait valdinguer (vx %.0f)" % lying.velocity.x)
+	lying.position = Vector2(700, 3000)
+	await step(1)
+	check(not lying in game.projectiles, "Arme par terre : sortie de la map, elle est perdue")
+	p1.item = ""; p2.item = ""
 
 	# 17) Le toit de l'Arène (le labo) : on ne le traverse pas par en dessous ; on y monte par l'échelle
 	# (à gauche, très rapide, on est éjecté en haut) ou par l'ascenseur (à droite)

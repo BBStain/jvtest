@@ -79,7 +79,7 @@ const KATANA_DASH_REACH := 0.8          ## la lame dépasse du perso de 0,8 fois
 const SLAM_WAVE_TIME := 0.12            ## marteau : durée de l'onde de choc après l'arc
 const SLAM_WAVE_REACH := 150.0          ## ... jusqu'où elle va de chaque côté (x1,6 à pleine charge)
 const SLAM_WAVE_RADIUS := 14.0          ## ... sa hauteur (de chaque côté du sol)
-const WEAPON_MAX_COUNTERS := 3         ## lourde d'une arme contrée 3 fois : arme cassée jusqu'à la prochaine vie perdue
+const WEAPON_MAX_COUNTERS := 3         ## lourde d'une arme contrée 3 fois : arme cassée pour de bon
 const WEAPON_SHRINK := 0.2              ## chaque contre rapetisse l'arme de 20 % (100 %, 80 %, 60 %)
 const WEAPON_REPAIR_COUNTERS := 2       ## contrer 2 fois avec le coup léger de son arme la répare d'un cran
 const WEAPON_REPAIR_FLASH := 0.5        ## arme réparée : un anneau de sa couleur apparaît ce temps
@@ -811,7 +811,7 @@ func weapon_length() -> float:
 
 
 ## La lourde de notre arme a été contrée : l'arme rapetisse, ou casse au WEAPON_MAX_COUNTERS-ième
-## contre (mains nues jusqu'à la prochaine vie perdue). Renvoie true si elle vient de casser.
+## contre (mains nues : il faut trouver une autre arme). Renvoie true si elle vient de casser.
 ## À mains nues (ou lance lancée et pas en main) : rien ne s'use.
 func weapon_countered() -> bool:
 	if weapon.is_bare_hands() or is_weapon_broken():
@@ -1208,10 +1208,6 @@ func _lose_life() -> void:
 	_stun_timer = 0.0
 	_invincible_timer = INVINCIBLE_TIME
 	show_lives()
-	if is_weapon_broken():
-		weapon_counters = 0  # arme cassée : une neuve revient à la vie suivante
-		weapon_away = false
-		_repair_counters = 0
 	if lives <= 0:
 		_leave_vine()
 		eliminated = true
