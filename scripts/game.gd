@@ -798,8 +798,7 @@ func _feet_to_center(feet: Vector2, stats: CharacterStats) -> Vector2:
 func _check_blast_zone() -> void:
 	for fighter in fighters:
 		if not fighter.eliminated and not map.blast_zone.has_point(fighter.global_position):
-			fighter.fall_out(_feet_to_center(map.respawn_position(), fighter.stats))
-			_return_weapon(fighter)  # on réapparaît avec son arme
+			fighter.fall_out(_feet_to_center(map.respawn_position(), fighter.stats))  # sans rendre l'arme perdue
 
 
 func _check_end_of_match() -> void:
@@ -871,7 +870,7 @@ func _resolve_projectiles() -> void:
 func _resolve_spear(projectile: Projectile) -> void:
 	var thrower: Fighter = fighters[projectile.owner_index]
 	if not map.blast_zone.has_point(projectile.position):
-		_remove_projectile(projectile)  # sortie de la map : perdue (elle revient à la prochaine vie perdue)
+		_remove_projectile(projectile)  # sortie de la map : perdue (il faudra trouver une autre arme)
 		return
 	if projectile.state != Projectile.State.FLYING:
 		if projectile.kind == "arme" and projectile.age < KNOCKED_PICKUP_DELAY:

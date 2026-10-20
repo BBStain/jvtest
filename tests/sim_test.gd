@@ -1631,8 +1631,8 @@ func _ready() -> void:
 	check(game._break_focus.is_empty() and Engine.time_scale > 0.99, "Arme cassée : le ralenti est court")
 	p1.position = Vector2(640, 2000)
 	await step(2)
-	check(not p1.weapon_away and p1.weapon_counters == 0 and p1.heavy_kind() == WeaponStats.Heavy.DASH,
-		"Arme cassée : une neuve revient à la prochaine vie perdue")
+	check(p1.weapon_away and p1.is_weapon_broken() and p1.heavy_kind() == WeaponStats.Heavy.SWING,
+		"Arme cassée : perdre une vie ne la rend pas")
 	# 18d) Marteau : le coup léger projette bien plus loin ; la lourde fait une onde de choc au sol
 	GameSetup.player_weapons = [GameSetup.WEAPONS[2], GameSetup.WEAPONS[0]]
 	await new_game()
@@ -1701,7 +1701,7 @@ func _ready() -> void:
 			break
 	check(not p1.weapon_away and game.projectiles.is_empty() and is_equal_approx(p1.stats.attack_reach, base.attack_reach * spear_weapon.light_reach_mult),
 		"Lance : on la ramasse en passant dessus")
-	# 18f) Lance lancée puis chute dans le vide : on réapparaît avec sa lance
+	# 18f) Lance lancée puis perdue : on reste à mains nues, même en perdant une vie
 	p1.input_source = Scripted.new(func(s, f):
 		s.heavy_pressed = f == 2
 		s.heavy_held = f >= 2 and f < 6)
@@ -1713,7 +1713,8 @@ func _ready() -> void:
 	check(p1.weapon_away and game.projectiles.is_empty(), "Lance : sortie de la map, elle est perdue (on reste à mains nues)")
 	p1.position = Vector2(640, 2000)
 	await step(2)
-	check(not p1.weapon_away and game.projectiles.is_empty(), "Lance : tombé de la map, on réapparaît avec sa lance")
+	check(p1.weapon_away and game.projectiles.is_empty(), "Lance : perdre une vie ne la rend pas")
+	p1.weapon_away = false
 	# 18g) Lance lancée contrée : un coup dessus la fait retomber (plus courte), 3 contres la cassent
 	p1.input_source = Scripted.new(func(s, f): pass)
 	p2.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 3)
@@ -1749,8 +1750,8 @@ func _ready() -> void:
 		"Lance cassée : on reste à mains nues")
 	p1.position = Vector2(640, 2000)
 	await step(2)
-	check(not p1.weapon_away and p1.weapon_counters == 0 and is_equal_approx(p1.stats.attack_reach, base.attack_reach * spear_weapon.light_reach_mult),
-		"Lance cassée : une lance neuve revient à la prochaine vie perdue")
+	check(p1.weapon_away and p1.is_weapon_broken() and is_equal_approx(p1.stats.attack_reach, base.attack_reach),
+		"Lance cassée : perdre une vie ne la rend pas")
 	# 18h) Contrer 2 fois avec le coup léger de son arme la répare d'un cran (pas au-delà de 100 %)
 	GameSetup.player_weapons = [GameSetup.WEAPONS[1], GameSetup.WEAPONS[0]]
 	await new_game()
@@ -1815,7 +1816,7 @@ func _ready() -> void:
 	await step(2)
 	check(p1.weapon_away and game.projectiles.size() == 1, "Arme projetée : on ne la rattrape pas dans la seconde")
 	game._return_weapon(p1)
-	check(not p1.weapon_away and game.projectiles.is_empty(), "Arme projetée : elle revient si on tombe de la map")
+	check(not p1.weapon_away and game.projectiles.is_empty(), "Arme projetée : ramassée, on l'a de nouveau en main")
 	game.gauge.points = CounterGauge.MAX_POINTS
 	game._knock_weapon(p1, Vector2.LEFT)
 	check(game.projectiles[0].velocity.length() > slow_speed * 2.0,
