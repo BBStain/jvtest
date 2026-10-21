@@ -1756,6 +1756,26 @@ func _ready() -> void:
 	check(p1.weapon_counters == 2 and not p1.is_weapon_broken() and game.projectiles.size() == 1, "Lance contrée 2 fois : pas encore cassée")
 	game._counter_spear(spear, p2)
 	check(p1.is_weapon_broken() and game.projectiles.is_empty() and p1.weapon_away, "Lance contrée 3 fois : cassée")
+	# Contrée pointe en l'air (lancée vers le haut), elle retombe et se plante : elle ne traverse
+	# pas le sol (avant, seul le bout de devant cherchait le sol).
+	var through_floor := []
+	for angle in [-150.0, -90.0, -30.0]:
+		var dropped := Projectile.new()
+		dropped.kind = "lance" if through_floor.size() % 2 == 0 else "fleche"
+		dropped.position = Vector2(500, 520)  # entre les deux joueurs (sinon J2 la ramasse)
+		dropped.rotation = deg_to_rad(angle)
+		dropped.velocity = Vector2(900, 0).rotated(dropped.rotation)
+		game._add_projectile(dropped)
+		dropped.drop()
+		for i in 120:
+			await step(1)
+			if not is_instance_valid(dropped) or dropped.state == Projectile.State.STUCK:
+				break
+		var ok := is_instance_valid(dropped) and dropped.state == Projectile.State.STUCK and dropped.tip().y < 575.0
+		through_floor.append(ok)
+		if is_instance_valid(dropped):
+			game._remove_projectile(dropped)
+	check(not false in through_floor, "Lance contrée : pointe en l'air, elle retombe sans traverser le sol (%s)" % [through_floor])
 	p1._attack_cooldown_timer = 0.0
 	p1.get_weapon_back()
 	check(p1.weapon_away and p1.heavy_kind() == WeaponStats.Heavy.SWING and is_equal_approx(p1.stats.attack_reach, base.attack_reach),

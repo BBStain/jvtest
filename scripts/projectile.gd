@@ -52,7 +52,7 @@ var body := LooseBody.new()             ## arme posée ou plantée : elle suit c
 var stuck_vine: Vine                    ## grenade collée à une liane...
 var stuck_on_vine := 0.0                ## ... à cette distance de son point d'accroche
 var _stuck_normal := Vector2.UP         ## grenade collée : le côté d'où elle est arrivée
-var tumbling := false                   ## lance frappée par terre : elle vole pointe devant et se replante
+var tumbling := false                   ## lance frappée ou contrée : elle vole pointe devant et se replante
 var hit_lock := 0.0                     ## vient d'être frappée : le même coup ne la refrappe pas
 var simulate := true                    ## false chez un copain en ligne : il ne fait qu'afficher
 
@@ -205,7 +205,7 @@ func _tick_knocked(delta: float) -> void:
 func launch(new_velocity: Vector2) -> void:
 	velocity = new_velocity
 	state = State.DROPPED
-	tumbling = kind == "lance"
+	tumbling = kind in ["lance", "fleche"]
 	body.launch()
 	hit_lock = Game.LOOSE_HIT_LOCK
 
@@ -228,9 +228,13 @@ func tail() -> Vector2:
 
 
 ## La lance a touché quelqu'un (ou un bouclier) : elle rebondit un peu et retombe, sans danger.
+## Elle retombe pointe devant (comme frappée par terre) : le rayon qui cherche le sol part de son
+## milieu vers sa pointe, donc une lance qui retombait pointe en l'air passait à travers le sol.
 func drop() -> void:
 	state = State.DROPPED
 	velocity = Vector2(-velocity.x * 0.15, -320.0)
+	tumbling = true
+	rotation = velocity.angle()
 
 
 func net_state() -> Array:
