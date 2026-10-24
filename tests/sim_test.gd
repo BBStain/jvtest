@@ -951,7 +951,7 @@ func _ready() -> void:
 		await step(1)
 		check(description.get_line_count() <= 3, "Contenu : la description de %s tient en 3 lignes (%d)" % [c.display_name, description.get_line_count()])
 		description.queue_free()
-	for path in GameSetup.MAPS:
+	for path in GameSetup.MAPS + [GameSetup.VILLE_MAP]:
 		var m := GameSetup.make_map(path)
 		var problems: Array[String] = []
 		if m == null:
@@ -1000,6 +1000,60 @@ func _ready() -> void:
 		await step(180)
 		var weapons_landed := spawned.filter(func(w): return is_instance_valid(w) and w in game.projectiles and w.state == Projectile.State.STUCK).size()
 		check(weapons_landed == spawned.size(), "Contenu : sur %s, les armes apparues se posent (%d/%d)" % [path.get_file(), weapons_landed, spawned.size()])
+	check(not GameSetup.VILLE_MAP in GameSetup.all_maps(), "Contenu : la Ville reste cachée (pas dans le choix de la map sans ?ville)")
+	# Ville : dans un immeuble, chaque perso monte d'un étage avec saut + double saut
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	for c_path in GameSetup.CHARACTERS:
+		GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}]]
+		GameSetup.player_characters = [c_path, c_path]
+		await new_game()
+		var climber: Fighter = game.fighters[0]
+		climber.input_source = Scripted.new(func(s, f):
+			s.jump_held = f >= 30 and f < 90
+			s.jump_pressed = f == 30 or f == 48)
+		game.fighters[1].input_source = Scripted.new(func(s, f): pass)
+		climber.global_position = Vector2(Ville.building_center(10), -climber.stats.body_size.y / 2.0)
+		climber.velocity = Vector2.ZERO
+		await step(140)
+		if c_path == GameSetup.CHARACTERS[0]:
+			await shot("ville_etage")
+		var feet := climber.global_position.y + climber.stats.body_size.y / 2.0
+		check(climber.is_on_floor() and absf(feet + Ville.FLOOR_HEIGHT) < 4.0,
+			"Ville : %s monte d'un étage avec saut + double saut (pieds à %d)" % [c_path.get_file(), feet])
+	# Ville : les murs se cassent à coups d'attaque lourde (3 PV sur 6 par coup), et ne reviennent pas
+	var wall_x := Ville.building_lefts()[10] + Ville.BUILDINGS[10][0] * Ville.BLOCK - Ville.BLOCK / 2.0
+	var wall_block: CityBlock = null
+	for window in game.map.windows():
+		if window is CityBlock and window.rect().has_point(Vector2(wall_x, -Ville.FLOOR_HEIGHT - Ville.BLOCK / 2.0)):
+			wall_block = window
+	var breaker: Fighter = game.fighters[0]
+	breaker.global_position = Vector2(wall_x - Ville.BLOCK / 2.0 - 40.0, -Ville.FLOOR_HEIGHT - breaker.stats.body_size.y / 2.0)
+	breaker.velocity = Vector2.ZERO
+	breaker.input_source = Scripted.new(func(s, f):
+		s.stick = Vector2(1, 0) if f < 3 else Vector2.ZERO
+		s.heavy_pressed = f == 20 or f == 90 or f == 160
+		s.heavy_held = s.heavy_pressed)
+	await step(60)
+	var after_one := wall_block.hp if wall_block != null else -1
+	await step(160)
+	check(wall_block != null and after_one == Ville.BLOCK_HP - CityBlock.HEAVY_DAMAGE and wall_block.broken,
+		"Ville : un mur s'abîme puis se casse à coups d'attaque lourde (PV après 1 coup : %d, cassé : %s)" % [after_one, wall_block.broken if wall_block else false])
+	await shot("ville_mur_casse")
+	await step(60 * 20)
+	check(wall_block != null and wall_block.broken, "Ville : un bloc cassé ne revient pas (la ville ne se répare pas)")
+	# ... et une grenade qui explose contre un immeuble abîme les blocs autour
+	var near: Array = game.map.windows().filter(func(w): return w is CityBlock and not w.broken \
+		and w.rect().get_center().distance_to(Vector2(Ville.building_center(9), -Ville.FLOOR_HEIGHT * 3.0)) < 150.0)
+	game.map.smash_windows_in(Vector2(Ville.building_center(9), -Ville.FLOOR_HEIGHT * 3.0), 150.0)
+	check(not near.is_empty() and near.all(func(w): return w.hp == Ville.BLOCK_HP - CityBlock.EXPLOSION_DAMAGE),
+		"Ville : une explosion abîme les blocs dans son rayon (%d blocs)" % near.size())
+	# Ville : le parc d'attractions et le parc arboré (captures)
+	if shot_dir != "":
+		for place in [["ville_fete_foraine", -7700.0, -6600.0], ["ville_parc", 6600.0, 8300.0]]:
+			game.fighters[0].global_position = Vector2(place[1], -300.0)
+			game.fighters[1].global_position = Vector2(place[2], -300.0)
+			await step(120)
+			await shot(place[0])
 	GameSetup.map_path = GameSetup.MAPS[0]
 	GameSetup.player_devices = []
 	GameSetup.player_characters = []

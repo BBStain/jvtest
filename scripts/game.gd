@@ -873,7 +873,10 @@ func _resolve_hits() -> void:
 		for window in map.windows():  # un coup casse les fenêtres qu'il frappe
 			if not window.broken and _segment_hits_rect(
 					attacker.attack_start(), attacker.attack_center(), attacker.attack_radius(), window.rect()):
-				window.smash()
+				if window is CityBlock:  # un bloc de la Ville : une lourde l'abîme plus
+					(window as CityBlock).hit(CityBlock.HEAVY_DAMAGE if attacker.is_heavy_attack() else 1)
+				else:
+					window.smash()
 		reached[attacker] = []
 		for victim in fighters:
 			if victim != attacker and victim.can_be_hit() and _segment_hits_rect(
