@@ -951,7 +951,7 @@ func _ready() -> void:
 		await step(1)
 		check(description.get_line_count() <= 3, "Contenu : la description de %s tient en 3 lignes (%d)" % [c.display_name, description.get_line_count()])
 		description.queue_free()
-	for path in GameSetup.MAPS:
+	for path in GameSetup.MAPS + [GameSetup.VILLE_MAP]:
 		var m := GameSetup.make_map(path)
 		var problems: Array[String] = []
 		if m == null:
@@ -1000,6 +1000,26 @@ func _ready() -> void:
 		await step(180)
 		var weapons_landed := spawned.filter(func(w): return is_instance_valid(w) and w in game.projectiles and w.state == Projectile.State.STUCK).size()
 		check(weapons_landed == spawned.size(), "Contenu : sur %s, les armes apparues se posent (%d/%d)" % [path.get_file(), weapons_landed, spawned.size()])
+	check(not GameSetup.VILLE_MAP in GameSetup.all_maps(), "Contenu : la Ville reste cachée (pas dans le choix de la map sans ?ville)")
+	# Ville : dans un immeuble, chaque perso monte d'un étage avec saut + double saut
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	for c_path in GameSetup.CHARACTERS:
+		GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}]]
+		GameSetup.player_characters = [c_path, c_path]
+		await new_game()
+		var climber: Fighter = game.fighters[0]
+		climber.input_source = Scripted.new(func(s, f):
+			s.jump_held = f >= 30 and f < 90
+			s.jump_pressed = f == 30 or f == 48)
+		game.fighters[1].input_source = Scripted.new(func(s, f): pass)
+		climber.global_position = Vector2(Ville.building_center(10), -climber.stats.body_size.y / 2.0)
+		climber.velocity = Vector2.ZERO
+		await step(140)
+		if c_path == GameSetup.CHARACTERS[0]:
+			await shot("ville_etage")
+		var feet := climber.global_position.y + climber.stats.body_size.y / 2.0
+		check(climber.is_on_floor() and absf(feet + Ville.FLOOR_HEIGHT) < 4.0,
+			"Ville : %s monte d'un étage avec saut + double saut (pieds à %d)" % [c_path.get_file(), feet])
 	GameSetup.map_path = GameSetup.MAPS[0]
 	GameSetup.player_devices = []
 	GameSetup.player_characters = []
