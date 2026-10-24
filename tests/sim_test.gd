@@ -1021,13 +1021,13 @@ func _ready() -> void:
 		check(climber.is_on_floor() and absf(feet + Ville.FLOOR_HEIGHT) < 4.0,
 			"Ville : %s monte d'un étage avec saut + double saut (pieds à %d)" % [c_path.get_file(), feet])
 	# Ville : les murs se cassent à coups d'attaque lourde (3 PV sur 6 par coup), et ne reviennent pas
-	var wall_x := Ville.building_lefts()[10] + Ville.BUILDINGS[10][0] * Ville.BLOCK - Ville.BLOCK / 2.0
+	var wall_x := Ville.building_lefts()[9] + Ville.BUILDINGS[9][0] * Ville.BLOCK - Ville.BLOCK / 2.0
 	var wall_block: CityBlock = null
 	for window in game.map.windows():
-		if window is CityBlock and window.rect().has_point(Vector2(wall_x, -Ville.FLOOR_HEIGHT - Ville.BLOCK / 2.0)):
+		if window is CityBlock and window.rect().has_point(Vector2(wall_x, -2.0 * Ville.FLOOR_HEIGHT - Ville.BLOCK / 2.0)):
 			wall_block = window
 	var breaker: Fighter = game.fighters[0]
-	breaker.global_position = Vector2(wall_x - Ville.BLOCK / 2.0 - 40.0, -Ville.FLOOR_HEIGHT - breaker.stats.body_size.y / 2.0)
+	breaker.global_position = Vector2(wall_x - Ville.BLOCK / 2.0 - 40.0, -2.0 * Ville.FLOOR_HEIGHT - breaker.stats.body_size.y / 2.0)
 	breaker.velocity = Vector2.ZERO
 	breaker.input_source = Scripted.new(func(s, f):
 		s.stick = Vector2(1, 0) if f < 3 else Vector2.ZERO
@@ -1047,6 +1047,59 @@ func _ready() -> void:
 	game.map.smash_windows_in(Vector2(Ville.building_center(9), -Ville.FLOOR_HEIGHT * 3.0), 150.0)
 	check(not near.is_empty() and near.all(func(w): return w.hp == Ville.BLOCK_HP - CityBlock.EXPLOSION_DAMAGE),
 		"Ville : une explosion abîme les blocs dans son rayon (%d blocs)" % near.size())
+	# Ville : écroulement. Casser un seul mur du rez-de-chaussée ne fait rien tomber...
+	await new_game()
+	var collapse := game.map.get_node("Ecroulement") as CityCollapse
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	var ground_walls := func(index: int, side: int) -> Array:
+		var left: float = Ville.building_lefts()[index]
+		var right: float = left + Ville.BUILDINGS[index][0] * Ville.BLOCK
+		var x: float = left + Ville.BLOCK / 2.0 if side < 0 else right - Ville.BLOCK / 2.0
+		return collapse.blocks.filter(func(b: CityBlock) -> bool:
+			return not b.one_way and b.rect().has_point(Vector2(x, b.rect().get_center().y)) and b.rect().position.y >= -Ville.FLOOR_HEIGHT - 1.0)
+	var in_building := func(index: int) -> Array:
+		var left: float = Ville.building_lefts()[index]
+		var right: float = left + Ville.BUILDINGS[index][0] * Ville.BLOCK
+		return collapse.blocks.filter(func(b: CityBlock) -> bool:
+			return not b.broken and b.rect().get_center().x > left and b.rect().get_center().x < right)
+	var before_count: int = in_building.call(1).size()
+	for b in ground_walls.call(1, -1):
+		b.hit(Ville.BLOCK_HP)
+	await step(30)
+	check(collapse.chunks.is_empty() and in_building.call(1).size() == before_count - 3,
+		"Ville : un seul mur coupé, l'immeuble tient (morceaux qui tombent : %d)" % collapse.chunks.size())
+	# ... couper les deux murs fait tomber tout le haut d'un bloc : il tremble, tombe, fait mal et éclate
+	var victim: Fighter = game.fighters[1]
+	victim.global_position = Vector2(Ville.building_center(0), -victim.stats.body_size.y / 2.0)
+	victim.velocity = Vector2.ZERO
+	for b in ground_walls.call(0, -1) + ground_walls.call(0, 1):
+		b.hit(Ville.BLOCK_HP)
+	await step(3)
+	var falling := collapse.chunks.size()
+	var chunk_size: int = collapse.chunks[0].rects.size() if falling > 0 else 0
+	var warned: bool = falling > 0 and collapse.chunks[0].state == FallingChunk.State.WARN
+	await step(20)
+	await shot("ville_ecroulement")
+	await step(130)
+	check(falling == 1 and chunk_size >= 20 and warned,
+		"Ville : les deux murs coupés, le haut tombe d'un seul morceau qui tremble d'abord (%d morceau(x), %d blocs)" % [falling, chunk_size])
+	check(in_building.call(0).is_empty() and collapse.chunks.is_empty(), "Ville : le morceau s'écrase et éclate (blocs restants : %d)" % in_building.call(0).size())
+	check(victim.is_stunned() or victim.lives < GameSetup.lives, "Ville : celui qui est dessous est touché (sonné : %s)" % victim.is_stunned())
+	# ... et un blocage l'arrête : il éclate sur le bouclier, qui craque fort
+	await step(200)
+	var blocker: Fighter = game.fighters[1]
+	blocker.global_position = Vector2(Ville.building_center(2), -blocker.stats.body_size.y / 2.0)
+	blocker.velocity = Vector2.ZERO
+	blocker.input_source = Scripted.new(func(s, f): s.block_held = true)
+	await step(30)
+	var shield_before := blocker.shield
+	var stunned_before := blocker.is_stunned()
+	for b in ground_walls.call(2, -1) + ground_walls.call(2, 1):
+		b.hit(Ville.BLOCK_HP)
+	await step(120)
+	check(not stunned_before and not blocker.is_stunned() and blocker.shield == shield_before - Game.CHUNK_SHIELD_DAMAGE,
+		"Ville : un gros morceau sur un bouclier éclate et le bouclier craque (%d -> %d)" % [shield_before, blocker.shield])
 	# Ville : le parc d'attractions et le parc arboré (captures)
 	if shot_dir != "":
 		for place in [["ville_fete_foraine", -7700.0, -6600.0], ["ville_parc", 6600.0, 8300.0]]:
