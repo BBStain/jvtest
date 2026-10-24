@@ -17,6 +17,7 @@ signal weapon_tossed(fighter: Fighter)  ## RB : on lance son arme (sans dégâts
 ## Un objet utilisé (balle tirée, grenade lancée ou lâchée) : game.gd crée ce qui vole.
 ## power : 0 à 1 (distance de la grenade) ; fuse : temps restant avant que la grenade explose.
 signal item_used(fighter: Fighter, kind: String, direction: Vector2, power: float, fuse: float)
+signal item_tossed(fighter: Fighter, kind: String, ammo: int)  ## RB avec une arme à 2 mains : game.gd la fait voler (objet par terre)
 signal grapple_parried(fighter: Fighter, by: Fighter)  ## notre grappin arrive sur un blocage parfait
 signal ultimate_used(fighter: Fighter)  ## X + Y avec la jauge d'ultime pleine : game.gd lance l'attaque ultime du perso
 
@@ -99,6 +100,15 @@ const ARROWS_MAX := 5                   ## arc : 5 flèches ; il faut aller les 
 # --- Objets ramassés sur la map (un seul à la fois, utilisé avec RT ; voir item_pickup.gd) ---
 const PISTOL_AMMO := 5                  ## balles du pistolet (une par appui)
 const PISTOL_COOLDOWN := 0.18           ## temps minimum entre deux balles
+## Ville : fusil d'assaut et lance-roquette sont des objets à 2 MAINS : tant qu'on les tient, plus
+## d'attaque X / Y (ni d'ultime) ; RB les jette par terre pour reprendre son arme. Vides, ils disparaissent.
+const TWO_HANDED_ITEMS := ["fusil", "lance_roquette"]
+const RIFLE_AMMO := 30                  ## fusil d'assaut : 30 balles, par rafales de 3 (RT)
+const RIFLE_BURST := 3
+const RIFLE_GAP := 0.07                 ## entre deux balles d'une rafale
+const RIFLE_COOLDOWN := 0.4             ## entre deux rafales
+const RIFLE_BULLET_SPEED := 1.25        ## ses balles vont 1,25 fois plus vite que celles du pistolet
+const LAUNCHER_BLAST := 1.8             ## lance-roquette : UNE roquette, plus violente qu'une roquette de mecha chargée à fond (1)
 const GRENADE_FUSE := 3.0               ## la grenade explose 3 s après avoir été dégoupillée (RT appuyé)
 const GRENADE_FULL_HOLD := 1.0          ## RT gardé ce temps : la grenade part le plus loin possible
 const ITEM_SHIELD_TIME := 5.0           ## le bouclier ramassé reste levé 5 s
@@ -307,6 +317,8 @@ var item := ""                          ## l'objet ramassé : "", "pistolet", "g
 var item_ammo := 0                      ## balles qui restent dans le pistolet (ou lancers du grappin)
 var item_shield_timer := 0.0            ## bouclier ramassé levé encore ce temps
 var _item_cooldown := 0.0
+var _rifle_burst_left := 0               ## balles de la rafale en cours qui restent à partir
+var _rifle_gap_timer := 0.0              ## avant la balle suivante de la rafale
 var _grenade_fuse := -1.0               ## grenade dégoupillée en main : temps avant l'explosion (-1 = non)
 var _grenade_hold := 0.0                ## depuis combien de temps RT est gardé (distance du lancer)
 var _item_flash_timer := 0.0            ## > 0 juste après avoir ramassé un objet (ou pris une vie)
@@ -632,13 +644,20 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 
 
 ## On ramasse un objet (seulement si on n'en a pas déjà un).
-func take_item(kind: String) -> bool:
+## "ammo" : ce qu'il reste dans une arme à 2 mains jetée par un autre (-1 = neuve).
+func take_item(kind: String, ammo := -1) -> bool:
 	if item != "" or mecha != null:
 		return false
 	item = kind
 	item_ammo = PISTOL_AMMO if kind == "pistolet" else 0
 	if kind == "grappin":
 		item_ammo = GRAPPLE_USES
+	elif kind == "fusil":
+		item_ammo = RIFLE_AMMO
+	elif kind == "lance_roquette":
+		item_ammo = 1
+	if ammo >= 0 and kind in TWO_HANDED_ITEMS:
+		item_ammo = ammo
 	_item_flash_timer = ITEM_FLASH_TIME
 	_item_flash_kind = kind
 	return true
@@ -657,6 +676,12 @@ func _tick_item(input: InputState, delta: float) -> void:
 			_release_grenade(Vector2.ZERO, 0.0)  # gardée trop longtemps : elle explose en main
 		elif not input.item_held:
 			_release_grenade(_item_direction(), clampf(_grenade_hold / GRENADE_FULL_HOLD, 0.0, 1.0))
+		return
+	if _rifle_burst_left > 0:
+		# Rafale en cours : les balles partent seules, l'une après l'autre.
+		_rifle_gap_timer -= delta
+		if _rifle_gap_timer <= 0.0:
+			_fire_rifle_bullet()
 		return
 	if not input.item_pressed or _blocking or is_dashing():
 		return
@@ -684,6 +709,16 @@ func _tick_item(input: InputState, delta: float) -> void:
 				_grapple_tap = false
 				_grapple_time = 0.0
 				_grapple_dist = 0.0
+		"fusil":
+			if _item_cooldown <= 0.0:
+				_item_cooldown = RIFLE_COOLDOWN
+				_rifle_burst_left = mini(RIFLE_BURST, item_ammo)
+				_fire_rifle_bullet()
+		"lance_roquette":
+			if _item_cooldown <= 0.0:
+				item = ""
+				item_ammo = 0
+				item_used.emit(self, "roquette", _item_direction(), LAUNCHER_BLAST, 0.0)
 		"balise":
 			item = ""
 			item_used.emit(self, "balise", Vector2.ZERO, 0.0, 0.0)  # game.gd appelle le mecha
@@ -694,6 +729,21 @@ func _tick_item(input: InputState, delta: float) -> void:
 				_item_flash_timer = ITEM_FLASH_TIME
 				_item_flash_kind = "vie"
 				show_lives()
+
+
+func _fire_rifle_bullet() -> void:
+	_rifle_burst_left -= 1
+	_rifle_gap_timer = RIFLE_GAP
+	item_ammo -= 1
+	if item_ammo <= 0:
+		item = ""  # chargeur vide : le fusil disparaît, on retrouve son arme
+		_rifle_burst_left = 0
+	item_used.emit(self, "balle", _item_direction(), RIFLE_BULLET_SPEED, 0.0)
+
+
+## Une arme à 2 mains (fusil d'assaut, lance-roquette) : plus d'attaque X / Y tant qu'on la tient.
+func has_two_handed_item() -> bool:
+	return item in TWO_HANDED_ITEMS
 
 
 ## Grappin (RT) : le crochet file vers l'adversaire le plus proche. S'il l'accroche :
@@ -1076,7 +1126,7 @@ func _try_start_attack(heavy: bool) -> void:
 ## X + Y : la jauge d'ultime est pleine et on n'est pas occupé. On peut la lancer pendant qu'un coup
 ## léger se prépare ou qu'une lourde se charge (X puis Y, ou Y puis X, un peu décalés) : ce coup est annulé.
 func can_use_ultimate() -> bool:
-	return is_ultimate_ready() and not eliminated and not is_dashing() and not is_invincible() \
+	return is_ultimate_ready() and not eliminated and not has_two_handed_item() and not is_dashing() and not is_invincible() \
 		and not _blocking and not is_stunned() and not is_ultimate_under_way() \
 		and (_heavy_charging or (not _attack_heavy and is_attacking() and _attack_time < stats.light_startup()) \
 			or (not is_attacking() and _attack_cooldown_timer <= 0.0))  # privé d'attaque (contré...) : pas d'ultime non plus
@@ -1306,6 +1356,15 @@ func get_weapon_back() -> void:
 ## RB : on lance l'arme qu'on a en main (pas pendant une attaque). Elle ne fait mal à personne ;
 ## game.gd la fait voler vers l'adversaire le plus proche.
 func _toss_weapon() -> void:
+	if has_two_handed_item():
+		# RB jette d'abord l'arme à 2 mains (avec ce qu'il reste dedans) : on retrouve son arme.
+		var kind := item
+		var ammo := item_ammo
+		item = ""
+		item_ammo = 0
+		_rifle_burst_left = 0
+		item_tossed.emit(self, kind, ammo)
+		return
 	if is_attacking() or not knock_weapon_away():
 		return
 	weapon_tossed.emit(self)
@@ -1499,7 +1558,7 @@ func attack_cooldown_left() -> float:
 
 
 func can_attack() -> bool:
-	return not eliminated and not is_dashing() and not is_invincible() and not _blocking \
+	return not eliminated and not has_two_handed_item() and not is_dashing() and not is_invincible() and not _blocking \
 		and not is_attacking() and not is_ultimate_under_way() and _attack_cooldown_timer <= 0.0
 
 
@@ -2078,6 +2137,25 @@ func _draw_item(body: Rect2) -> void:
 			draw_rect(Rect2(2.0, 3.0, 6.0, 7.0), gun_color)     # la poignée
 			for i in item_ammo:
 				draw_circle(Vector2(5.0 + i * 3.5, -5.5), 1.5, Color(1.0, 0.9, 0.5))
+			draw_set_transform(Vector2.ZERO, 0.0)
+		"fusil", "lance_roquette":
+			# Tenu à 2 mains, pointé là où le tir partira. Fusil : les balles qui restent = une barre
+			# sous le canon. Lance-roquette : un gros tube, la roquette dépasse devant.
+			var aim2 := _item_direction()
+			var side2 := signf(aim2.x) if absf(aim2.x) > 0.01 else facing
+			draw_set_transform(Vector2(side2 * body.size.x * 0.2, 0.0), aim2.angle(), Vector2(1.0, side2))
+			var two_color := ItemPickup.color_of(item)
+			if item == "fusil":
+				draw_rect(Rect2(-14.0, -4.0, 46.0, 8.0), two_color)    # le corps et le canon
+				draw_rect(Rect2(-22.0, -3.0, 9.0, 9.0), two_color)     # la crosse
+				draw_rect(Rect2(6.0, 4.0, 6.0, 9.0), two_color)        # le chargeur
+				var left := float(item_ammo) / RIFLE_AMMO
+				draw_rect(Rect2(-14.0, -8.0, 46.0 * left, 2.5), Color(1.0, 0.9, 0.5))
+			else:
+				draw_rect(Rect2(-24.0, -7.0, 52.0, 14.0), two_color)   # le tube sur l'épaule
+				draw_rect(Rect2(2.0, 7.0, 6.0, 8.0), two_color)        # la poignée
+				if item_ammo > 0:
+					draw_colored_polygon(PackedVector2Array([Vector2(28, -5), Vector2(38, 0), Vector2(28, 5)]), color)
 			draw_set_transform(Vector2.ZERO, 0.0)
 		"grenade":
 			var grenade_color := ItemPickup.color_of("grenade")
