@@ -31,6 +31,10 @@ var pose_time := 0.0                  ## depuis quand on est dans cette pose
 var heavy_weapon := "roquette"        ## "roquette" ou "laser"
 var piloted := true                   ## false : mecha vide, cockpit sans pilote
 var hover := true                     ## pose « vol » : dessiné au-dessus du sol (vitrine) ; en jeu, c'est le corps qui vole
+var gun_shot_time := -1.0             ## en jeu : depuis quand la rafale a tiré sa dernière balle (-1 = rien)
+var turret_charge := -1.0             ## en jeu : charge de la roquette, 0 à 1 (-1 = pas de charge)
+var turret_shot_time := -1.0          ## en jeu : depuis quand une roquette est partie (-1 = rien)...
+var turret_barrel := 1                ## ... et de quel canon (0, 1 ou 2)
 var flames := true                    ## pose « vol » : réacteurs allumés (false : il retombe, jambes repliées)
 var _time := 0.0
 
@@ -48,6 +52,10 @@ func set_pose(value: Pose) -> void:
 func _process(delta: float) -> void:
 	_time += delta
 	pose_time += delta
+	if gun_shot_time >= 0.0:
+		gun_shot_time = -1.0 if gun_shot_time > 0.2 else gun_shot_time + delta
+	if turret_shot_time >= 0.0:
+		turret_shot_time = -1.0 if turret_shot_time > 0.4 else turret_shot_time + delta
 	queue_redraw()
 
 
@@ -151,8 +159,8 @@ func _draw_chin_gun(mount: Vector2, body: Color) -> void:
 	var dir := _aim_dir()
 	var length := SIZE.x * 0.38
 	var thick := SIZE.y * 0.045
-	var cycle := fmod(pose_time, 0.2)
-	var firing := pose == Pose.SHOOT
+	var firing := pose == Pose.SHOOT or gun_shot_time >= 0.0
+	var cycle := fmod(pose_time, 0.2) if pose == Pose.SHOOT else gun_shot_time
 	var base := mount - (dir * 8.0 * maxf(0.0, 1.0 - cycle * 10.0) if firing else Vector2.ZERO)
 	var side := Vector2(-dir.y, dir.x) * thick * 0.8
 	var metal := body.darkened(0.5)
@@ -180,11 +188,14 @@ func _draw_turret(base: Vector2, body: Color) -> void:
 	var length := w * 0.7
 	var thick := h * 0.05
 	var t := fmod(pose_time, HEAVY_CYCLE)
-	var charging := pose == Pose.HEAVY and t < HEAVY_CHARGE
+	var charge := t / HEAVY_CHARGE if pose == Pose.HEAVY else turret_charge
+	var charging := (pose == Pose.HEAVY and t < HEAVY_CHARGE) or turret_charge >= 0.0
 	for i in BARRELS:
 		var offset := up * thick * 1.15 * (i - 1)
-		var shot_t := t - HEAVY_CHARGE - i * 0.12   # chaque canon tire 0.12 s après le précédent
-		var recoil := 12.0 * maxf(0.0, 1.0 - shot_t * 6.0) if pose == Pose.HEAVY and shot_t >= 0.0 else 0.0
+		var shot_t := t - HEAVY_CHARGE - i * 0.12   # vitrine : chaque canon tire 0.12 s après le précédent
+		if pose != Pose.HEAVY:
+			shot_t = turret_shot_time if i == turret_barrel else -1.0  # en jeu : le canon qui vient de tirer
+		var recoil := 12.0 * maxf(0.0, 1.0 - shot_t * 6.0) if shot_t >= 0.0 else 0.0
 		var start := pivot + offset - dir * recoil
 		var tip := start + dir * length
 		draw_line(start, tip, body.darkened(0.5), thick)
@@ -193,8 +204,8 @@ func _draw_turret(base: Vector2, body: Color) -> void:
 		else:
 			draw_line(tip - dir * thick * 1.2, tip, body.darkened(0.6), thick * 1.35)   # la bouche
 		if charging:
-			draw_circle(tip, thick * (0.3 + 0.7 * t / HEAVY_CHARGE), Color(glow, 0.35 + 0.4 * t / HEAVY_CHARGE))
-		if pose == Pose.HEAVY and shot_t >= 0.0 and shot_t < 0.08:
+			draw_circle(tip, thick * (0.3 + 0.7 * charge), Color(glow, 0.35 + 0.4 * charge))
+		if shot_t >= 0.0 and shot_t < 0.08:
 			draw_circle(tip + dir * thick, thick * 1.8, Color(1.0, 0.9, 0.5) if not laser else glow.lightened(0.4))
 	draw_circle(pivot, h * 0.08, body.darkened(0.3))
 	# L'antenne à l'arrière de la tourelle

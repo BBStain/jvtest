@@ -1231,6 +1231,161 @@ func _ready() -> void:
 	await step(1)
 	var beacons_after: int = game.pickups.filter(func(p): return p.kind == "balise").size()
 	check(beacons == 1 and beacons_after == 1, "Ville : une balise tombe tant qu'il y a moins de mechas que de joueurs (%d puis %d)" % [beacons, beacons_after])
+	# Ville, tests préventifs : chaque perso monte et sort ; un mecha appelé contre un immeuble ne reste
+	# pas coincé dans le mur ; appelé au-dessus du vide, il tombe et disparaît sans bug.
+	for c_path in GameSetup.CHARACTERS:
+		GameSetup.player_characters = [c_path, c_path]
+		await new_game()
+		game._beacon_timer = 1e9
+		game._item_spawn_timer = 1e9
+		var mech_rider: Fighter = game.fighters[0]
+		mech_rider.input_source = Scripted.new(func(s, f):
+			s.stick = Vector2(0.0, -1.0) if f >= 100 and f < 104 else Vector2(0.0, 1.0) if f >= 140 and f < 180 else Vector2.ZERO
+			s.jump_held = f >= 140 and f < 180)
+		game.fighters[1].input_source = Scripted.new(func(s, f): pass)
+		mech_rider.global_position = Vector2(Ville.building_center(13), Ville.roof_top(13) - mech_rider.stats.body_size.y / 2.0 - 2.0)
+		game.fighters[1].global_position = Vector2(Ville.building_center(7), Ville.roof_top(7) - 60.0)
+		await step(2)
+		var mech_ride: Mecha = game.call_mecha(mech_rider)
+		await step(120)
+		var boarded := mech_rider.is_piloting()
+		await step(150)
+		check(boarded and not mech_rider.is_piloting() and mech_rider.is_on_floor() and not mech_ride.pilot,
+			"Ville : %s monte dans le mecha puis en sort" % c_path.get_file())
+	var wall_left := Ville.building_lefts()[13]
+	caller = game.fighters[0]
+	caller.input_source = Scripted.new(func(s, f): pass)
+	caller.global_position = Vector2(wall_left - 30.0, -caller.stats.body_size.y / 2.0 - 2.0)
+	await step(5)
+	var walled: Mecha = game.call_mecha(caller)
+	await step(100)
+	var landed_y := walled.global_position.y
+	caller._board(walled)
+	caller.input_source = Scripted.new(func(s, f): s.stick = Vector2(1.0, 0.0) if f < 15 else Vector2.ZERO)
+	var x_start := walled.global_position.x
+	await step(20)
+	check(absf(landed_y - Ville.roof_top(13)) < 2.0 and walled.global_position.x > x_start + 60.0 and absf(walled.global_position.y - landed_y) < 2.0,
+		"Ville : appelé au pied d'un immeuble, il se pose sur son toit et n'est pas coincé (y %d, x %d -> %d)" % [landed_y, x_start, walled.global_position.x])
+	caller.leave_mecha()
+	var faller: Fighter = game.fighters[1]
+	faller.global_position = Vector2(Ville.HALF_WIDTH + 300.0, -600.0)
+	var lost_mecha: Mecha = game.call_mecha(faller)
+	await step(200)
+	check(not is_instance_valid(lost_mecha) and not lost_mecha in game.mechas and faller.lives < GameSetup.lives,
+		"Ville : un mecha appelé au-dessus du vide tombe et disparaît")
+	check(not caller.take_item("balise") or not caller.is_piloting(), "Ville : on ne ramasse pas d'objet en mecha")
+
+	# Ville : les coups des joueurs à pied usent un mecha (1 pour un léger, 3 pour un lourd, une fois
+	# par coup) ; le pilote, lui, n'est pas touché.
+	GameSetup.player_characters = [GameSetup.CHARACTERS[0], GameSetup.CHARACTERS[0]]
+	await new_game()
+	game._beacon_timer = 1e9
+	game._item_spawn_timer = 1e9
+	var pilot: Fighter = game.fighters[0]
+	var hitter: Fighter = game.fighters[1]
+	var pcmd := {"stick": Vector2.ZERO, "x": false, "y": false, "yh": false}
+	pilot.input_source = Scripted.new(func(s, f):
+		s.stick = pcmd.stick
+		s.attack_pressed = pcmd.x
+		s.heavy_pressed = pcmd.y
+		s.heavy_held = pcmd.yh
+		pcmd.x = false
+		pcmd.y = false)
+	hitter.input_source = Scripted.new(func(s, f): pass)
+	var mx := Ville.building_center(Ville.TOWER) - 300.0  # sur le toit de la grande tour (960 px de large)
+	var my := Ville.roof_top(Ville.TOWER)
+	pilot.global_position = Vector2(mx, my - 40.0)
+	hitter.global_position = Vector2(mx + 400.0, my - 40.0)
+	await step(2)
+	var tank: Mecha = game.call_mecha(pilot)
+	await step(100)
+	pilot._board(tank)
+	await step(2)
+	hitter.global_position = Vector2(tank.body_rect().end.x + hitter.stats.body_size.x / 2.0 + 4.0, my - hitter.stats.body_size.y / 2.0 - 1.0)
+	await step(5)
+	var hp0 := tank.hp
+	hitter.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 0)
+	await step(40)
+	var after_light := tank.hp
+	hitter.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 0
+		s.heavy_held = f < 4)
+	await step(70)
+	check(hp0 == Mecha.WEAR_MAX and after_light == hp0 - Game.MECHA_WEAR_LIGHT and tank.hp == after_light - Game.MECHA_WEAR_HEAVY,
+		"Ville : un coup léger use le mecha de 1, un lourd de 3 (%d -> %d -> %d)" % [hp0, after_light, tank.hp])
+	check(untouched(pilot) and pilot.is_piloting() and tank.visual.wear > 0.0, "Ville : le pilote n'est pas touché, le mecha se fissure")
+	# Le fusil d'assaut : X = une rafale de 3 balles vers l'adversaire, qui le sonne
+	hitter.input_source = Scripted.new(func(s, f): pass)
+	hitter.global_position = Vector2(mx + 350.0, my - hitter.stats.body_size.y / 2.0 - 1.0)
+	await step(90)
+	var bullets_before: int = game.projectiles.filter(func(p): return p.kind == "balle").size()
+	pcmd.x = true
+	await step(1)
+	var seen_bullets := {}  # toutes les balles vues (la première peut toucher avant que la 3e parte)
+	for i in 12:
+		await step(1)
+		for p in game.projectiles:
+			if p.kind == "balle":
+				seen_bullets[p.get_instance_id()] = true
+	var max_bullets := seen_bullets.size()
+	check(bullets_before == 0 and max_bullets == Mecha.BURST_SHOTS and tank.facing > 0.0, "Ville : X tire une rafale de %d balles vers l'adversaire" % max_bullets)
+	await step(30)
+	check(touched(hitter) and tank.hp == after_light - Game.MECHA_WEAR_HEAVY, "Ville : la rafale touche l'adversaire, pas son propre mecha")
+	await shot("ville_mecha_rafale")
+	# Le lance-roquette : Y gardé = chargée, lâché = elle part ; elle explose sur l'adversaire
+	await step(200)
+	hitter.recover()
+	hitter._invincible_timer = 0.0
+	var lives_h := hitter.lives
+	pcmd.y = true
+	pcmd.yh = true
+	await step(30)
+	check(tank.visual.turret_charge > 0.3, "Ville : Y gardé, la roquette se charge (%.2f)" % tank.visual.turret_charge)
+	pcmd.yh = false
+	await step(2)
+	var rocket_list: Array = game.projectiles.filter(func(p): return p.kind == "roquette")
+	check(rocket_list.size() == 1 and rocket_list[0].blast > 0.3, "Ville : Y lâché, une roquette part (charge %.2f)" % (rocket_list[0].blast if rocket_list.size() > 0 else -1.0))
+	await step(4)
+	await shot("ville_mecha_roquette")
+	await step(40)
+	check(game.projectiles.filter(func(p): return p.kind == "roquette").is_empty() and touched(hitter),
+		"Ville : la roquette explose sur l'adversaire (vies %d -> %d, sonné : %s)" % [lives_h, hitter.lives, hitter.is_stunned()])
+	# Une roquette use un autre mecha (de 5 à 7) ; le mecha détruit explose, son pilote est éjecté sonné
+	# sans perdre de vie
+	await step(150)
+	hitter.recover()
+	hitter.global_position = Vector2(mx + 550.0, my - 40.0)
+	await step(2)
+	var enemy: Mecha = game.call_mecha(hitter)
+	await step(100)
+	hitter._board(enemy)
+	await step(5)
+	pcmd.y = true
+	pcmd.yh = false
+	frames = 0
+	while enemy.hp == Mecha.WEAR_MAX and frames < 120:
+		await step(1)
+		frames += 1
+	check(enemy.hp <= Mecha.WEAR_MAX - Game.MECHA_WEAR_ROCKET[0] and enemy.hp >= Mecha.WEAR_MAX - Game.MECHA_WEAR_ROCKET[1] and hitter.is_piloting() and untouched(hitter),
+		"Ville : une roquette use l'autre mecha de %d, son pilote n'est pas touché" % (Mecha.WEAR_MAX - enemy.hp))
+	var hitter_lives := hitter.lives
+	enemy.hp = 2
+	await step(60)
+	pcmd.y = true
+	frames = 0
+	while is_instance_valid(enemy) and frames < 120:
+		await step(1)
+		frames += 1
+	await step(2)
+	await shot("ville_mecha_explosion")
+	check(not is_instance_valid(enemy) and not hitter.is_piloting() and hitter.is_stunned() and hitter.is_invincible() and hitter.lives == hitter_lives and game.mechas.size() == 1,
+		"Ville : plus de solidité, le mecha explose ; le pilote est éjecté, sonné, sans perdre de vie")
+	await step(20)
+	check(hitter.global_position.y < my - 100.0 or hitter.velocity.y < 0.0 or hitter.is_on_floor(), "Ville : le pilote éjecté part vers le haut")
+	# Une grenade use un mecha (pas le pilote)
+	var hp_before_grenade := tank.hp
+	game._explode(tank.body_rect().get_center())
+	check(tank.hp == hp_before_grenade - Game.MECHA_WEAR_GRENADE and pilot.is_piloting() and untouched(pilot), "Ville : une grenade use le mecha de 4, pas son pilote")
 	# Ville : le parc d'attractions et le parc arboré (captures)
 	if shot_dir != "":
 		for place in [["ville_fete_foraine", -8000.0, -6900.0], ["ville_parc", 6900.0, 8600.0]]:

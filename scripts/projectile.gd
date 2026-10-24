@@ -10,6 +10,8 @@ extends Node2D
 ##   grenade : collante. Elle se colle au premier élément de la map qu'elle touche (sol, mur,
 ##             plateforme qui bouge, liane, fenêtre) et explose quand sa mèche est finie. Une fenêtre
 ##             touchée trop vite casse et la grenade continue. Un coup la décolle et la repousse.
+##   roquette: Ville, tirée par un mecha. Elle file droit et explose contre le décor, un joueur ou
+##             un mecha (voir game.gd, _resolve_rocket). blast = sa charge (0 à 1).
 ##   arme    : l'arme qui a sauté des mains (blocage parfait) ou qu'on a lancée avec RB. Elle vole
 ##             en tournant, sans danger, rebondit sur les murs, se pose au sol. Un joueur à mains
 ##             nues l'attrape en vol ou la ramasse en passant dessus (voir game.gd, _resolve_spear).
@@ -24,6 +26,7 @@ const DROP_GRAVITY := 2300.0
 const GRENADE_GRAVITY := 900.0          ## la grenade vole plus droit qu'avant (elle tombe moins vite)
 const GRENADE_WINDOW_BREAK := 900.0     ## plus vite que ça, elle casse la fenêtre au lieu de s'y coller
 const BULLET_LIFETIME := 2.5            ## une balle qui ne touche rien disparaît au bout de ce temps
+const ROCKET_LIFETIME := 3.0            ## une roquette qui ne touche rien explose au bout de ce temps
 const ARROW_GRAVITY := 400.0            ## la flèche de l'arc tombe un peu en volant
 const ARROW_LENGTH := 34.0
 const RADIUS := 6.0                     ## épaisseur de la zone qui touche
@@ -65,6 +68,8 @@ func _physics_process(delta: float) -> void:
 	match kind:
 		"balle":
 			_tick_bullet(delta)
+		"roquette":
+			_tick_rocket(delta)
 		"grenade":
 			_tick_grenade(delta)
 		"arme":
@@ -114,6 +119,23 @@ func _tick_bullet(delta: float) -> void:
 	if not hit.is_empty() and hit.collider is BreakableWindow:
 		(hit.collider as BreakableWindow).smash()  # la balle casse la fenêtre et s'arrête
 	if age > BULLET_LIFETIME or not hit.is_empty():
+		finished = true
+		return
+	position += step
+	rotation = velocity.angle()
+
+
+## La roquette file droit ; contre le décor (planchers compris), elle s'arrête là : game.gd la fait exploser.
+func _tick_rocket(delta: float) -> void:
+	if finished:
+		return
+	var step := velocity * delta
+	var hit := _ray(position, tip() + step, true)
+	if not hit.is_empty():
+		position = hit.position
+		finished = true
+		return
+	if age > ROCKET_LIFETIME:
 		finished = true
 		return
 	position += step
@@ -259,6 +281,12 @@ func _draw() -> void:
 		"balle":
 			draw_line(Vector2(-length / 2.0 - 24.0, 0.0), Vector2(-length / 2.0, 0.0), Color(color, 0.3), 2.0)
 			draw_line(Vector2(-length / 2.0, 0.0), Vector2(length / 2.0, 0.0), color, 4.0)
+		"roquette":
+			var half := length / 2.0
+			draw_rect(Rect2(-half, -6.0, length, 12.0), color)
+			draw_colored_polygon(PackedVector2Array([Vector2(half, -6.0), Vector2(half + 10.0, 0.0), Vector2(half, 6.0)]), color.lightened(0.3))
+			var flame := 14.0 + 6.0 * sin(age * 50.0)
+			draw_colored_polygon(PackedVector2Array([Vector2(-half, -5.0), Vector2(-half - flame, 0.0), Vector2(-half, 5.0)]), Color(1.0, 0.75, 0.3))
 		"grenade":
 			# Clignote d'après la mèche (envoyée aux copains en ligne), pas d'après l'âge (qui n'est
 			# compté que chez l'hôte : chez un copain, la grenade restait rouge sans clignoter).
