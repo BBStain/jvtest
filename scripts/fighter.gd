@@ -115,6 +115,11 @@ const GRAPPLE_ARRIVE_KEEP := 0.4        ## ... et celui qui était tiré garde 4
 const GRAPPLE_FLING_TIME := 0.35        ## corde lâchée en route : celui qui était tiré garde tout son élan ce temps
 enum Grapple { NONE, FLYING, PULL_SELF, PULL_THEM }
 
+# --- Ville : piloter un mecha (voir scripts/ville/mecha.gd) ---
+const MECHA_BOARD_STICK := 0.5          ## collé à un mecha vide, stick vers le haut au-delà de ça : on monte dedans
+const MECHA_REBOARD_TIME := 0.6         ## juste après être sorti, on ne remonte pas tout de suite
+const MECHA_EXIT_LIFT := 750.0          ## en sortant, on saute par le haut du mecha
+
 # --- Blocage (B) : un bouclier qui craque peu à peu (ses points sont dans les stats du perso) ---
 const SHIELD_REGEN_TIME := 2.0          ## 1 point regagné toutes les 2 s quand on ne bloque pas
 const SHIELD_BREAK_COOLDOWN := 2.0      ## bouclier cassé : pas d'attaque pendant ce temps (on peut bouger)
@@ -297,7 +302,7 @@ var _shield_regen_timer := 0.0
 var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
 var _shield_flash_timer := 0.0          ## petit éclat quand le bouclier encaisse un coup
 
-var item := ""                          ## l'objet ramassé : "", "pistolet", "grenade", "bouclier", "vie" ou "grappin"
+var item := ""                          ## l'objet ramassé : "", "pistolet", "grenade", "bouclier", "vie", "grappin" ou "balise" (Ville)
 var item_ammo := 0                      ## balles qui restent dans le pistolet (ou lancers du grappin)
 var item_shield_timer := 0.0            ## bouclier ramassé levé encore ce temps
 var _item_cooldown := 0.0
@@ -315,6 +320,9 @@ var _grapple_time := 0.0
 var _grapple_dist := 0.0
 var _grappled_by: Fighter               ## celui dont la corde nous tire vers lui
 var _repair_counters := 0               ## contres au coup léger depuis la dernière réparation (voir weapon_light_counter)
+
+var mecha: Mecha = null                 ## Ville : le mecha qu'on pilote (null = à pied)
+var _mecha_reboard_timer := 0.0
 
 var gauge := CounterGauge.new()         ## la jauge de contre de la partie (partagée, donnée par game.gd)
 var ultimate_points := 0                ## la jauge d'ultime de ce joueur (pleine à ULTIMATE_POINTS)
@@ -368,6 +376,9 @@ func physics_tick(input: InputState, delta: float) -> void:
 	_tick_timers(delta)
 	if eliminated:
 		return
+	if mecha != null:
+		_tick_mecha(input, delta)
+		return
 	if is_frozen():
 		# Gelé : on ne fait plus rien, on tombe seulement si on était en l'air.
 		velocity.x = move_toward(velocity.x, 0.0, stats.ground_accel * delta)
@@ -400,6 +411,14 @@ func physics_tick(input: InputState, delta: float) -> void:
 			_air_dashes_left = stats.air_dashes
 			_dash_cooldown_timer = 0.0
 			facing = _wall_normal_x
+
+	# Ville : "haut" en touchant un mecha vide pour monter dedans (pas sonné : il faut d'abord s'en sortir).
+	if input.stick.y < -MECHA_BOARD_STICK and _mecha_reboard_timer <= 0.0 and not is_stunned() \
+			and not is_attacking() and not is_dashing():
+		var empty := _touched_mecha()
+		if empty != null:
+			_board(empty)
+			return
 
 	# Échelle : "haut" en la touchant pour s'accrocher ; on monte tout seul (rien d'autre à faire).
 	if _ladder == null and _ladder_regrab_timer <= 0.0 and input.stick.y < -LADDER_GRAB_STICK \
@@ -507,6 +526,7 @@ func _tick_timers(delta: float) -> void:
 	_ladder_regrab_timer -= delta
 	_ladder_fling_timer -= delta
 	_vine_regrab_timer -= delta
+	_mecha_reboard_timer -= delta
 	_item_cooldown -= delta
 	_item_flash_timer -= delta
 	_repair_flash_timer -= delta
@@ -612,7 +632,7 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 
 ## On ramasse un objet (seulement si on n'en a pas déjà un).
 func take_item(kind: String) -> bool:
-	if item != "":
+	if item != "" or mecha != null:
 		return false
 	item = kind
 	item_ammo = PISTOL_AMMO if kind == "pistolet" else 0
@@ -663,6 +683,9 @@ func _tick_item(input: InputState, delta: float) -> void:
 				_grapple_tap = false
 				_grapple_time = 0.0
 				_grapple_dist = 0.0
+		"balise":
+			item = ""
+			item_used.emit(self, "balise", Vector2.ZERO, 0.0, 0.0)  # game.gd appelle le mecha
 		"vie":
 			if lives < MAX_LIVES:
 				item = ""
@@ -783,6 +806,70 @@ func _item_direction() -> Vector2:
 
 func is_item_shielded() -> bool:
 	return item_shield_timer > 0.0
+
+
+## Le mecha vide (posé) que le corps touche, ou null.
+func _touched_mecha() -> Mecha:
+	for node in get_tree().get_nodes_in_group("mechas"):
+		var candidate := node as Mecha
+		if candidate != null and candidate.pilot == null and candidate.is_ready() and candidate.body_rect().intersects(body_rect()):
+			return candidate
+	return null
+
+
+## On monte dans le mecha : on lâche tout (attaque, bouclier, échelle, liane, grappin, grenade dégoupillée).
+func _board(new_mecha: Mecha) -> void:
+	_cancel_attack()
+	_leave_ladder()
+	_leave_vine()
+	if grapple_mode != Grapple.NONE:
+		_end_grapple(false)
+	if _grenade_fuse >= 0.0:
+		_release_grenade(Vector2.ZERO, 0.0)
+	_dash_timer = 0.0
+	_blocking = false
+	_sprinting = false
+	_knockback_timer = 0.0
+	mecha = new_mecha
+	mecha.board(self)
+	set_collision_mask_value(1, false)  # dans le cockpit, on ne touche plus le décor
+	set_collision_mask_value(PLATFORM_LAYER, false)
+	global_position = mecha.cockpit()
+	velocity = Vector2.ZERO
+
+
+## Aux commandes : le mecha suit nos touches, on reste dans le cockpit. Bas + A gardés : on sort.
+func _tick_mecha(input: InputState, delta: float) -> void:
+	mecha.tick(input, delta)
+	facing = mecha.facing
+	global_position = mecha.cockpit()
+	velocity = mecha.velocity
+	if mecha.wants_exit():
+		leave_mecha()
+		velocity = Vector2(0.0, -MECHA_EXIT_LIFT)
+	queue_redraw()
+
+
+## On sort du mecha (il reste là, vide) : on réapparaît juste au-dessus de lui.
+func leave_mecha() -> void:
+	if mecha == null:
+		return
+	var top := mecha.body_rect().position.y
+	mecha.leave()
+	mecha = null
+	_mecha_reboard_timer = MECHA_REBOARD_TIME
+	global_position = Vector2(global_position.x, top - stats.body_size.y / 2.0 - 4.0)
+	velocity = Vector2.ZERO
+	_air_jumps_left = stats.air_jumps
+	_air_dashes_left = stats.air_dashes
+	if not eliminated:
+		set_collision_mask_value(1, true)
+		set_collision_mask_value(PLATFORM_LAYER, true)
+	queue_redraw()
+
+
+func is_piloting() -> bool:
+	return mecha != null
 
 
 ## L'échelle que le corps touche, ou null.
@@ -1520,12 +1607,12 @@ func attack_direction() -> Vector2:
 ## Peut-on se faire toucher ? Non pendant un dash (aussi celui du katana) ou une invincibilité.
 ## Le dash du katana peut quand même être contré (voir game.gd).
 func can_be_hit() -> bool:
-	return not eliminated and not is_dashing() and not is_katana_dashing() and not is_invincible()
+	return not eliminated and mecha == null and not is_dashing() and not is_katana_dashing() and not is_invincible()
 
 
 ## En train d'esquiver (dash, dash du katana) : ce qui vole (balle, lance) passe au travers.
 func is_dodging() -> bool:
-	return is_dashing() or is_katana_dashing()
+	return is_dashing() or is_katana_dashing() or mecha != null
 
 
 func body_rect() -> Rect2:
@@ -1661,6 +1748,10 @@ func _pushed(force: Vector2) -> Vector2:
 
 ## Sorti de la map : on perd une vie et on réapparaît au milieu.
 func fall_out(respawn_position: Vector2) -> void:
+	if mecha != null:
+		var lost := mecha
+		leave_mecha()
+		lost.queue_free()  # tombé avec son mecha : le mecha est perdu
 	_cancel_attack()
 	_leave_ladder()
 	_leave_vine()
@@ -1731,7 +1822,7 @@ func apply_net_state(state: Array) -> void:
 # --- Dessin (pas d'images : tout est dessiné avec des rectangles) ---
 
 func _draw() -> void:
-	if eliminated:
+	if eliminated or mecha != null:  # aux commandes d'un mecha : on se voit dans son cockpit
 		return
 	var body := Rect2(-stats.body_size / 2.0, stats.body_size)
 
@@ -1962,6 +2053,9 @@ func _draw_item(body: Rect2) -> void:
 				draw_circle(hand + Vector2(-6.0 + i * 6.0, -10.0), 1.8, ItemPickup.color_of("grappin"))
 		"vie":
 			draw_rect(Rect2(hand - Vector2.ONE * 6.0, Vector2.ONE * 12.0), ItemPickup.color_of("vie"))
+		"balise":
+			var beacon := ItemPickup.color_of("balise") if int(_blink_clock / 0.25) % 2 == 0 else Color(1, 1, 1)
+			draw_colored_polygon(PackedVector2Array([hand + Vector2(0, -8), hand + Vector2(6, 0), hand + Vector2(0, 8), hand + Vector2(-6, 0)]), beacon)
 		"pistolet":
 			# Le pistolet pointe là où la balle partira ; les balles qui restent sont des points sur le canon.
 			var aim := _item_direction()

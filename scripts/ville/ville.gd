@@ -99,6 +99,7 @@ static func build() -> GameMap:
 	var map := GameMap.new()
 	map.name = "Ville"
 	map.map_name = "Ville"
+	map.has_mechas = true
 	var decor := Node2D.new()
 	decor.name = "Decor"
 	map.add_child(decor)

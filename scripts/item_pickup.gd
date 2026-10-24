@@ -7,6 +7,7 @@ extends Node2D
 ##   bouclier : levé pendant 5 s, qui frappe dedans est projeté très loin
 ##   vie      : RT donne une vie en plus (jusqu'à Fighter.MAX_LIVES)
 ##   grappin  : 3 lancers vers l'adversaire le plus proche (voir Fighter._tick_grapple)
+##   balise   : Ville seulement (pas dans KINDS) : RT appelle un mecha, qui tombe du ciel (voir Game.call_mecha)
 ## Dessin très simple (une caisse de couleur avec une lettre) : à remplacer par un graphiste.
 
 const KINDS := ["pistolet", "grenade", "bouclier", "vie", "grappin"]
@@ -36,6 +37,8 @@ static func color_of(item_kind: String) -> Color:
 			return Color(1.0, 0.45, 0.6)
 		"grappin":
 			return Color(0.85, 0.6, 0.3)
+		"balise":
+			return Color(1.0, 0.2, 0.2)
 	return Color.WHITE
 
 
@@ -48,6 +51,8 @@ func _physics_process(delta: float) -> void:
 	velocity = body.step(self, velocity, SIZE / 2.0, delta)
 	if body.resting:
 		_launched = false
+	if kind == "balise":
+		queue_redraw()  # elle clignote
 
 
 ## Un coup (ou une explosion) l'envoie valdinguer.
@@ -78,6 +83,15 @@ func _ready() -> void:
 
 
 func _draw() -> void:
+	if kind == "balise":
+		# Un petit losange rouge qui clignote
+		var on := int(Time.get_ticks_msec() / 250) % 2 == 0
+		var h := SIZE * 0.75
+		draw_colored_polygon(PackedVector2Array([Vector2(0, -h), Vector2(h * 0.7, 0), Vector2(0, h), Vector2(-h * 0.7, 0)]),
+			color_of(kind) if on else Color(1.0, 0.75, 0.75))
+		draw_polyline(PackedVector2Array([Vector2(0, -h), Vector2(h * 0.7, 0), Vector2(0, h), Vector2(-h * 0.7, 0), Vector2(0, -h)]),
+			Color(1, 1, 1, 0.9), 2.0)
+		return
 	var box := Rect2(-Vector2.ONE * SIZE / 2.0, Vector2.ONE * SIZE)
 	draw_rect(box, Color(color_of(kind), 0.9))
 	draw_rect(box, Color(1, 1, 1, 0.8), false, 2.0)

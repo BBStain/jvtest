@@ -18,6 +18,8 @@ extends Node2D
 @export var map_name := "Map"
 ## Au-delà de ce rectangle, le joueur est sorti de la map et perd une vie.
 @export var blast_zone := Rect2(-2150, -1500, 5400, 2450)
+## Ville : des balises d'appel de mecha tombent sur cette map (voir Game._tick_beacons).
+var has_mechas := false
 
 var _windows: Array[BreakableWindow] = []
 

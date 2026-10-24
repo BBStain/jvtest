@@ -29,6 +29,9 @@ var aim := 0.0                        ## angle de visée des armes (0 = devant)
 var wear := 0.0                       ## 0 = neuf, 1 = sur le point d'exploser
 var pose_time := 0.0                  ## depuis quand on est dans cette pose
 var heavy_weapon := "roquette"        ## "roquette" ou "laser"
+var piloted := true                   ## false : mecha vide, cockpit sans pilote
+var hover := true                     ## pose « vol » : dessiné au-dessus du sol (vitrine) ; en jeu, c'est le corps qui vole
+var flames := true                    ## pose « vol » : réacteurs allumés (false : il retombe, jambes repliées)
 var _time := 0.0
 
 
@@ -68,7 +71,7 @@ func _draw() -> void:
 			bob = h * 0.04 * maxf(0.0, 1.0 - since_step * 4.0) - h * 0.015
 			_draw_stomp(since_step, -signf(stride) * facing * w * 0.22)
 		Pose.FLY:
-			lift = h * 0.35 + sin(_time * 3.0) * h * 0.03
+			lift = (h * 0.35 if hover else 0.0) + sin(_time * 3.0) * h * 0.03
 			tuck = 0.6
 		Pose.LAND:
 			var k := clampf(pose_time / LAND_TIME, 0.0, 1.0)
@@ -96,7 +99,7 @@ func _draw() -> void:
 		draw_rect(Rect2(foot + Vector2(-w * 0.13, -h * 0.04), Vector2(w * 0.26, h * 0.04)), leg.darkened(0.35))
 		draw_colored_polygon(PackedVector2Array([foot + Vector2(facing * w * 0.13, -h * 0.04),
 			foot + Vector2(facing * w * 0.2, 0.0), foot + Vector2(facing * w * 0.13, 0.0)]), leg.darkened(0.35))
-		if pose == Pose.FLY or (pose == Pose.LAND and pose_time < LAND_TIME):
+		if (pose == Pose.FLY and flames) or (pose == Pose.LAND and pose_time < LAND_TIME):
 			var flame := h * 0.16 * (0.85 + 0.15 * sin(_time * 40.0 + side))
 			var base := foot + Vector2(0.0, h * 0.01)
 			draw_colored_polygon(PackedVector2Array([base + Vector2(-w * 0.1, 0.0), base + Vector2(w * 0.1, 0.0),
@@ -117,7 +120,8 @@ func _draw() -> void:
 	var glass := Rect2(Vector2(f * w * 0.24 - w * 0.13, top + h * 0.07), Vector2(w * 0.26, h * 0.13))
 	draw_rect(glass, Color(0.1, 0.12, 0.17))
 	var pilot := (stats.body_size if stats != null else Vector2(20, 60)) * 0.42
-	draw_rect(Rect2(Vector2(glass.get_center().x - pilot.x / 2.0, glass.end.y - pilot.y), pilot), color.lightened(0.35))
+	if piloted:
+		draw_rect(Rect2(Vector2(glass.get_center().x - pilot.x / 2.0, glass.end.y - pilot.y), pilot), color.lightened(0.35))
 	draw_rect(Rect2(glass.position, Vector2(glass.size.x, h * 0.02)), Color(0.55, 0.75, 0.95, 0.5))
 	_draw_wear(hull)
 	# La mitrailleuse sous le nez, puis la tourelle à trois canons sur le dos
