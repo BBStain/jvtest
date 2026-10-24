@@ -47,6 +47,7 @@ var fuse := -1.0                        ## grenade : temps avant l'explosion
 var blast := 1.0                        ## grenade : force de l'explosion (plus elle a été chargée, plus fort)
 var age := 0.0
 var finished := false                   ## à retirer (balle arrivée dans un mur, grenade qui explose)
+var shot_hits := 0                      ## roquette : balles adverses reçues en vol (3 = annulée)
 var weapon: WeaponStats                 ## lance ou arme : l'arme qu'on récupère en la ramassant...
 var counters := 0                       ## ... et son usure (voir Fighter.weapon_counters)
 var ammo := Fighter.ARROWS_MAX          ## arc par terre : ses flèches ; flèche : l'arc auquel elle revient (bow_id)

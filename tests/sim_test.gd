@@ -1392,6 +1392,7 @@ func _ready() -> void:
 	game._item_spawn_timer = 1e9
 	var gunner: Fighter = game.fighters[0]
 	var foe: Fighter = game.fighters[1]
+	game._weapon_spawn_timer = 1e9
 	var gcmd := {"x": false, "rt": false, "rb": false}
 	gunner.input_source = Scripted.new(func(s, f):
 		s.attack_pressed = gcmd.x
@@ -1456,6 +1457,104 @@ func _ready() -> void:
 	await shot("ville_lance_roquette")
 	await step(20)
 	check(touched(foe) and foe.global_position.x > foe_x + 60.0, "Ville : la roquette touche et projette loin (%d px)" % (foe.global_position.x - foe_x))
+	# Les tirs s'annulent : balle contre balle, 3 balles contre une roquette ; une roquette se contre
+	# (coup ou blocage parfait), un blocage parfait dans une explosion est un contre.
+	var reset_pair := func() -> void:
+		for fi: Fighter in [gunner, foe]:
+			fi.recover()
+			fi._invincible_timer = 0.0
+			fi.velocity = Vector2.ZERO
+		gunner.global_position = Vector2(mx, my - gunner.stats.body_size.y / 2.0 - 1.0)
+		foe.global_position = Vector2(mx + 400.0, my - foe.stats.body_size.y / 2.0 - 1.0)
+	await step(200)
+	reset_pair.call()
+	await step(5)
+	var lives_pair := [gunner.lives, foe.lives]
+	game._on_item_used(gunner, "balle", Vector2.RIGHT, 1.0, 0.0)
+	game._on_item_used(foe, "balle", Vector2.LEFT, 1.0, 0.0)
+	await step(20)
+	check(game.projectiles.filter(func(p): return p.kind == "balle").is_empty() and not gunner.is_stunned() and not foe.is_stunned()
+		and [gunner.lives, foe.lives] == lives_pair, "Ville : deux balles qui se croisent s'annulent")
+	game.gauge.points = 0.0  # la jauge a un maximum : on repart de 0 pour voir le +3
+	var gauge_cancel: float = game.gauge.points
+	game._fire_launcher(foe, Vector2.LEFT, Fighter.LAUNCHER_BLAST)
+	for i in Game.ROCKET_CANCEL_BULLETS:
+		game._on_item_used(gunner, "balle", Vector2.RIGHT, 1.0, 0.0)
+		await step(3)
+	await step(30)
+	check(game.projectiles.is_empty() and not gunner.is_stunned() and not foe.is_stunned() and game.gauge.points >= gauge_cancel + 3.0,
+		"Ville : 3 balles annulent la roquette, contre compté triple (jauge %.0f -> %.0f)" % [gauge_cancel, game.gauge.points])
+	await step(60)
+	reset_pair.call()
+	gunner.input_source = Scripted.new(func(s, f): s.block_held = f > 16)
+	await step(5)
+	game._fire_launcher(foe, Vector2.LEFT, Fighter.LAUNCHER_BLAST)
+	var parry_frames := 0
+	while not game.projectiles.is_empty() and parry_frames < 60:
+		await step(1)
+		parry_frames += 1
+	check(game.projectiles.is_empty() and not gunner.is_stunned() and gunner.shield == gunner.stats.shield_max,
+		"Ville : une roquette prise en blocage parfait est annulée, sans explosion")
+	await step(60)
+	reset_pair.call()
+	gunner.input_source = Scripted.new(func(s, f): pass)
+	await step(5)
+	game.gauge.points = 0.0  # la jauge a un maximum : on repart de 0 pour voir le +3
+	var gauge_hit: float = game.gauge.points
+	game._fire_launcher(foe, Vector2.LEFT, Fighter.LAUNCHER_BLAST)
+	await step(8)
+	var rocket_now: Array = game.projectiles.filter(func(p): return p.kind == "roquette")
+	if not rocket_now.is_empty():
+		gunner.global_position.x = rocket_now[0].tip().x - 50.0
+		light_now(gunner, Vector2.RIGHT)
+		gunner._attack_time = gunner._attack_startup()  # pile quand le coup sort : renvoi parfait
+	await step(2)
+	var sent_back: Array = game.projectiles.filter(func(p): return p.kind == "roquette")
+	check(sent_back.size() == 1 and sent_back[0].owner_index == gunner.player_index and sent_back[0].velocity.x > 0.0
+		and game.gauge.points >= gauge_hit + 3.0, "Ville : une roquette frappée pile au bon moment repart vers le tireur (contre de lourde)")
+	var foe_lives := foe.lives
+	await step(40)
+	check(not gunner.is_stunned() and (foe.is_stunned() or foe.lives < foe_lives), "Ville : la roquette renvoyée explose sur son tireur")
+	await step(60)
+	reset_pair.call()
+	gunner.input_source = Scripted.new(func(s, f): s.block_held = true)
+	await step(4)
+	var shield_parry := gunner.shield
+	game._explode(gunner.global_position + Vector2(60.0, 0.0))
+	check(not gunner.is_stunned() and gunner.shield == shield_parry, "Ville : un blocage parfait dans une explosion ne prend rien (contre)")
+	# Un gros morceau qui tombe se casse en l'air sous 3 balles, ou sous une roquette (contre de lourde)
+	var city := game.map.get_node("Ecroulement") as CityCollapse
+	var cut_building := func(index: int) -> void:
+		var left: float = Ville.building_lefts()[index]
+		var right: float = left + Ville.BUILDINGS[index][0] * Ville.BLOCK
+		for b: CityBlock in city.blocks:
+			var c := b.rect().get_center()
+			if not b.one_way and b.rect().position.y >= -Ville.FLOOR_HEIGHT - 1.0 \
+					and (absf(c.x - (left + Ville.BLOCK / 2.0)) < 1.0 or absf(c.x - (right - Ville.BLOCK / 2.0)) < 1.0):
+				b.hit(Ville.BLOCK_HP)
+	var shoot_at := func(kind: String, where: Vector2) -> void:
+		var p := Projectile.new()
+		p.kind = kind
+		p.owner_index = 0
+		p.position = where
+		p.velocity = Vector2.UP * 10.0
+		p.rotation = -PI / 2.0
+		p.length = 16.0
+		game._add_projectile(p)
+	for test in [["roquette", 0], ["balle", 2]]:
+		cut_building.call(test[1])
+		await step(36)  # il tremble 0,5 s, puis tombe
+		var falling_now: Array = city.chunks.filter(func(c): return is_instance_valid(c) and c.is_dangerous())
+		var piece: FallingChunk = falling_now[0] if falling_now.size() > 0 else null
+		game.gauge.points = 0.0  # la jauge a un maximum : on repart de 0 pour voir le +3
+		var gauge_chunk: float = game.gauge.points
+		for i in (1 if test[0] == "roquette" else FallingChunk.LIGHT_HITS):
+			if piece != null and piece.is_dangerous():
+				shoot_at.call(test[0], piece.current_rects()[0].get_center())
+			await step(2)
+		check(piece != null and piece.state == FallingChunk.State.BURST and game.gauge.points >= gauge_chunk + 3.0,
+			"Ville : un gros morceau se casse en l'air sous %s (contre de lourde)" % ("une roquette" if test[0] == "roquette" else "3 balles"))
+		await step(200)
 	# Ville : le parc d'attractions et le parc arboré (captures)
 	if shot_dir != "":
 		for place in [["ville_fete_foraine", -8000.0, -6900.0], ["ville_parc", 6900.0, 8600.0]]:
