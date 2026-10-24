@@ -1102,11 +1102,30 @@ func _ready() -> void:
 		"Ville : un gros morceau sur un bouclier éclate et le bouclier craque (%d -> %d)" % [shield_before, blocker.shield])
 	# Ville : le parc d'attractions et le parc arboré (captures)
 	if shot_dir != "":
-		for place in [["ville_fete_foraine", -7700.0, -6600.0], ["ville_parc", 6600.0, 8300.0]]:
+		for place in [["ville_fete_foraine", -8000.0, -6900.0], ["ville_parc", 6900.0, 8600.0]]:
 			game.fighters[0].global_position = Vector2(place[1], -300.0)
 			game.fighters[1].global_position = Vector2(place[2], -300.0)
 			await step(120)
 			await shot(place[0])
+	# Ville : la vitrine des mechas (design) montre le même mecha avec chaque pilote, dans chaque pose
+	game.queue_free()
+	game = null
+	var showroom := (load(MechaShowroom.SCENE) as PackedScene).instantiate() as MechaShowroom
+	add_child(showroom)
+	await step(2)
+	var sizes_ok := showroom.mechas.size() == GameSetup.CHARACTERS.size() and showroom.mechas.all(
+		func(m: MechaVisual) -> bool: return m.mecha_size() == MechaVisual.SIZE)
+	check(sizes_ok, "Ville : vitrine, un mecha par perso, le même pour tous")
+	for i in MechaShowroom.POSE_NAMES.size():
+		showroom.show_pose(i)
+		await step(50 if i != MechaVisual.Pose.LAND else 60)
+		if i == MechaVisual.Pose.WORN:
+			for m in showroom.mechas:
+				m.wear = 0.9
+			await step(2)
+		await shot("mecha_%d" % i)
+	check(showroom.pose_index == MechaShowroom.POSE_NAMES.size() - 1, "Ville : vitrine, toutes les poses s'affichent")
+	showroom.queue_free()
 	GameSetup.map_path = GameSetup.MAPS[0]
 	GameSetup.player_devices = []
 	GameSetup.player_characters = []
