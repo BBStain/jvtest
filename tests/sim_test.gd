@@ -1100,6 +1100,137 @@ func _ready() -> void:
 	await step(120)
 	check(not stunned_before and not blocker.is_stunned() and blocker.shield == shield_before - Game.CHUNK_SHIELD_DAMAGE,
 		"Ville : un gros morceau sur un bouclier éclate et le bouclier craque (%d -> %d)" % [shield_before, blocker.shield])
+	# Ville : la balise d'appel. RT : un viseur rouge, puis le mecha tombe du ciel 1,5 s plus tard et se
+	# pose sur le toit (pas dedans). Celui qui est dessous est écrasé (sonné), celui qui l'a appelé non.
+	await new_game()
+	game._beacon_timer = 1e9
+	game._item_spawn_timer = 1e9
+	var caller: Fighter = game.fighters[0]
+	var other: Fighter = game.fighters[1]
+	var cmd := {"stick": Vector2.ZERO, "jump": false, "jp": false, "dash": false, "item": false}
+	caller.input_source = Scripted.new(func(s, f):
+		s.stick = cmd.stick
+		s.jump_held = cmd.jump
+		s.jump_pressed = cmd.jp
+		s.dash_pressed = cmd.dash
+		s.item_pressed = cmd.item
+		cmd.jp = false
+		cmd.dash = false
+		cmd.item = false)
+	other.input_source = Scripted.new(func(s, f): pass)
+	var roof_x := Ville.building_center(13) - 120.0
+	var roof_y := Ville.roof_top(13)
+	caller.global_position = Vector2(roof_x, roof_y - caller.stats.body_size.y / 2.0 - 2.0)
+	other.global_position = Vector2(roof_x + 30.0, roof_y - other.stats.body_size.y / 2.0 - 2.0)
+	await step(10)
+	check(caller.take_item("balise") and caller.item == "balise", "Ville : on ramasse une balise d'appel")
+	cmd.item = true
+	await step(2)
+	var mecha: Mecha = game.mechas[0] if game.mechas.size() == 1 else null
+	check(mecha != null and caller.item == "" and mecha.state == Mecha.State.CALLED and absf(mecha.global_position.y - roof_y) < 2.0,
+		"Ville : RT avec la balise marque le toit d'un viseur rouge (mecha en route : %s)" % (mecha != null))
+	var frames := 0
+	while mecha != null and not mecha.is_ready() and frames < 200:
+		await step(1)
+		frames += 1
+		if frames == 82:
+			await shot("ville_mecha_appel")
+	check(mecha != null and mecha.is_ready() and absf(frames / 60.0 - Mecha.CALL_TIME) < 0.1,
+		"Ville : le mecha se pose %.2f s après l'appel" % (frames / 60.0))
+	await step(2)
+	check(touched(other) and untouched(caller), "Ville : il écrase celui qui est dessous (sonné : %s), pas celui qui l'a appelé" % other.is_stunned())
+	await step(40)
+	check(mecha.is_on_floor() and absf(mecha.global_position.y - roof_y) < 2.0, "Ville : le mecha tient sur le toit (y = %d)" % mecha.global_position.y)
+	# Monter : collé au mecha, stick vers le haut
+	caller.global_position = Vector2(mecha.global_position.x, roof_y - caller.stats.body_size.y / 2.0 - 2.0)
+	await step(2)
+	cmd.stick = Vector2(0.0, -1.0)
+	await step(3)
+	cmd.stick = Vector2.ZERO
+	check(caller.is_piloting() and mecha.pilot == caller and not caller.can_be_hit() and mecha.visual.color == caller.color,
+		"Ville : stick vers le haut contre le mecha, on monte dedans")
+	# Marcher, voler, carburant, dash
+	var x0 := mecha.global_position.x
+	cmd.stick = Vector2(1.0, 0.0)
+	await step(20)
+	cmd.stick = Vector2.ZERO
+	await step(10)
+	check(mecha.global_position.x - x0 > 120.0 and caller.global_position.distance_to(mecha.cockpit()) < 1.0,
+		"Ville : le mecha marche (%d px), le pilote reste dans le cockpit" % (mecha.global_position.x - x0))
+	cmd.jp = true
+	cmd.jump = true
+	await step(90)
+	await shot("ville_mecha_vol")
+	check(mecha.global_position.y < roof_y - 600.0 and mecha.fuel < Mecha.FUEL_MAX - 1.0,
+		"Ville : A gardé, il vole (%d px au-dessus du toit, carburant %.1f s)" % [roof_y - mecha.global_position.y, mecha.fuel])
+	cmd.jump = false
+	var fuel_air := mecha.fuel
+	frames = 0
+	while not mecha.is_on_floor() and frames < 300:
+		await step(1)
+		frames += 1
+	await step(30)
+	check(mecha.is_on_floor() and absf(mecha.global_position.y - roof_y) < 2.0 and mecha.fuel > fuel_air + 1.0,
+		"Ville : A lâché, il retombe sur le toit et le carburant revient (%.1f -> %.1f)" % [fuel_air, mecha.fuel])
+	mecha.fuel = 0.3
+	cmd.jp = true
+	cmd.jump = true
+	await step(60)
+	cmd.jump = false
+	check(mecha._empty_tank and mecha.global_position.y > roof_y - 400.0, "Ville : réservoir vide, il ne vole plus (%d px)" % (roof_y - mecha.global_position.y))
+	await step(120)
+	x0 = mecha.global_position.x
+	cmd.stick = Vector2(-1.0, 0.0)
+	cmd.dash = true
+	await step(12)
+	cmd.stick = Vector2.ZERO
+	check(x0 - mecha.global_position.x > 200.0, "Ville : LB, le mecha fait un dash (%d px)" % (x0 - mecha.global_position.x))
+	await step(30)
+	# Sortir : bas + A gardés 0,5 s (pas moins)
+	cmd.stick = Vector2(0.0, 1.0)
+	cmd.jump = true
+	await step(15)
+	var still_in := caller.is_piloting()
+	await step(25)
+	cmd.stick = Vector2.ZERO
+	cmd.jump = false
+	check(still_in and not caller.is_piloting() and mecha.pilot == null and caller.global_position.y < mecha.body_rect().position.y,
+		"Ville : bas + A gardés 0,5 s, on sort par le haut (pas avant)")
+	await step(60)
+	check(caller.can_be_hit() and mecha.pilot == null and mecha.visual.color == Mecha.EMPTY_COLOR, "Ville : le mecha reste là, vide (gris)")
+	# N'importe qui peut le prendre ; tombé hors de la ville avec, on perd une vie et le mecha
+	other.global_position = Vector2(mecha.global_position.x, roof_y - other.stats.body_size.y / 2.0 - 2.0)
+	other.input_source = Scripted.new(func(s, f): s.stick = Vector2(0.0, -1.0) if f < 3 else Vector2.ZERO)
+	await step(6)
+	check(other.is_piloting() and mecha.pilot == other and mecha.visual.color == other.color, "Ville : un autre joueur monte dans le mecha vide")
+	var lives_before_fall := other.lives
+	mecha.global_position = Vector2(Ville.HALF_WIDTH + 2000.0, -500.0)
+	await step(3)
+	check(other.lives == lives_before_fall - 1 and not other.is_piloting() and not is_instance_valid(mecha) and game.mechas.is_empty(),
+		"Ville : tombé hors de la ville dans le mecha, on perd une vie et le mecha")
+	# L'onde de choc repousse ceux qui sont autour (sans les sonner)
+	await step(90)
+	caller.global_position = Vector2(roof_x, roof_y - caller.stats.body_size.y / 2.0 - 2.0)
+	other.global_position = Vector2(roof_x + 200.0, roof_y - other.stats.body_size.y / 2.0 - 2.0)
+	await step(5)
+	var stunned_other := other.is_stunned()
+	var x_other := other.global_position.x
+	var second_mecha: Mecha = game.call_mecha(caller)
+	frames = 0
+	while not second_mecha.is_ready() and frames < 200:
+		await step(1)
+		frames += 1
+	await step(4)
+	check(other.global_position.x - x_other > 40.0 and other.is_stunned() == stunned_other,
+		"Ville : l'onde de choc repousse ceux qui sont autour (%d px), sans les sonner" % (other.global_position.x - x_other))
+	# Les balises tombent tant qu'il y a moins de mechas que de joueurs
+	game._beacon_timer = 0.0
+	await step(1)
+	var beacons: int = game.pickups.filter(func(p): return p.kind == "balise").size()
+	game._beacon_timer = 0.0
+	await step(1)
+	var beacons_after: int = game.pickups.filter(func(p): return p.kind == "balise").size()
+	check(beacons == 1 and beacons_after == 1, "Ville : une balise tombe tant qu'il y a moins de mechas que de joueurs (%d puis %d)" % [beacons, beacons_after])
 	# Ville : le parc d'attractions et le parc arboré (captures)
 	if shot_dir != "":
 		for place in [["ville_fete_foraine", -8000.0, -6900.0], ["ville_parc", 6900.0, 8600.0]]:

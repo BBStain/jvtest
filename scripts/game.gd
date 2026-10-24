@@ -35,6 +35,11 @@ const SHIELD_BREAK_SLOWMO := 1.2            ## ... pendant 1,2 vraie seconde
 const PARRY_COLOR := Color(0.55, 0.85, 1.0)  ## la marque d'un blocage parfait
 const CHUNK_SHIELD_DAMAGE := 6               ## Ville : un gros morceau qui tombe sur un bouclier
 const CHUNK_KNOCKBACK := 900.0               ## Ville : ... et sur quelqu'un qui ne bloque pas
+const BEACON_FIRST_TIME := 5.0               ## Ville : la première balise d'appel tombe au bout de 5 s...
+const BEACON_SPAWN_TIME := 20.0              ## ... puis une toutes les 20 s, tant qu'il y a moins de mechas que de joueurs
+const MECHA_SHOCK_PUSH := 1100.0             ## Ville : un mecha qui se pose repousse tout le monde autour...
+const MECHA_SHOCK_LIFT := 380.0              ## ... en les soulevant un peu...
+const MECHA_SHOCK_BLOCK_DAMAGE := 2          ## ... et abîme les blocs de la ville dans le rayon (sans casser le toit où il se pose)
 const WEAPON_BREAK_TIME_SCALE := 0.25       ## arme cassée (3e contre de sa lourde) : court ralenti...
 const WEAPON_BREAK_SLOWMO := 0.8            ## ... pendant 0,8 vraie seconde...
 const WEAPON_BREAK_CAMERA_MARGIN := Vector2(260, 180)  ## ... et la caméra zoome fort sur l'arme qui casse
@@ -114,6 +119,8 @@ var _online_state: Array = []              ## (copain) le dernier état du jeu r
 var map: GameMap
 var projectiles: Array[Projectile] = []    ## ce qui vole : lances lancées, balles, grenades
 var pickups: Array[ItemPickup] = []        ## les objets tombés sur la map, pas encore ramassés
+var mechas: Array[Mecha] = []              ## Ville : les mechas appelés (pilotés, vides, ou en train d'arriver)
+var _beacon_timer := BEACON_FIRST_TIME
 var rng := RandomNumberGenerator.new()     ## où et quel objet tombe (seul l'hôte tire au sort)
 var _item_spawn_timer := ITEM_SPAWN_TIME
 var _weapon_spawn_timer := WEAPON_SPAWN_TIME
@@ -237,6 +244,7 @@ func _physics_process(delta: float) -> void:
 			input.item_pressed = false
 		fighter.physics_tick(input, delta)
 	_resume_grace -= 1
+	_tick_mechas(delta)
 
 	_resolve_clashes()
 	_resolve_hits()
@@ -1302,23 +1310,115 @@ func _resolve_chunks() -> void:
 			var side := Vector2(signf(body.get_center().x - chunk.bounds().get_center().x), 0.0)
 			if side.x == 0.0:
 				side.x = 1.0
-			if fighter.is_item_shielded():
-				chunk.burst()
-			elif fighter.is_parrying():
-				chunk.burst()
-				_spawn_clash_mark(body.get_center(), true, PARRY_COLOR)
-				_count_counter(true, [fighter])
-				fighter.recover()
-			elif fighter.is_blocking() and not fighter.is_stunned():
-				chunk.burst()
-				if fighter.absorb_hit(side, CHUNK_SHIELD_DAMAGE):
-					fighter.shield_burst(side, true)
-			else:
-				fighter.take_hit((side + Vector2.DOWN).normalized(), CHUNK_KNOCKBACK)
-				if fighter.is_stunned() and _alive_count() == 2:
-					_stun_focus = [fighter, _closest_opponent(fighter)]
+			if _crush(fighter, side):
+				chunk.burst()  # il s'en est protégé : le morceau éclate dessus
 			if not chunk.is_dangerous():
 				break
+
+
+## Ville : quelque chose de lourd tombe sur "fighter" (gros morceau, mecha qui se pose). Ça se traite
+## comme une lourde : bouclier ramassé, blocage parfait (un contre) ou blocage normal (le bouclier
+## craque fort) le protègent ; sinon il est touché (sonné, ou une vie en moins s'il l'était déjà).
+## side : de quel côté il est repoussé. Renvoie true s'il s'en est protégé.
+func _crush(fighter: Fighter, side: Vector2) -> bool:
+	if fighter.is_item_shielded():
+		return true
+	if fighter.is_parrying():
+		_spawn_clash_mark(fighter.body_rect().get_center(), true, PARRY_COLOR)
+		_count_counter(true, [fighter])
+		fighter.recover()
+		return true
+	if fighter.is_blocking() and not fighter.is_stunned():
+		if fighter.absorb_hit(side, CHUNK_SHIELD_DAMAGE):
+			fighter.shield_burst(side, true)
+		return true
+	fighter.take_hit((side + Vector2.DOWN).normalized(), CHUNK_KNOCKBACK)
+	if fighter.is_stunned() and _alive_count() == 2:
+		_stun_focus = [fighter, _closest_opponent(fighter)]
+	return false
+
+
+# --- Ville : les mechas (voir scripts/ville/mecha.gd) ---
+
+## Les mechas vides (ou en train d'arriver) avancent tout seuls ; un mecha piloté avance avec son
+## pilote (voir Fighter._tick_mecha). Un mecha vide tombé hors de la ville est perdu.
+func _tick_mechas(delta: float) -> void:
+	for i in range(mechas.size() - 1, -1, -1):  # à l'envers : on peut en retirer en route
+		if not is_instance_valid(mechas[i]) or mechas[i].is_queued_for_deletion():
+			mechas.remove_at(i)  # tombé avec son pilote (voir Fighter.fall_out)
+			continue
+		var mecha := mechas[i]
+		if mecha.pilot != null and mecha.pilot.eliminated:
+			mecha.pilot.leave_mecha()
+		if mecha.pilot != null:
+			continue
+		if not map.blast_zone.has_point(mecha.global_position):
+			mechas.remove_at(i)
+			mecha.queue_free()
+			continue
+		mecha.tick(InputState.new(), delta)
+
+
+## La balise d'appel est activée (RT) : un viseur rouge marque l'endroit où le mecha va se poser,
+## à la verticale du joueur, sur ce qu'il y a de plus haut (un toit plutôt que l'intérieur d'un immeuble).
+func call_mecha(fighter: Fighter) -> Mecha:
+	var mecha := Mecha.new()
+	mecha.caller = fighter
+	mecha.position = _mecha_landing(fighter.global_position.x, fighter.global_position.y + fighter.stats.body_size.y / 2.0)
+	mecha.facing = fighter.facing
+	mecha.landed.connect(_on_mecha_landed)
+	mechas.append(mecha)
+	add_child(mecha)
+	move_child(mecha, 1)  # derrière les joueurs, devant le décor
+	return mecha
+
+
+## Où se pose un mecha appelé à la verticale de x : le plus haut de ce qui est sous le ciel à cet endroit
+## (sur toute la largeur de son corps). Au-dessus du vide : là où est le joueur (il tombera).
+func _mecha_landing(x: float, feet_y: float) -> Vector2:
+	var space := get_world_2d().direct_space_state
+	var best := INF
+	var mask := 1 | (1 << (Fighter.PLATFORM_LAYER - 1))  # le sol et les planchers
+	for dx in [-Mecha.BODY.x * 0.4, 0.0, Mecha.BODY.x * 0.4]:
+		var from := Vector2(x + dx, map.blast_zone.position.y)
+		var hit := space.intersect_ray(PhysicsRayQueryParameters2D.create(from, Vector2(x + dx, map.blast_zone.end.y), mask))
+		if not hit.is_empty():
+			best = minf(best, hit.position.y)
+	return Vector2(x, best if best != INF else feet_y)
+
+
+## Le mecha appelé se pose : onde de choc. Celui qui est dessous est écrasé (comme sous un gros
+## morceau), les autres autour sont repoussés, les blocs dans le rayon s'abîment, les objets volent.
+## Celui qui l'a appelé n'est pas touché.
+func _on_mecha_landed(mecha: Mecha) -> void:
+	var center := mecha.global_position
+	_shake_left = SHAKE_TIME
+	for window in map.windows():
+		var r := window.rect()
+		if window.broken or center.clamp(r.position, r.end).distance_to(center) > Mecha.SHOCKWAVE_RADIUS:
+			continue
+		if window is CityBlock:
+			(window as CityBlock).hit(MECHA_SHOCK_BLOCK_DAMAGE)
+		else:
+			window.smash()
+	for loose: Node2D in _loose_objects():
+		var away := loose.position - center
+		if away.length() <= Mecha.SHOCKWAVE_RADIUS:
+			var dir := (away.normalized() if away.length() > 1.0 else Vector2.UP) + Vector2(0.0, -0.6)
+			loose.launch(dir.normalized() * LOOSE_BLAST_SPEED)
+	var crush := mecha.body_rect()
+	for fighter in fighters:
+		if fighter == mecha.caller or fighter.eliminated or fighter.is_piloting():
+			continue
+		var body := fighter.body_rect()
+		var side := Vector2(signf(body.get_center().x - center.x), 0.0)
+		if side.x == 0.0:
+			side.x = 1.0
+		if body.intersects(crush):
+			if fighter.can_be_hit():
+				_crush(fighter, side)
+		elif center.clamp(body.position, body.end).distance_to(center) <= Mecha.SHOCKWAVE_RADIUS:
+			fighter.clash(side * MECHA_SHOCK_PUSH, Fighter.CLASH_LOCKOUT, MECHA_SHOCK_LIFT)
 
 
 ## Une grenade : un coup la décolle et la repousse ; au bout de sa mèche, elle explose.
@@ -1350,7 +1450,7 @@ func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK) -> void:
 			var dir := (away.normalized() if away.length() > 1.0 else Vector2.UP) + Vector2(0.0, -0.5)
 			loose.launch(dir.normalized() * LOOSE_BLAST_SPEED)
 	for fighter in fighters:
-		if fighter.eliminated or fighter.is_invincible() or fighter.is_item_shielded():
+		if fighter.eliminated or fighter.is_invincible() or fighter.is_item_shielded() or fighter.is_piloting():
 			continue
 		var body := fighter.body_rect()
 		if where.clamp(body.position, body.end).distance_to(where) > GRENADE_RADIUS:
@@ -1430,6 +1530,9 @@ func _bounce_off_item_shield(attacker: Fighter, victim: Fighter) -> void:
 
 ## Un objet utilisé : une balle tirée, ou une grenade lancée (ou lâchée, ou qui explose en main).
 func _on_item_used(fighter: Fighter, kind: String, direction: Vector2, power: float, fuse: float) -> void:
+	if kind == "balise":
+		call_mecha(fighter)
+		return
 	var projectile := Projectile.new()
 	projectile.kind = kind
 	projectile.owner_index = fighter.player_index
@@ -1506,6 +1609,8 @@ func _tick_pickups(delta: float) -> void:
 		if pickups.size() < MAX_PICKUPS:
 			var points := map.item_spawn_points()
 			spawn_pickup(ItemPickup.KINDS[rng.randi() % ItemPickup.KINDS.size()], points[rng.randi() % points.size()])
+	if map.has_mechas:
+		_tick_beacons(delta)
 	for pickup: ItemPickup in pickups.duplicate():
 		if not map.blast_zone.has_point(pickup.position):
 			_remove_pickup(pickup)
@@ -1514,6 +1619,21 @@ func _tick_pickups(delta: float) -> void:
 			if not fighter.eliminated and fighter.body_rect().intersects(pickup.rect()) and fighter.take_item(pickup.kind):
 				_remove_pickup(pickup)
 				break
+
+
+## Ville : une balise d'appel tombe de temps en temps, tant qu'il y a moins de mechas (déjà là, en
+## route, ou dont la balise est par terre ou en main) que de joueurs encore en jeu.
+func _tick_beacons(delta: float) -> void:
+	_beacon_timer -= delta
+	if _beacon_timer > 0.0:
+		return
+	_beacon_timer = BEACON_SPAWN_TIME
+	var count := mechas.size()
+	count += pickups.filter(func(p: ItemPickup) -> bool: return p.kind == "balise").size()
+	count += fighters.filter(func(f: Fighter) -> bool: return f.item == "balise").size()
+	if count < _alive_count():
+		var points := map.item_spawn_points()
+		spawn_pickup("balise", points[rng.randi() % points.size()])
 
 
 func spawn_pickup(kind: String, where: Vector2) -> ItemPickup:
