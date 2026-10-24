@@ -1562,11 +1562,17 @@ func _ready() -> void:
 	game._weapon_spawn_timer = 1e9
 	var knight: Fighter = game.fighters[0]
 	var walker: Fighter = game.fighters[1]
-	var kcmd := {"b": false, "rb": false}
+	var kcmd := {"b": false, "rb": false, "u": false, "rt": false}
 	knight.input_source = Scripted.new(func(s, f):
 		s.block_held = kcmd.b
 		s.throw_pressed = kcmd.rb
-		kcmd.rb = false)
+		s.ultimate_pressed = kcmd.u
+		s.attack_pressed = kcmd.u
+		s.heavy_pressed = kcmd.u
+		s.item_pressed = kcmd.rt
+		kcmd.rb = false
+		kcmd.u = false
+		kcmd.rt = false)
 	walker.input_source = Scripted.new(func(s, f): pass)
 	knight.global_position = Vector2(mx, my - 40.0)
 	walker.global_position = Vector2(mx + 500.0, my - 40.0)
@@ -1672,6 +1678,105 @@ func _ready() -> void:
 	kcmd.rb = true
 	await step(15)
 	check(rival.hp == rival_hp - Game.MECHA_WEAR_PUNCH, "Ville : le coup de poing use l'autre mecha de 3 (%d -> %d)" % [rival_hp, rival.hp])
+	# Missiles (objet, RT en mecha) : on ne les prend qu'en mecha ; 4 missiles suivent l'ennemi
+	walker.leave_mecha()
+	rival.queue_free()
+	await step(2)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(guard.global_position.x + 700.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	walker.velocity = Vector2.ZERO
+	await step(60)
+	check(not walker.take_item("missiles"), "Ville : à pied, on ne prend pas les missiles")
+	game.spawn_pickup("missiles", guard.body_rect().get_center())
+	await step(3)
+	check(knight.item == "missiles", "Ville : en mecha, on ramasse les missiles en passant dessus")
+	var walker_lives := walker.lives
+	kcmd.rt = true
+	var missiles_seen := {}
+	for i in 40:
+		await step(1)
+		for p in game.projectiles:
+			if p.kind == "missile":
+				missiles_seen[p.get_instance_id()] = true
+		if i == 20:
+			await shot("ville_mecha_missiles")
+	check(missiles_seen.size() == Mecha.MISSILES and knight.item == "", "Ville : RT tire %d missiles" % missiles_seen.size())
+	await step(120)
+	check(walker.is_stunned() or walker.lives < walker_lives, "Ville : les missiles suivent l'ennemi et le touchent")
+	# Ultimes en mecha (X + Y, jauge pleine). Barre : grand laser qui gèle (à pied et en mecha)
+	await step(200)
+	for pr in game.projectiles.duplicate():
+		game._remove_projectile(pr)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(guard.global_position.x + 600.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	walker.velocity = Vector2.ZERO
+	await step(30)
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(2)
+	check(guard.ultimate == "laser" and knight.ultimate_points == 0 and game.projectiles.is_empty(),
+		"Ville : X + Y avec la jauge pleine lance l'ultime en mecha (sans tirer en plus)")
+	await step(int((Mecha.ULT_LASER_STARTUP + 0.15) * 60.0))
+	await shot("ville_mecha_ultime_laser")
+	await step(20)
+	check(walker.is_frozen(), "Ville : le grand laser du mecha gèle celui qui est à pied")
+	await step(200)
+	walker.recover()
+	walker._frozen_timer = 0.0
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(guard.global_position.x + 600.0, my - 40.0)
+	await step(2)
+	var target_mecha: Mecha = game.call_mecha(walker)
+	await step(100)
+	walker._board(target_mecha)
+	await step(5)
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(int((Mecha.ULT_LASER_STARTUP + 0.2) * 60.0))
+	check(target_mecha.is_frozen() and target_mecha.hp == Mecha.WEAR_MAX - Game.MECHA_WEAR_ULT_LASER,
+		"Ville : le grand laser gèle l'autre mecha et l'use de 10 (%d)" % target_mecha.hp)
+	# Jumb : onde de 600 px (l'autre mecha s'use de 8 et recule)
+	await step(200)
+	knight.stats = knight.stats.duplicate()
+	knight.stats.ultimate = "onde"
+	var hp_wave := target_mecha.hp
+	var x_wave := target_mecha.global_position.x
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(int((Mecha.ULT_WAVE_STARTUP + 0.2) * 60.0))
+	await shot("ville_mecha_ultime_onde")
+	await step(20)
+	check(target_mecha.hp == hp_wave - Game.MECHA_WEAR_ULT_WAVE and target_mecha.global_position.x > x_wave + 30.0,
+		"Ville : l'onde du mecha use l'autre mecha de 8 et le repousse (%d px)" % (target_mecha.global_position.x - x_wave))
+	# Jib : 3 traversées, chacune use l'autre mecha
+	await step(120)
+	knight.stats.ultimate = "eclair"
+	target_mecha.global_position = Vector2(guard.global_position.x + 500.0, my)  # l'onde l'a fait tomber du toit
+	target_mecha.velocity = Vector2.ZERO
+	await step(10)
+	var hp_bolt := target_mecha.hp
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(90)
+	check(target_mecha.hp <= hp_bolt - 2 * Game.MECHA_WEAR_ULT_BOLT and guard.ultimate == "",
+		"Ville : l'éclair du mecha traverse l'autre mecha plusieurs fois (%d -> %d)" % [hp_bolt, target_mecha.hp])
+	# Un blocage parfait (du mecha visé) arrête l'ultime : contre
+	await step(60)
+	knight.stats.ultimate = "laser"
+	target_mecha.global_position = Vector2(guard.global_position.x + 500.0, my)
+	target_mecha.velocity = Vector2.ZERO
+	await step(10)
+	var hp_parry := target_mecha.hp
+	game.gauge.points = 0.0
+	walker.input_source = Scripted.new(func(s, f): s.block_held = f >= 20)
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(int((Mecha.ULT_LASER_STARTUP + 0.15) * 60.0))
+	check(target_mecha.hp == hp_parry and not target_mecha.is_frozen() and guard.ultimate == "" and game.gauge.points >= 3.0,
+		"Ville : un blocage parfait du mecha visé arrête le grand laser (contre)")
+	walker.input_source = Scripted.new(func(s, f): pass)
 	# Ville : le parc d'attractions et le parc arboré (captures)
 	if shot_dir != "":
 		for place in [["ville_fete_foraine", -8000.0, -6900.0], ["ville_parc", 6900.0, 8600.0]]:

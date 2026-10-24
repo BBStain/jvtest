@@ -55,12 +55,23 @@ const MECHA_BLAST_RADIUS := 230.0            ## l'explosion d'un mecha : rayon (
 const MECHA_BLAST_PUSH := 1000.0
 const PUNCH_KNOCKBACK := 1300.0               ## coup de poing de mecha sur un joueur à pied (comme une grosse lourde)
 const PUNCH_BLOCK_DAMAGE := 2                 ## ... et sur les blocs de la ville
+const MECHA_WEAR_ULT_LASER := 10             ## ultimes en mecha : le grand laser de Barre (et il gèle 3 s)...
+const MECHA_WEAR_ULT_WAVE := 8                ## ... l'onde de Jumb (et elle repousse)...
+const MECHA_WEAR_ULT_BOLT := 5                ## ... chaque traversée de Jib
+const ULT_WAVE_PUSH := 1400.0                 ## l'onde de Jumb repousse les mechas...
+const ULT_WAVE_KNOCKBACK := 1900.0            ## ... et projette très loin ceux qui sont à pied
+const ULT_WAVE_BLOCK_DAMAGE := 3
+const ULT_BOLT_KNOCKBACK := 900.0
 const MECHA_PARRY_PUSH := 900.0               ## mecha dont le coup est bloqué parfaitement : repoussé
 const MECHA_BULLET_SPEED := 2100.0           ## les balles de la rafale vont plus vite que celles du pistolet
 const ROCKET_SPEED := [950.0, 1500.0]        ## roquette : non chargée, chargée à fond
 const ROCKET_RADIUS := [110.0, 160.0]        ## rayon de son explosion
 const ROCKET_KNOCKBACK := [1000.0, 1350.0]
 const ROCKET_CANCEL_BULLETS := 3             ## balles adverses pour annuler une roquette en vol
+const MISSILE_SPEED := 950.0                  ## missiles de mecha (objet) : ils suivent l'ennemi le plus proche...
+const MISSILE_RADIUS := 75.0                  ## ... et font une petite explosion
+const MISSILE_KNOCKBACK := 900.0
+const MECHA_WEAR_MISSILE := 3
 const LAUNCHER_ROCKET_SPEED := 1300.0         ## la roquette du lance-roquette (à pied) : grosse mais esquivable
 const ITEM_TOSS_LOCK := 0.6                   ## arme à 2 mains jetée : son lanceur ne la reprend pas avant ce temps
 const WEAPON_BREAK_TIME_SCALE := 0.25       ## arme cassée (3e contre de sa lourde) : court ralenti...
@@ -274,6 +285,7 @@ func _physics_process(delta: float) -> void:
 	_resolve_hits()
 	_resolve_mecha_hits()
 	_resolve_punches()
+	_resolve_mecha_ultimates()
 	_resolve_chunks()
 	_resolve_lasers()
 	_resolve_waves()
@@ -1174,7 +1186,7 @@ func _resolve_projectiles() -> void:
 				_resolve_arrow(projectile)
 			"grenade":
 				_resolve_grenade(projectile)
-			"roquette":
+			"roquette", "missile":
 				_resolve_rocket(projectile)
 			_:
 				_resolve_spear(projectile)
@@ -1297,6 +1309,8 @@ func _deflect_bullet(bullet: Projectile, deflector: Fighter) -> void:
 	bullet.velocity = dir * bullet.velocity.length() * DEFLECT_SPEED
 	bullet.rotation = dir.angle()
 	bullet.owner_index = deflector.player_index
+	if bullet.kind == "missile":
+		bullet.homing = _homing_node(shooter)  # renvoyé : il suit maintenant son tireur
 	var perfect := error <= 0.0
 	_spawn_clash_mark(bullet.position, false, PARRY_COLOR if perfect else Color.WHITE)
 	if perfect:
@@ -1458,7 +1472,7 @@ func _resolve_mecha_hits() -> void:
 func _projectiles_hit_mechas() -> void:
 	for projectile: Projectile in projectiles.duplicate():
 		if projectile.state != Projectile.State.FLYING or projectile.finished \
-				or not projectile.kind in ["balle", "fleche", "lance", "roquette"]:
+				or not projectile.kind in ["balle", "fleche", "lance", "roquette", "missile"]:
 			continue
 		for mecha in mechas.duplicate():
 			if not is_instance_valid(mecha) or not mecha.is_ready() \
@@ -1466,7 +1480,7 @@ func _projectiles_hit_mechas() -> void:
 				continue
 			if not _segment_hits_rect(projectile.tail(), projectile.tip(), Projectile.RADIUS, mecha.body_rect()):
 				continue
-			if (projectile.kind == "balle" or projectile.kind == "roquette") and mecha.is_parrying():
+			if projectile.kind in ["balle", "roquette", "missile"] and mecha.is_parrying():
 				# Blocage parfait du mecha : la balle (ou la roquette) repart droit sur son tireur
 				_wear_mecha(mecha, 0, projectile.kind == "roquette")
 				_send_back(projectile, mecha.pilot)
@@ -1481,7 +1495,7 @@ func _projectiles_hit_mechas() -> void:
 				"lance":
 					projectile.drop()
 					_wear_mecha(mecha, MECHA_WEAR_SPEAR, true)
-				"roquette":
+				"roquette", "missile":
 					projectile.finished = true  # elle explose tout de suite (voir _resolve_rocket)
 			break
 
@@ -1510,12 +1524,120 @@ func _send_back(projectile: Projectile, by: Fighter) -> void:
 	projectile.position += dir * 30.0  # qu'il ne retouche pas tout de suite le bouclier
 	if by != null:
 		projectile.owner_index = by.player_index
+	if projectile.kind == "missile":
+		projectile.homing = _homing_node(shooter)
 
 
 ## Du point "from" vers le joueur, à plat (pour repousser).
 func _push_dir_from(from: Vector2, fighter: Fighter) -> Vector2:
 	var side := signf(fighter.global_position.x - from.x)
 	return Vector2(side if side != 0.0 else 1.0, 0.0)
+
+
+## X + Y en mecha : l'ultime du pilote en plus gros (voir Mecha._start_ultimate). Comme à pied,
+## seul un blocage parfait l'arrête (contre de lourde, le mecha est repoussé) ; le bouclier ramassé
+## protège ; un blocage normal non. Un mecha touché s'use (son bouclier encaisse à sa place).
+##   grand laser (Barre) : traverse tout, casse les blocs sur son chemin, gèle 3 s (joueur ou mecha) ;
+##   onde (Jumb) : 600 px autour, projette ceux à pied, repousse les mechas, abîme les blocs ;
+##   éclair (Jib) : chaque traversée frappe ce qu'elle touche.
+func _resolve_mecha_ultimates() -> void:
+	for mecha in mechas.duplicate():
+		if not is_instance_valid(mecha) or not mecha.is_ready() or mecha.ultimate == "" or mecha.pilot == null:
+			continue
+		var shooter: Fighter = mecha.pilot
+		var center: Vector2 = mecha.body_rect().get_center()
+		var targets: Array = []  # [ce qui est touché, sa zone]
+		match mecha.ultimate:
+			"laser":
+				if not mecha.is_laser_firing():
+					continue
+				var a: Vector2 = mecha.laser_start()
+				var b: Vector2 = mecha.laser_end()
+				if not mecha.laser_blocks_done:
+					mecha.laser_blocks_done = true
+					for block in map.windows():
+						if not block.broken and _segment_hits_rect(a, b, Mecha.ULT_LASER_RADIUS, block.rect()):
+							if block is CityBlock:
+								(block as CityBlock).hit(Ville.BLOCK_HP)
+							else:
+								block.smash()
+				for fighter in fighters:
+					if not fighter.is_piloting() and _segment_hits_rect(a, b, Mecha.ULT_LASER_RADIUS, fighter.body_rect()):
+						targets.append(fighter)
+				for other in mechas:
+					if other != mecha and is_instance_valid(other) and other.is_ready() \
+							and _segment_hits_rect(a, b, Mecha.ULT_LASER_RADIUS, other.body_rect()):
+						targets.append(other)
+			"onde":
+				var r: float = mecha.wave_radius()
+				if r <= 0.0:
+					continue
+				for block in map.windows():
+					if not block.broken and not mecha.ult_blocks.has(block) and _rect_distance(block.rect(), center) <= r:
+						mecha.ult_blocks[block] = true
+						if block is CityBlock:
+							(block as CityBlock).hit(ULT_WAVE_BLOCK_DAMAGE)
+						else:
+							block.smash()
+				for fighter in fighters:
+					if not fighter.is_piloting() and _rect_distance(fighter.body_rect(), center) <= r:
+						targets.append(fighter)
+				for other in mechas:
+					if other != mecha and is_instance_valid(other) and other.is_ready() and _rect_distance(other.body_rect(), center) <= r:
+						targets.append(other)
+			"eclair":
+				if not mecha.is_bolt_passing():
+					continue
+				var reach: Rect2 = mecha.body_rect().grow(20.0)
+				for fighter in fighters:
+					if not fighter.is_piloting() and reach.intersects(fighter.body_rect()):
+						targets.append(fighter)
+				for other in mechas:
+					if other != mecha and is_instance_valid(other) and other.is_ready() and reach.intersects(other.body_rect()):
+						targets.append(other)
+		for target in targets:
+			if target in mecha.ult_hit or mecha.ultimate == "":
+				continue
+			if target is Fighter:
+				var victim: Fighter = target
+				if victim == shooter or victim.eliminated or not victim.can_be_hit():
+					continue
+				mecha.ult_hit.append(victim)
+				if victim.is_item_shielded():
+					_spawn_clash_mark(victim.global_position, false, ItemPickup.color_of("bouclier"))
+				elif victim.is_parrying():
+					_spawn_clash_mark(victim.global_position, true, PARRY_COLOR)
+					_count_counter(true, [victim])
+					victim.recover()
+					victim.reset_cooldown()
+					mecha.parried(_push_dir_from(victim.global_position, shooter) * MECHA_PARRY_PUSH)
+				else:
+					var away := (victim.global_position - center).normalized()
+					match mecha.ultimate:
+						"laser":
+							victim.freeze()
+							_spawn_clash_mark(victim.global_position, true, Fighter.LASER_COLOR)
+						"onde":
+							victim.take_hit((away + Vector2(0.0, -Fighter.WAVE_LIFT)).normalized(), ULT_WAVE_KNOCKBACK)
+							_spawn_clash_mark(victim.global_position, true, Fighter.WAVE_COLOR)
+						"eclair":
+							victim.take_hit(mecha.velocity.normalized(), ULT_BOLT_KNOCKBACK)
+							_spawn_clash_mark(victim.global_position, false, Fighter.BOLT_COLOR)
+					if victim.is_stunned() and _alive_count() == 2:
+						_stun_focus = [shooter, victim]
+			else:
+				var hit_mecha: Mecha = target
+				mecha.ult_hit.append(hit_mecha)
+				var wear := MECHA_WEAR_ULT_LASER if mecha.ultimate == "laser" else MECHA_WEAR_ULT_WAVE if mecha.ultimate == "onde" else MECHA_WEAR_ULT_BOLT
+				var kind: String = mecha.ultimate
+				if _wear_mecha(hit_mecha, wear, true) == "parry":
+					mecha.parried((center - hit_mecha.body_rect().get_center()).normalized() * MECHA_PARRY_PUSH)
+				elif is_instance_valid(hit_mecha) and not hit_mecha.is_destroyed():
+					if kind == "laser":
+						hit_mecha.freeze()
+					elif kind == "onde":
+						var push_dir := (hit_mecha.body_rect().get_center() - center).normalized()
+						hit_mecha.velocity = (push_dir + Vector2(0.0, -0.3)).normalized() * ULT_WAVE_PUSH
 
 
 ## RB en mecha : le coup de poing. Il frappe une fois chacun de ce qu'il touche devant lui :
@@ -1587,7 +1709,7 @@ func _resolve_punches() -> void:
 func _resolve_shot_cancels(delta: float) -> void:
 	var shots: Array[Projectile] = []
 	for projectile in projectiles:
-		if (projectile.kind == "balle" or projectile.kind == "roquette") and not projectile.finished:
+		if projectile.kind in ["balle", "roquette", "missile"] and not projectile.finished:
 			shots.append(projectile)
 	var gone := {}
 	for i in shots.size():
@@ -1603,6 +1725,15 @@ func _resolve_shot_cancels(delta: float) -> void:
 				gone[a] = true
 				gone[b] = true
 				_spawn_clash_mark(where, a.kind == "roquette")
+				continue
+			if a.kind == "missile" or b.kind == "missile":
+				# Un missile s'annule avec ce qu'il croise (une balle suffit : petit contre pour son tireur)
+				gone[a] = true
+				gone[b] = true
+				_spawn_clash_mark(where, false)
+				for shot in [a, b]:
+					if shot.kind == "balle":
+						_count_counter(false, [fighters[shot.owner_index]])
 				continue
 			var rocket := a if a.kind == "roquette" else b
 			var bullet := b if rocket == a else a
@@ -1634,7 +1765,7 @@ func _shots_hit_chunks(delta: float) -> void:
 			continue
 		var parts := chunk.current_rects()
 		for projectile: Projectile in projectiles.duplicate():
-			if not (projectile.kind == "balle" or projectile.kind == "roquette") or projectile.finished:
+			if not projectile.kind in ["balle", "roquette", "missile"] or projectile.finished:
 				continue
 			var from := projectile.tail() - projectile.velocity * delta
 			var part_hit := Rect2()
@@ -1644,8 +1775,8 @@ func _shots_hit_chunks(delta: float) -> void:
 					break
 			if part_hit.size == Vector2.ZERO:
 				continue
-			var rocket := projectile.kind == "roquette"
-			if chunk.take_attack(rocket):
+			var rocket := projectile.kind != "balle"  # roquette et missile explosent dessus
+			if chunk.take_attack(projectile.kind == "roquette"):
 				_spawn_clash_mark(part_hit.get_center(), true)
 				_count_counter(true, [fighters[projectile.owner_index]])
 			if rocket:
@@ -1669,7 +1800,14 @@ func _on_mecha_fired(mecha: Mecha, kind: String, origin: Vector2, direction: Vec
 	projectile.position = origin
 	var center := mecha.body_rect().get_center()
 	var wall := get_world_2d().direct_space_state.intersect_ray(PhysicsRayQueryParameters2D.create(center, origin, 1))
-	if kind == "balle":
+	if kind == "missile":
+		projectile.velocity = direction * MISSILE_SPEED
+		projectile.length = 26.0
+		projectile.color = mecha.pilot.color
+		var target := _closest_opponent(mecha.pilot)
+		if target != null:
+			projectile.homing = _homing_node(target)
+	elif kind == "balle":
 		if not wall.is_empty():
 			if wall.collider is BreakableWindow:
 				(wall.collider as BreakableWindow).smash()
@@ -1688,6 +1826,11 @@ func _on_mecha_fired(mecha: Mecha, kind: String, origin: Vector2, direction: Vec
 			projectile.position = wall.position
 			projectile.finished = true  # elle explose contre le mur collé au canon
 	_add_projectile(projectile)
+
+
+## Ce qu'un missile suit pour toucher ce joueur : son mecha s'il pilote, sinon lui.
+func _homing_node(fighter: Fighter) -> Node2D:
+	return fighter.mecha if fighter.is_piloting() else fighter
 
 
 ## Une roquette : elle explose contre le décor, un mecha (voir _projectiles_hit_mechas), le premier
@@ -1711,6 +1854,10 @@ func _resolve_rocket(rocket: Projectile) -> void:
 		if victim.is_parrying():
 			_counter_rocket(rocket, victim)
 			return
+	if rocket.kind == "missile":
+		_explode(rocket.tip() if not rocket.finished else rocket.position, MISSILE_KNOCKBACK, MISSILE_RADIUS, MECHA_WEAR_MISSILE, rocket.owner_index)
+		_remove_projectile(rocket)
+		return
 	var p := rocket.blast
 	_explode(rocket.tip() if not rocket.finished else rocket.position, lerpf(ROCKET_KNOCKBACK[0], ROCKET_KNOCKBACK[1], p),
 		lerpf(ROCKET_RADIUS[0], ROCKET_RADIUS[1], p), roundi(lerpf(MECHA_WEAR_ROCKET[0], MECHA_WEAR_ROCKET[1], p)), rocket.owner_index)
@@ -2048,7 +2195,8 @@ func _tick_pickups(delta: float) -> void:
 		for fighter in fighters:
 			if pickup.thrown_lock > 0.0 and fighter.player_index == pickup.thrown_by:
 				continue
-			if not fighter.eliminated and fighter.body_rect().intersects(pickup.rect()) and fighter.take_item(pickup.kind, pickup.ammo):
+			var reach := fighter.mecha.body_rect() if fighter.is_piloting() else fighter.body_rect()  # en mecha : tout le mecha
+			if not fighter.eliminated and reach.intersects(pickup.rect()) and fighter.take_item(pickup.kind, pickup.ammo):
 				_remove_pickup(pickup)
 				break
 

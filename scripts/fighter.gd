@@ -646,8 +646,8 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 ## On ramasse un objet (seulement si on n'en a pas déjà un).
 ## "ammo" : ce qu'il reste dans une arme à 2 mains jetée par un autre (-1 = neuve).
 func take_item(kind: String, ammo := -1) -> bool:
-	if item != "" or mecha != null:
-		return false
+	if item != "" or (mecha != null) != (kind == "missiles"):
+		return false  # en mecha, on ne prend que les missiles (et eux, seulement en mecha)
 	item = kind
 	item_ammo = PISTOL_AMMO if kind == "pistolet" else 0
 	if kind == "grappin":

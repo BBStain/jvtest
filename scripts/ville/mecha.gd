@@ -14,6 +14,9 @@ extends CharacterBody2D
 ##   B : bouclier d'énergie (il encaisse à la place du mecha ; vide, il est cassé pour de bon) ;
 ##       levé juste avant le coup (PARRY_WINDOW) = blocage parfait, un contre
 ##   RB : coup de poing devant soi
+##   RT : missiles (objet ramassé en mecha) : 4 missiles qui suivent l'ennemi le plus proche
+##   X + Y : l'ultime du pilote en plus gros (jauge d'ultime pleine) : Barre = grand laser qui
+##       traverse tout et gèle 3 s, Jumb = onde de choc de 600 px, Jib = 3 traversées éclair
 ## Il s'use : WEAR_MAX points de solidité, les coups et les tirs en enlèvent (voir game.gd), on le voit
 ## aux fissures. À 0 il explose (signal destroyed) : le pilote est éjecté et sonné, sans perdre de vie.
 ## Gros et lourd, mais vif : il démarre et s'arrête vite, il ne traverse jamais les planchers.
@@ -71,6 +74,21 @@ const SHIELD_MAX := 20                  ## B : le bouclier d'énergie encaisse 2
 const SHIELD_WALK_MULT := 0.4           ## bouclier levé : il avance lentement, ne tire pas, ne dashe pas
 const PARRY_WINDOW := Fighter.PARRY_WINDOW  ## B levé depuis au plus ça au moment du coup : blocage parfait
 const PARRY_LOCK := 1.0                 ## frappé sur un blocage parfait : plus de poing ni de tir pendant 1 s
+const MISSILES := 4                     ## RT avec l'objet missiles : 4 missiles...
+const MISSILE_GAP := 0.12               ## ... un toutes les 0,12 s, qui partent vers le haut puis suivent l'ennemi
+const ULT_LASER_STARTUP := 0.4          ## Barre : le grand laser vise (fin trait bleu)...
+const ULT_LASER_ACTIVE := 0.6           ## ... puis tire : il traverse tout (blocs compris) et gèle
+const ULT_LASER_RANGE := 2600.0
+const ULT_LASER_RADIUS := 45.0          ## demi-épaisseur du rayon
+const ULT_WAVE_STARTUP := 0.3           ## Jumb : il se ramasse...
+const ULT_WAVE_ACTIVE := 0.45           ## ... puis l'onde s'ouvre jusqu'à 600 px
+const ULT_WAVE_RADIUS := 600.0
+const ULT_BOLT_STARTUP := 0.15          ## Jib : un éclair l'entoure, puis 3 traversées à travers l'ennemi
+const ULT_BOLT_PASSES := 3
+const ULT_BOLT_PASS_TIME := 0.2
+const ULT_BOLT_GAP := 0.12
+const ULT_BOLT_SPEED := 3000.0
+const FREEZE_TIME := 3.0                ## gelé par le grand laser : plus rien ne marche pendant 3 s
 const PUNCH_STARTUP := 0.06             ## RB : le poing part...
 const PUNCH_ACTIVE := 0.12              ## ... frappe pendant ce temps...
 const PUNCH_COOLDOWN := 0.5             ## ... et revient au plus toutes les 0,5 s
@@ -110,7 +128,19 @@ var _shield_hold := 0.0                 ## B gardé depuis ce temps (blocage par
 var _shield_flash := 0.0                ## le bouclier vient d'encaisser (ou de casser) : il brille
 var _punch_time := -1.0                 ## RB : temps depuis le début du coup de poing (-1 = pas de poing)
 var _punch_cooldown := 0.0
-var punch_hit := []                     ## ce que ce coup de poing a déjà touché (une fois chacun)
+var _missiles_left := 0
+var _missile_timer := 0.0
+var punch_hit := []
+var ultimate := ""                      ## l'ultime en cours : "laser", "onde", "eclair" ("" = aucun)
+var ult_time := 0.0
+var ult_dir := Vector2.RIGHT            ## grand laser : sa direction
+var ult_hit := []                       ## ce que l'ultime a déjà touché (éclair : pendant cette traversée)
+var ult_blocks := {}                    ## onde : les blocs déjà abîmés
+var ult_target: Node2D                  ## éclair : ce qu'il traverse (le mecha de l'ennemi, ou l'ennemi à pied)
+var laser_blocks_done := false
+var frozen_timer := 0.0
+var _bolt_pass := -1
+var _dash_speed := DASH_SPEED                     ## ce que ce coup de poing a déjà touché (une fois chacun)
 
 
 func _ready() -> void:
@@ -154,9 +184,15 @@ func tick(input: InputState, delta: float) -> void:
 				landed.emit(self)
 			queue_redraw()
 			return
-	if pilot == null:
-		input = InputState.new()
+	frozen_timer -= delta
+	if pilot == null or frozen_timer > 0.0:
+		input = InputState.new()  # vide, ou gelé par un grand laser : il ne fait plus rien
 	var on_floor := is_on_floor()
+	if ultimate == "" and pilot != null and input.ultimate_pressed and pilot.is_ultimate_ready():
+		_start_ultimate()
+	if ultimate != "":
+		_tick_ultimate(delta)
+		input = InputState.new()  # pendant l'ultime, il ne fait rien d'autre
 	_dash_timer -= delta
 	_dash_cooldown -= delta
 	var exiting := input.stick.y > EXIT_STICK and input.jump_held
@@ -173,9 +209,10 @@ func tick(input: InputState, delta: float) -> void:
 	if input.dash_pressed and _dash_cooldown <= 0.0 and not _shielding:
 		_dash_dir = input.stick.normalized() if input.stick.length() >= 0.3 else Vector2(facing, 0.0)
 		_dash_timer = DASH_TIME
+		_dash_speed = DASH_SPEED
 		_dash_cooldown = DASH_COOLDOWN
 	if _dash_timer > 0.0:
-		velocity = _dash_dir * DASH_SPEED
+		velocity = _dash_dir * _dash_speed
 		if _dash_timer <= delta:
 			velocity *= DASH_END_KEEP
 	else:
@@ -219,8 +256,22 @@ func _tick_weapons(input: InputState, delta: float) -> void:
 	if pilot == null or _shielding:
 		_burst_left = 0
 		_charge = -1.0
+		_missiles_left = 0
 		visual.turret_charge = -1.0
 		return
+	if input.item_pressed and pilot.item == "missiles" and _missiles_left <= 0:
+		pilot.item = ""
+		_missiles_left = MISSILES
+		_missile_timer = 0.0
+	if _missiles_left > 0:
+		_missile_timer -= delta
+		if _missile_timer <= 0.0:
+			# Ils partent de la tourelle en éventail vers le haut, puis tournent vers leur cible
+			var spread := (_missiles_left - (MISSILES + 1) / 2.0) * 0.25
+			var dir := Vector2(facing * 0.45, -1.0).normalized().rotated(spread)
+			fired.emit(self, "missile", global_position + TURRET_PIVOT + Vector2(0.0, -30.0), dir, 0.0)
+			_missiles_left -= 1
+			_missile_timer = MISSILE_GAP
 	var flick := input.aimed_attack_pressed and input.aim != Vector2.ZERO
 	if (input.attack_pressed or flick) and _gun_cooldown <= 0.0:
 		_burst_left = BURST_SHOTS
@@ -249,10 +300,116 @@ func _tick_weapons(input: InputState, delta: float) -> void:
 	visual.turret_charge = clampf(_charge / ROCKET_FULL_CHARGE, 0.0, 1.0) if _charge >= 0.0 else -1.0
 
 
+## X + Y, jauge d'ultime du pilote pleine : l'ultime de son perso, en plus gros.
+func _start_ultimate() -> void:
+	pilot.ultimate_points = 0
+	ultimate = pilot.stats.ultimate
+	ult_time = 0.0
+	ult_hit.clear()
+	ult_blocks.clear()
+	laser_blocks_done = false
+	_bolt_pass = -1
+	_burst_left = 0
+	_charge = -1.0
+	_punch_time = -1.0
+	ult_dir = aim_direction(TURRET_PIVOT)
+	var target := pilot.target
+	ult_target = null
+	if target != null and not target.eliminated:
+		ult_target = target.mecha if target.is_piloting() else target
+
+
+func _tick_ultimate(delta: float) -> void:
+	ult_time += delta
+	match ultimate:
+		"laser":
+			velocity.x = 0.0
+			if ult_time < ULT_LASER_STARTUP:
+				ult_dir = aim_direction(TURRET_PIVOT)  # il vise l'ennemi pendant qu'il se prépare
+				_face(ult_dir)
+			elif ult_time >= ULT_LASER_STARTUP + ULT_LASER_ACTIVE:
+				stop_ultimate()
+		"onde":
+			velocity.x = 0.0
+			if ult_time >= ULT_WAVE_STARTUP + ULT_WAVE_ACTIVE:
+				stop_ultimate()
+		"eclair":
+			if ult_time < ULT_BOLT_STARTUP:
+				velocity = Vector2.ZERO
+				return
+			var cycle := ULT_BOLT_PASS_TIME + ULT_BOLT_GAP
+			var index := int((ult_time - ULT_BOLT_STARTUP) / cycle)
+			if index >= ULT_BOLT_PASSES:
+				stop_ultimate()
+				return
+			if index != _bolt_pass:
+				# Nouvelle traversée : il vise à nouveau l'ennemi et fonce à travers lui
+				_bolt_pass = index
+				ult_hit.clear()
+				var aim := Vector2(facing, 0.0)
+				if is_instance_valid(ult_target):
+					aim = (_center_of(ult_target) - body_rect().get_center()).normalized()
+				_dash_dir = aim
+				_dash_speed = ULT_BOLT_SPEED
+				_dash_timer = ULT_BOLT_PASS_TIME
+				_face(aim)
+			elif _dash_timer <= 0.0:
+				velocity = Vector2.ZERO  # petit arrêt entre deux traversées
+
+
+func _center_of(node: Node2D) -> Vector2:
+	return node.body_rect().get_center() if node.has_method("body_rect") else node.global_position
+
+
+func stop_ultimate() -> void:
+	ultimate = ""
+	if _dash_speed != DASH_SPEED:
+		_dash_timer = 0.0
+		_dash_speed = DASH_SPEED
+
+
+func is_laser_firing() -> bool:
+	return ultimate == "laser" and ult_time >= ULT_LASER_STARTUP
+
+
+func laser_start() -> Vector2:
+	return turret_muzzle(ult_dir)
+
+
+func laser_end() -> Vector2:
+	return laser_start() + ult_dir * ULT_LASER_RANGE
+
+
+## Onde de Jumb : son rayon en ce moment (0 = pas d'onde).
+func wave_radius() -> float:
+	if ultimate != "onde" or ult_time < ULT_WAVE_STARTUP:
+		return 0.0
+	return lerpf(80.0, ULT_WAVE_RADIUS, clampf((ult_time - ULT_WAVE_STARTUP) / ULT_WAVE_ACTIVE, 0.0, 1.0))
+
+
+func is_bolt_passing() -> bool:
+	return ultimate == "eclair" and _dash_timer > 0.0
+
+
+## Touché par un grand laser : gelé (plus rien ne marche) pendant FREEZE_TIME.
+func freeze() -> void:
+	frozen_timer = FREEZE_TIME
+	stop_ultimate()
+	_punch_time = -1.0
+	_burst_left = 0
+	_charge = -1.0
+	_missiles_left = 0
+	_dash_timer = 0.0
+
+
+func is_frozen() -> bool:
+	return frozen_timer > 0.0
+
+
 ## B : le bouclier d'énergie se lève (pas pendant un dash ni un coup de poing ; plus jamais une fois cassé).
 func _tick_shield(input: InputState, delta: float) -> void:
 	_shield_flash -= delta
-	_shielding = pilot != null and input.block_held and not shield_broken and _dash_timer <= 0.0 and _punch_time < 0.0
+	_shielding = pilot != null and input.block_held and not shield_broken and _dash_timer <= 0.0 and _punch_time < 0.0 and ultimate == ""
 	_shield_hold = _shield_hold + delta if _shielding else 0.0
 
 
@@ -285,6 +442,7 @@ func absorb(amount: int) -> String:
 ## Ce qu'il a frappé était en blocage parfait : repoussé, et plus de poing ni de tir un instant.
 func parried(push: Vector2) -> void:
 	velocity = push
+	stop_ultimate()
 	_punch_time = -1.0
 	_burst_left = 0
 	_charge = -1.0
@@ -394,7 +552,7 @@ func _update_visual(on_floor: bool) -> void:
 	if dir.x * facing < 0.0:
 		dir.x = 0.0  # il est derrière : les armes pointent vers le haut ou le bas, sans se retourner
 	visual.aim = clampf(atan2(dir.y, absf(dir.x)), -AIM_UP_MAX, AIM_DOWN_MAX)
-	visual.modulate = Color(2.0, 2.0, 2.0) if _hit_flash > 0.0 else Color.WHITE
+	visual.modulate = Color(2.0, 2.0, 2.0) if _hit_flash > 0.0 else (Color(0.6, 0.85, 1.4) if is_frozen() else Color.WHITE)
 
 
 ## Le pilote monte (game.gd vérifie qu'il le touche et qu'il pousse vers le haut).
@@ -447,6 +605,11 @@ func _draw() -> void:
 		return
 	_draw_shield()
 	_draw_punch()
+	_draw_ultimate()
+	if pilot != null and pilot.item == "missiles":
+		# Les missiles prêts : 4 petits traits roses sur la tourelle
+		for i in MISSILES:
+			draw_rect(Rect2(Vector2(-30.0 + i * 16.0, TURRET_PIVOT.y - 60.0), Vector2(8.0, 22.0)), ItemPickup.color_of("missiles"))
 	# Sortie en cours : un anneau qui se remplit au-dessus du mecha
 	if _exit_hold > 0.0:
 		var center := Vector2(0.0, -BODY.y - 70.0)
@@ -473,6 +636,33 @@ func _draw_shield() -> void:
 		points.append(center + Vector2(cos(a) * (BODY.x / 2.0 + 45.0), sin(a) * (BODY.y / 2.0 + 40.0)))
 	draw_colored_polygon(points, Color(color, 0.12 + 0.18 * left))
 	draw_polyline(points, Color(color, 0.5 + 0.5 * left), 5.0 if _shield_flash > 0.0 else 3.0)
+
+
+## Jauge d'ultime pleine : un anneau qui pulse autour du mecha. Pendant l'ultime : le laser (fin
+## trait qui vise, puis gros rayon bleu), l'onde orange, ou l'éclair jaune autour du corps.
+func _draw_ultimate() -> void:
+	var center := Vector2(0.0, -BODY.y / 2.0)
+	if pilot != null and pilot.is_ultimate_ready() and ultimate == "":
+		var pulse := 0.5 + 0.5 * sin(_state_time * 8.0)
+		draw_arc(center, BODY.y / 2.0 + 40.0 + 8.0 * pulse, 0.0, TAU, 48, Color(1, 1, 1, 0.35 + 0.4 * pulse), 4.0)
+	match ultimate:
+		"laser":
+			var from := to_local(laser_start())
+			var to := to_local(laser_end())
+			if not is_laser_firing():
+				draw_line(from, to, Color(Fighter.LASER_COLOR, 0.5), 3.0)
+			else:
+				draw_line(from, to, Color(Fighter.LASER_COLOR, 0.45), ULT_LASER_RADIUS * 2.0)
+				draw_line(from, to, Color(1, 1, 1, 0.9), ULT_LASER_RADIUS * 0.6)
+		"onde":
+			var r := wave_radius()
+			if r <= 0.0:
+				draw_arc(center, 120.0 * (1.0 - ult_time / ULT_WAVE_STARTUP) + 60.0, 0.0, TAU, 48, Fighter.WAVE_COLOR, 6.0)
+			else:
+				draw_arc(center, r, 0.0, TAU, 64, Fighter.WAVE_COLOR, 14.0)
+		"eclair":
+			var flicker := Color(Fighter.BOLT_COLOR, 0.5 + 0.5 * sin(ult_time * 60.0))
+			draw_rect(Rect2(-BODY.x / 2.0 - 20.0, -BODY.y - 20.0, BODY.x + 40.0, BODY.y + 40.0), flicker, false, 8.0)
 
 
 ## Le poing : un gros bloc de sa couleur qui jaillit devant le corps.

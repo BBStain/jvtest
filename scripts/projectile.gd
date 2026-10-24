@@ -27,6 +27,8 @@ const GRENADE_GRAVITY := 900.0          ## la grenade vole plus droit qu'avant (
 const GRENADE_WINDOW_BREAK := 900.0     ## plus vite que ça, elle casse la fenêtre au lieu de s'y coller
 const BULLET_LIFETIME := 2.5            ## une balle qui ne touche rien disparaît au bout de ce temps
 const ROCKET_LIFETIME := 3.0            ## une roquette qui ne touche rien explose au bout de ce temps
+const MISSILE_LIFETIME := 4.0           ## missile de mecha : il suit sa cible ce temps, puis explose
+const MISSILE_TURN := 3.2               ## ... en tournant au plus de tant de radians par seconde
 const ARROW_GRAVITY := 400.0            ## la flèche de l'arc tombe un peu en volant
 const ARROW_LENGTH := 34.0
 const RADIUS := 6.0                     ## épaisseur de la zone qui touche
@@ -47,6 +49,7 @@ var fuse := -1.0                        ## grenade : temps avant l'explosion
 var blast := 1.0                        ## grenade : force de l'explosion (plus elle a été chargée, plus fort)
 var age := 0.0
 var finished := false                   ## à retirer (balle arrivée dans un mur, grenade qui explose)
+var homing: Node2D                      ## missile : ce qu'il suit (un joueur à pied ou un mecha)
 var shot_hits := 0                      ## roquette : balles adverses reçues en vol (3 = annulée)
 var weapon: WeaponStats                 ## lance ou arme : l'arme qu'on récupère en la ramassant...
 var counters := 0                       ## ... et son usure (voir Fighter.weapon_counters)
@@ -69,7 +72,7 @@ func _physics_process(delta: float) -> void:
 	match kind:
 		"balle":
 			_tick_bullet(delta)
-		"roquette":
+		"roquette", "missile":
 			_tick_rocket(delta)
 		"grenade":
 			_tick_grenade(delta)
@@ -136,9 +139,16 @@ func _tick_rocket(delta: float) -> void:
 		position = hit.position
 		finished = true
 		return
-	if age > ROCKET_LIFETIME:
+	if age > (MISSILE_LIFETIME if kind == "missile" else ROCKET_LIFETIME):
 		finished = true
 		return
+	if kind == "missile" and is_instance_valid(homing):
+		# Il tourne petit à petit vers sa cible (on peut l'esquiver en changeant vite de direction)
+		var center: Vector2 = homing.body_rect().get_center() if homing.has_method("body_rect") else homing.global_position
+		var wanted := (center - position).angle()
+		var turn := clampf(wrapf(wanted - velocity.angle(), -PI, PI), -MISSILE_TURN * delta, MISSILE_TURN * delta)
+		velocity = velocity.rotated(turn)
+		step = velocity * delta
 	position += step
 	rotation = velocity.angle()
 
@@ -282,12 +292,13 @@ func _draw() -> void:
 		"balle":
 			draw_line(Vector2(-length / 2.0 - 24.0, 0.0), Vector2(-length / 2.0, 0.0), Color(color, 0.3), 2.0)
 			draw_line(Vector2(-length / 2.0, 0.0), Vector2(length / 2.0, 0.0), color, 4.0)
-		"roquette":
+		"roquette", "missile":
 			var half := length / 2.0
-			draw_rect(Rect2(-half, -6.0, length, 12.0), color)
-			draw_colored_polygon(PackedVector2Array([Vector2(half, -6.0), Vector2(half + 10.0, 0.0), Vector2(half, 6.0)]), color.lightened(0.3))
+			var thick := 6.0 if kind == "roquette" else 4.0
+			draw_rect(Rect2(-half, -thick, length, thick * 2.0), color)
+			draw_colored_polygon(PackedVector2Array([Vector2(half, -thick), Vector2(half + 10.0, 0.0), Vector2(half, thick)]), color.lightened(0.3))
 			var flame := 14.0 + 6.0 * sin(age * 50.0)
-			draw_colored_polygon(PackedVector2Array([Vector2(-half, -5.0), Vector2(-half - flame, 0.0), Vector2(-half, 5.0)]), Color(1.0, 0.75, 0.3))
+			draw_colored_polygon(PackedVector2Array([Vector2(-half, -thick + 1.0), Vector2(-half - flame, 0.0), Vector2(-half, thick - 1.0)]), Color(1.0, 0.75, 0.3))
 		"grenade":
 			# Clignote d'après la mèche (envoyée aux copains en ligne), pas d'après l'âge (qui n'est
 			# compté que chez l'hôte : chez un copain, la grenade restait rouge sans clignoter).
