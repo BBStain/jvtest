@@ -20,6 +20,12 @@ extends Node2D
 @export var blast_zone := Rect2(-2150, -1500, 5400, 2450)
 ## Ville : des balises d'appel de mecha tombent sur cette map (voir Game._tick_beacons).
 var has_mechas := false
+## Les objets et les armes qui apparaissent : toutes les combien de secondes, et au plus combien
+## par terre (0 = comme sur les autres maps, voir Game.ITEM_SPAWN_TIME...). La Ville en met beaucoup plus.
+var item_spawn_time := 0.0
+var max_pickups := 0
+var weapon_spawn_time := 0.0
+var max_loose_weapons := 0
 
 var _windows: Array[BreakableWindow] = []
 

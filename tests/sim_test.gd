@@ -1001,6 +1001,32 @@ func _ready() -> void:
 		var weapons_landed := spawned.filter(func(w): return is_instance_valid(w) and w in game.projectiles and w.state == Projectile.State.STUCK).size()
 		check(weapons_landed == spawned.size(), "Contenu : sur %s, les armes apparues se posent (%d/%d)" % [path.get_file(), weapons_landed, spawned.size()])
 	check(GameSetup.VILLE_MAP in GameSetup.all_maps(), "Contenu : la Ville est dans le choix de la map")
+	# Ville : beaucoup d'objets et d'armes, dans les immeubles et partout, qui se posent tous
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	GameSetup.player_devices = []
+	GameSetup.player_characters = []
+	await new_game()
+	game._item_spawn_timer = 1e9
+	game._weapon_spawn_timer = 1e9
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+		fi.equip(load(GameSetup.WEAPONS[1]), 0)
+		fi.item = "bouclier"  # main pleine : personne ne ramasse rien
+	check(game.map.item_spawn_points().size() >= 30 and game.map.weapon_spawn_points().size() >= 30 and game.map.max_pickups > game.MAX_PICKUPS \
+		and game.map.item_spawn_time < game.ITEM_SPAWN_TIME and game.map.weapon_spawn_time < game.WEAPON_SPAWN_TIME,
+		"Ville : beaucoup plus d'objets et d'armes (%d + %d points, plus souvent)" % [game.map.item_spawn_points().size(), game.map.weapon_spawn_points().size()])
+	var ville_items: Array[ItemPickup] = []
+	for where in game.map.item_spawn_points():
+		ville_items.append(game.spawn_pickup("pistolet", where))
+	var ville_weapons: Array[Projectile] = []
+	for where in game.map.weapon_spawn_points():
+		ville_weapons.append(game.spawn_weapon(load(GameSetup.WEAPONS[1]), where))
+	await step(180)
+	var items_down := ville_items.filter(func(p): return is_instance_valid(p) and p in game.pickups and p.velocity.length() < 1.0).size()
+	var weapons_down := ville_weapons.filter(func(w): return is_instance_valid(w) and w in game.projectiles and w.state == Projectile.State.STUCK).size()
+	check(items_down == ville_items.size() and weapons_down == ville_weapons.size(),
+		"Ville : les objets (%d/%d) et les armes (%d/%d) apparus dans les immeubles se posent" % [items_down, ville_items.size(), weapons_down, ville_weapons.size()])
+	await shot("ville_objets_partout")
 	# Ville : dans un immeuble, chaque perso monte d'un étage avec saut + double saut
 	GameSetup.map_path = GameSetup.VILLE_MAP
 	for c_path in GameSetup.CHARACTERS:

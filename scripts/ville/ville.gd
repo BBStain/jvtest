@@ -46,6 +46,11 @@ const BRIDGE_COLOR := "#8a6a4a"
 const INSIDE_COLOR := "#242833"
 const FAIR_GROUND_COLOR := "#4a3f55"
 const GRASS_COLOR := "#3f6b45"
+## Beaucoup d'objets et d'armes : dans les immeubles (un étage sur deux), sur les toits et dans les parcs.
+const ITEM_SPAWN_TIME := 3.0        ## un objet toutes les 3 s...
+const MAX_PICKUPS := 10             ## ... jusqu'à 10 par terre
+const WEAPON_SPAWN_TIME := 4.0      ## une arme toutes les 4 s...
+const MAX_LOOSE_WEAPONS := 8        ## ... jusqu'à 8 qui traînent
 const BLOCK_HP := 6                 ## PV d'un bloc (une attaque légère : 1, une lourde : 3)
 
 static var _next_id := 0
@@ -130,20 +135,32 @@ static func build() -> GameMap:
 	respawn.name = "RespawnPoint"
 	respawn.position = Vector2(building_center(TOWER), roof_top(TOWER) - 400.0)
 	map.add_child(respawn)
+	map.item_spawn_time = ITEM_SPAWN_TIME
+	map.max_pickups = MAX_PICKUPS
+	map.weapon_spawn_time = WEAPON_SPAWN_TIME
+	map.max_loose_weapons = MAX_LOOSE_WEAPONS
 	var items := Node2D.new()
 	items.name = "ItemSpawns"
 	map.add_child(items)
 	var weapons := Node2D.new()
 	weapons.name = "WeaponSpawns"
 	map.add_child(weapons)
-	for i in [3, 6, 8, 12, 14, 17]:
-		var marker := Marker2D.new()
-		marker.position = Vector2(building_center(i), roof_top(i) - 200.0)
-		(weapons if i in [6, 8, 12, 14] else items).add_child(marker)
-	for x in [-7320.0, 7920.0]:  # un objet dans chaque parc
-		var marker := Marker2D.new()
-		marker.position = Vector2(x, -200.0)
-		items.add_child(marker)
+	# Dans chaque immeuble, un étage sur deux (objets et armes en alternance), et sur chaque toit
+	var spot := 0
+	for i in BUILDINGS.size():
+		for f in range(0, BUILDINGS[i][1], 2):
+			var marker := Marker2D.new()
+			marker.position = Vector2(building_center(i), -f * FLOOR_HEIGHT - 100.0)
+			(items if spot % 2 == 0 else weapons).add_child(marker)
+			spot += 1
+		var roof := Marker2D.new()
+		roof.position = Vector2(building_center(i), roof_top(i) - 200.0)
+		(weapons if i % 2 == 0 else items).add_child(roof)
+	for x in [-7920.0, -7320.0, -6800.0, 6800.0, 7400.0, 7920.0]:  # dans les deux parcs
+		for target in [items, weapons]:
+			var marker := Marker2D.new()
+			marker.position = Vector2(x + (60.0 if target == weapons else 0.0), -200.0)
+			target.add_child(marker)
 	map.blast_zone = Rect2(-HALF_WIDTH - 700.0, -SKY - 600.0, HALF_WIDTH * 2.0 + 1400.0, SKY + 600.0 + 900.0)
 	return map
 

@@ -180,6 +180,10 @@ func _ready() -> void:
 	map = GameSetup.make_map(GameSetup.map_path)
 	add_child(map)
 	move_child(map, 0)  # le décor est dessiné derrière les joueurs
+	if map.item_spawn_time > 0.0:
+		_item_spawn_timer = map.item_spawn_time
+	if map.weapon_spawn_time > 0.0:
+		_weapon_spawn_timer = map.weapon_spawn_time
 	InputBindings.register_menu_actions()
 	player_devices = GameSetup.devices_or_default().duplicate(true)
 	_ultimate_test = _ultimate_full_for_tests()
@@ -798,9 +802,9 @@ func _tick_weapon_spawns(delta: float) -> void:
 	_weapon_spawn_timer -= delta
 	if _weapon_spawn_timer > 0.0:
 		return
-	_weapon_spawn_timer = WEAPON_SPAWN_TIME
+	_weapon_spawn_timer = map.weapon_spawn_time if map.weapon_spawn_time > 0.0 else WEAPON_SPAWN_TIME
 	var lying := projectiles.filter(func(p: Projectile) -> bool: return p.kind in ["lance", "arme"] and p.state != Projectile.State.FLYING)
-	if lying.size() >= MAX_LOOSE_WEAPONS:
+	if lying.size() >= (map.max_loose_weapons if map.max_loose_weapons > 0 else MAX_LOOSE_WEAPONS):
 		return
 	var points := map.weapon_spawn_points()
 	spawn_weapon(load(GameSetup.WEAPONS[1 + rng.randi() % (GameSetup.WEAPONS.size() - 1)]), points[rng.randi() % points.size()])
@@ -2295,8 +2299,8 @@ func _loose_in_attack(loose: Node2D, fighter: Fighter) -> bool:
 func _tick_pickups(delta: float) -> void:
 	_item_spawn_timer -= delta
 	if _item_spawn_timer <= 0.0:
-		_item_spawn_timer = ITEM_SPAWN_TIME
-		if pickups.size() < MAX_PICKUPS:
+		_item_spawn_timer = map.item_spawn_time if map.item_spawn_time > 0.0 else ITEM_SPAWN_TIME
+		if pickups.size() < (map.max_pickups if map.max_pickups > 0 else MAX_PICKUPS):
 			var points := map.item_spawn_points()
 			var kinds: Array = ItemPickup.KINDS + ItemPickup.VILLE_KINDS if map.has_mechas else ItemPickup.KINDS
 			spawn_pickup(kinds[rng.randi() % kinds.size()], points[rng.randi() % points.size()])
