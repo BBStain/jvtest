@@ -1,6 +1,6 @@
 class_name Mecha
 extends CharacterBody2D
-## Un mecha de la Ville (étape 5 du plan : l'appeler et le piloter ; les armes viendront après).
+## Un mecha de la Ville : on l'appelle, on le pilote, il tire, il s'use et il explose.
 ##
 ## Il arrive avec une balise d'appel (objet ramassé, RT) : un viseur rouge marque le sol, puis il
 ## tombe du ciel et fait une onde de choc en se posant (game.gd l'applique, voir landed).
@@ -9,10 +9,17 @@ extends CharacterBody2D
 ##   stick gauche : marcher, diriger le vol      A : sauter, garder appuyé en l'air = voler
 ##   LT : turbo (plus vite, brûle du carburant)    LB : dash (casse les blocs qu'il percute)
 ##   bas + A gardés 0,5 s : sortir (le mecha reste là, vide)
+##   X : fusil d'assaut, une rafale de 3 balles (visée auto, ou stick droit)
+##   Y : lance-roquette, garder pour charger (plus loin, plus fort), lâcher pour tirer
+## Il s'use : WEAR_MAX points de solidité, les coups et les tirs en enlèvent (voir game.gd), on le voit
+## aux fissures. À 0 il explose (signal destroyed) : le pilote est éjecté et sonné, sans perdre de vie.
 ## Gros et lourd, mais vif : il démarre et s'arrête vite, il ne traverse jamais les planchers.
 ## La position du nœud est entre les deux pieds, au sol (comme MechaVisual).
 
 signal landed(mecha: Mecha)             ## il vient de se poser (après l'appel) : onde de choc
+## Il tire (game.gd crée ce qui vole) : kind "balle" ou "roquette", power = charge de la roquette (0 à 1).
+signal fired(mecha: Mecha, kind: String, origin: Vector2, direction: Vector2, power: float)
+signal destroyed(mecha: Mecha)          ## plus de solidité : il explose (game.gd éjecte le pilote)
 
 enum State { CALLED, FALLING, READY }
 
@@ -44,6 +51,19 @@ const EXIT_STICK := 0.6                 ## sortir : stick vers le bas au-delà d
 const EXIT_TIME := 0.5                  ## ... et A gardés ce temps
 const EMPTY_COLOR := Color(0.55, 0.57, 0.62)  ## un mecha vide est gris
 const FUEL_SHOW_TIME := 1.0             ## la jauge de carburant reste affichée ce temps après être pleine
+const WEAR_MAX := 40                    ## solidité d'un mecha neuf
+const HIT_FLASH_TIME := 0.1             ## touché : il blanchit un instant
+const BURST_SHOTS := 3                  ## X : une rafale de 3 balles...
+const BURST_GAP := 0.07                 ## ... une toutes les 0,07 s...
+const BURST_COOLDOWN := 0.45            ## ... et une nouvelle rafale au plus toutes les 0,45 s
+const ROCKET_FULL_CHARGE := 1.0         ## Y gardé 1 s : roquette chargée au maximum (elle part toute seule)
+const ROCKET_COOLDOWN := 0.8
+const GUN_MOUNT := Vector2(94.0, -125.0)  ## la mitrailleuse sous le nez (x vers l'avant) : d'où partent les balles...
+const GUN_LENGTH := 99.0
+const TURRET_PIVOT := Vector2(0.0, -270.0)  ## ... et la tourelle sur le dos, d'où partent les roquettes
+const TURRET_LENGTH := 182.0
+const AIM_UP_MAX := 1.3                 ## les armes visent jusqu'à presque droit au-dessus...
+const AIM_DOWN_MAX := 1.0               ## ... et assez bas devant soi
 
 var state := State.CALLED
 var caller: Fighter                     ## celui qui l'a appelé (l'onde de choc l'épargne)
@@ -60,6 +80,16 @@ var _exit_hold := 0.0
 var _empty_tank := false
 var _fuel_show_timer := 0.0
 var _thrusting := false
+var hp := WEAR_MAX                      ## solidité qui reste
+var hit_by := {}                        ## les attaques qui l'ont déjà touché (une fois par attaque, voir game.gd)
+var _hit_flash := 0.0
+var _burst_left := 0
+var _burst_timer := 0.0
+var _burst_dir := Vector2.RIGHT
+var _gun_cooldown := 0.0
+var _rocket_cooldown := 0.0
+var _charge := -1.0                     ## Y gardé depuis ce temps (-1 = pas de charge)
+var _barrel := 0
 
 
 func _ready() -> void:
@@ -150,9 +180,89 @@ func tick(input: InputState, delta: float) -> void:
 		fuel = minf(fuel + FUEL_AIR_REFILL * delta, FUEL_MAX)
 	_fuel_show_timer = FUEL_SHOW_TIME if fuel < FUEL_MAX else _fuel_show_timer - delta
 
+	_tick_weapons(input, delta)
 	_move()
-	_update_visual(on_floor, input)
+	_update_visual(on_floor)
 	queue_redraw()
+
+
+## X : rafale de 3 balles ; Y : roquette chargée. Elles partent vers l'adversaire visé par le pilote
+## (ou là où pointe le stick droit), et le mecha se tourne de ce côté.
+func _tick_weapons(input: InputState, delta: float) -> void:
+	_gun_cooldown -= delta
+	_rocket_cooldown -= delta
+	_burst_timer -= delta
+	_hit_flash -= delta
+	if pilot == null:
+		_burst_left = 0
+		_charge = -1.0
+		visual.turret_charge = -1.0
+		return
+	var flick := input.aimed_attack_pressed and input.aim != Vector2.ZERO
+	if (input.attack_pressed or flick) and _gun_cooldown <= 0.0:
+		_burst_left = BURST_SHOTS
+		_burst_timer = 0.0
+		_burst_dir = input.aim.normalized() if flick else aim_direction(GUN_MOUNT)
+		_gun_cooldown = BURST_COOLDOWN
+	if _burst_left > 0 and _burst_timer <= 0.0:
+		_burst_left -= 1
+		_burst_timer = BURST_GAP
+		_face(_burst_dir)
+		fired.emit(self, "balle", gun_muzzle(_burst_dir), _burst_dir, 0.0)
+		visual.gun_shot_time = 0.0
+	if input.heavy_pressed and _rocket_cooldown <= 0.0 and _charge < 0.0:
+		_charge = 0.0
+	if _charge >= 0.0:
+		_charge += delta
+		if not input.heavy_held or _charge >= ROCKET_FULL_CHARGE:
+			var dir := aim_direction(TURRET_PIVOT)
+			_face(dir)
+			fired.emit(self, "roquette", turret_muzzle(dir), dir, clampf(_charge / ROCKET_FULL_CHARGE, 0.0, 1.0))
+			_charge = -1.0
+			_rocket_cooldown = ROCKET_COOLDOWN
+			visual.turret_barrel = _barrel
+			visual.turret_shot_time = 0.0
+			_barrel = (_barrel + 1) % MechaVisual.BARRELS
+	visual.turret_charge = clampf(_charge / ROCKET_FULL_CHARGE, 0.0, 1.0) if _charge >= 0.0 else -1.0
+
+
+## Vers l'adversaire visé par le pilote (depuis cette arme), sinon droit devant.
+func aim_direction(mount: Vector2) -> Vector2:
+	var from := global_position + Vector2(mount.x * facing, mount.y)
+	if pilot != null and pilot.target != null and not pilot.target.eliminated:
+		var to_target := pilot.target.global_position - from
+		if to_target.length() > 1.0:
+			return to_target.normalized()
+	return Vector2(facing, 0.0)
+
+
+func _face(dir: Vector2) -> void:
+	if absf(dir.x) > 0.05:
+		facing = signf(dir.x)
+
+
+## Le bout du canon de la mitrailleuse (et de la tourelle) quand l'arme vise dans cette direction.
+func gun_muzzle(dir: Vector2) -> Vector2:
+	return global_position + Vector2(GUN_MOUNT.x * facing, GUN_MOUNT.y) + dir * GUN_LENGTH
+
+
+func turret_muzzle(dir: Vector2) -> Vector2:
+	return global_position + TURRET_PIVOT + dir * TURRET_LENGTH
+
+
+## Un coup ou un tir l'abîme. Plus de solidité : il explose (game.gd fait le reste).
+func damage(amount: int) -> void:
+	if state != State.READY or hp <= 0:
+		return
+	hp = maxi(hp - amount, 0)
+	visual.wear = 1.0 - float(hp) / WEAR_MAX
+	_hit_flash = HIT_FLASH_TIME
+	if hp <= 0:
+		destroyed.emit(self)
+
+
+func is_destroyed() -> bool:
+	return hp <= 0
 
 
 func _move() -> void:
@@ -174,7 +284,7 @@ func _move() -> void:
 			velocity = before
 
 
-func _update_visual(on_floor: bool, input: InputState) -> void:
+func _update_visual(on_floor: bool) -> void:
 	visual.facing = facing
 	if visual.pose == MechaVisual.Pose.LAND and visual.pose_time < MechaVisual.LAND_TIME + MechaVisual.SHOCKWAVE_TIME:
 		return  # on laisse finir l'onde de choc de l'arrivée
@@ -186,7 +296,12 @@ func _update_visual(on_floor: bool, input: InputState) -> void:
 	if visual.pose != pose:
 		visual.set_pose(pose)
 	visual.flames = _thrusting or _dash_timer > 0.0
-	visual.aim = -0.3 if input.stick.y < -0.5 else 0.0
+	# Les armes suivent l'adversaire visé (comme la visée auto)
+	var dir := _burst_dir if _burst_left > 0 else aim_direction(TURRET_PIVOT)
+	if dir.x * facing < 0.0:
+		dir.x = 0.0  # il est derrière : les armes pointent vers le haut ou le bas, sans se retourner
+	visual.aim = clampf(atan2(dir.y, absf(dir.x)), -AIM_UP_MAX, AIM_DOWN_MAX)
+	visual.modulate = Color(2.0, 2.0, 2.0) if _hit_flash > 0.0 else Color.WHITE
 
 
 ## Le pilote monte (game.gd vérifie qu'il le touche et qu'il pousse vers le haut).

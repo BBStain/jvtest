@@ -119,6 +119,7 @@ enum Grapple { NONE, FLYING, PULL_SELF, PULL_THEM }
 const MECHA_BOARD_STICK := 0.5          ## collé à un mecha vide, stick vers le haut au-delà de ça : on monte dedans
 const MECHA_REBOARD_TIME := 0.6         ## juste après être sorti, on ne remonte pas tout de suite
 const MECHA_EXIT_LIFT := 750.0          ## en sortant, on saute par le haut du mecha
+const MECHA_EJECT_SPEED := 1100.0       ## mecha détruit : le pilote est éjecté vers le haut, sonné
 
 # --- Blocage (B) : un bouclier qui craque peu à peu (ses points sont dans les stats du perso) ---
 const SHIELD_REGEN_TIME := 2.0          ## 1 point regagné toutes les 2 s quand on ne bloque pas
@@ -870,6 +871,17 @@ func leave_mecha() -> void:
 
 func is_piloting() -> bool:
 	return mecha != null
+
+
+## Notre mecha a explosé (game.gd nous a déjà sortis) : éjectés vers le haut et sonnés, comme un
+## premier coup, mais sans perdre de vie (même si on l'était déjà). Invincibles juste après.
+func eject_from_mecha() -> void:
+	_cancel_attack()
+	velocity = Vector2(0.0, -MECHA_EJECT_SPEED)
+	_jump_rising = false
+	_knockback_timer = KNOCKBACK_TIME
+	_stun_timer = STUN_TIME
+	_invincible_timer = INVINCIBLE_TIME
 
 
 ## L'échelle que le corps touche, ou null.

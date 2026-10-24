@@ -40,6 +40,22 @@ const BEACON_SPAWN_TIME := 20.0              ## ... puis une toutes les 20 s, ta
 const MECHA_SHOCK_PUSH := 1100.0             ## Ville : un mecha qui se pose repousse tout le monde autour...
 const MECHA_SHOCK_LIFT := 380.0              ## ... en les soulevant un peu...
 const MECHA_SHOCK_BLOCK_DAMAGE := 2          ## ... et abîme les blocs de la ville dans le rayon (sans casser le toit où il se pose)
+# Ville : ce qui use un mecha (il a Mecha.WEAR_MAX points de solidité)
+const MECHA_WEAR_LIGHT := 1                  ## coup léger d'un joueur à pied
+const MECHA_WEAR_HEAVY := 3                  ## coup lourd
+const MECHA_WEAR_BULLET := 1                 ## balle (pistolet ou rafale de mecha)
+const MECHA_WEAR_ARROW := 2
+const MECHA_WEAR_SPEAR := 3
+const MECHA_WEAR_GRENADE := 4                ## explosion de grenade
+const MECHA_WEAR_ROCKET := [5, 7]            ## roquette : non chargée, chargée à fond
+const MECHA_WEAR_CHUNK := 8                  ## gros morceau d'immeuble
+const MECHA_WEAR_BLAST := 4                  ## un mecha qui explose use ceux d'à côté
+const MECHA_BLAST_RADIUS := 230.0            ## l'explosion d'un mecha : rayon (blocs, mechas, joueurs repoussés)
+const MECHA_BLAST_PUSH := 1000.0
+const MECHA_BULLET_SPEED := 2100.0           ## les balles de la rafale vont plus vite que celles du pistolet
+const ROCKET_SPEED := [950.0, 1500.0]        ## roquette : non chargée, chargée à fond
+const ROCKET_RADIUS := [110.0, 160.0]        ## rayon de son explosion
+const ROCKET_KNOCKBACK := [1000.0, 1350.0]
 const WEAPON_BREAK_TIME_SCALE := 0.25       ## arme cassée (3e contre de sa lourde) : court ralenti...
 const WEAPON_BREAK_SLOWMO := 0.8            ## ... pendant 0,8 vraie seconde...
 const WEAPON_BREAK_CAMERA_MARGIN := Vector2(260, 180)  ## ... et la caméra zoome fort sur l'arme qui casse
@@ -248,10 +264,12 @@ func _physics_process(delta: float) -> void:
 
 	_resolve_clashes()
 	_resolve_hits()
+	_resolve_mecha_hits()
 	_resolve_chunks()
 	_resolve_lasers()
 	_resolve_waves()
 	_resolve_bolts()
+	_projectiles_hit_mechas()
 	_resolve_projectiles()
 	_hit_loose_objects()
 	_tick_pickups(delta)
@@ -1146,6 +1164,8 @@ func _resolve_projectiles() -> void:
 				_resolve_arrow(projectile)
 			"grenade":
 				_resolve_grenade(projectile)
+			"roquette":
+				_resolve_rocket(projectile)
 			_:
 				_resolve_spear(projectile)
 
@@ -1314,6 +1334,17 @@ func _resolve_chunks() -> void:
 				chunk.burst()  # il s'en est protégé : le morceau éclate dessus
 			if not chunk.is_dangerous():
 				break
+		if not chunk.is_dangerous():
+			continue
+		for mecha in mechas.duplicate():  # un mecha (piloté ou vide) s'use, et le morceau éclate dessus
+			if not is_instance_valid(mecha) or not mecha.is_ready() or chunk.hit_fighters.has(mecha):
+				continue
+			var hull: Rect2 = mecha.body_rect()
+			if parts.any(func(r: Rect2) -> bool: return r.intersects(hull)):
+				chunk.hit_fighters[mecha] = true
+				chunk.burst()
+				mecha.damage(MECHA_WEAR_CHUNK)
+				break
 
 
 ## Ville : quelque chose de lourd tombe sur "fighter" (gros morceau, mecha qui se pose). Ça se traite
@@ -1367,6 +1398,8 @@ func call_mecha(fighter: Fighter) -> Mecha:
 	mecha.position = _mecha_landing(fighter.global_position.x, fighter.global_position.y + fighter.stats.body_size.y / 2.0)
 	mecha.facing = fighter.facing
 	mecha.landed.connect(_on_mecha_landed)
+	mecha.fired.connect(_on_mecha_fired)
+	mecha.destroyed.connect(_on_mecha_destroyed)
 	mechas.append(mecha)
 	add_child(mecha)
 	move_child(mecha, 1)  # derrière les joueurs, devant le décor
@@ -1379,12 +1412,149 @@ func _mecha_landing(x: float, feet_y: float) -> Vector2:
 	var space := get_world_2d().direct_space_state
 	var best := INF
 	var mask := 1 | (1 << (Fighter.PLATFORM_LAYER - 1))  # le sol et les planchers
-	for dx in [-Mecha.BODY.x * 0.4, 0.0, Mecha.BODY.x * 0.4]:
+	for dx in [-Mecha.BODY.x / 2.0 + 1.0, -Mecha.BODY.x / 4.0, 0.0, Mecha.BODY.x / 4.0, Mecha.BODY.x / 2.0 - 1.0]:
 		var from := Vector2(x + dx, map.blast_zone.position.y)
 		var hit := space.intersect_ray(PhysicsRayQueryParameters2D.create(from, Vector2(x + dx, map.blast_zone.end.y), mask))
 		if not hit.is_empty():
 			best = minf(best, hit.position.y)
 	return Vector2(x, best if best != INF else feet_y)
+
+
+## Les coups des joueurs à pied usent les mechas qu'ils touchent (une fois par attaque) : 1 pour un
+## léger, 3 pour un lourd. Le pilote, lui, n'est pas touché tant que son mecha tient.
+func _resolve_mecha_hits() -> void:
+	for mecha in mechas.duplicate():  # (un mecha détruit sort de la liste)
+		if not is_instance_valid(mecha) or not mecha.is_ready():
+			continue
+		for attacker in mecha.hit_by.keys():
+			if not is_instance_valid(attacker) or not (attacker as Fighter).is_attack_active():
+				mecha.hit_by.erase(attacker)  # cette attaque est finie : la suivante pourra toucher
+		for attacker in fighters:
+			if attacker.eliminated or attacker == mecha.pilot or not attacker.is_attack_active() or mecha.hit_by.has(attacker):
+				continue
+			if _segment_hits_rect(attacker.attack_start(), attacker.attack_center(), attacker.attack_radius(), mecha.body_rect()):
+				mecha.hit_by[attacker] = true
+				attacker.mark_attack_hit()
+				mecha.damage(MECHA_WEAR_HEAVY if attacker.is_heavy_attack() else MECHA_WEAR_LIGHT)
+				if mecha.is_destroyed():
+					break
+
+
+## Ce qui vole et touche un mecha (pas les tirs de son propre pilote) : la balle s'arrête dessus,
+## la flèche et la lance retombent, la roquette explose. Chacun l'use un peu.
+func _projectiles_hit_mechas() -> void:
+	for projectile: Projectile in projectiles.duplicate():
+		if projectile.state != Projectile.State.FLYING or projectile.finished \
+				or not projectile.kind in ["balle", "fleche", "lance", "roquette"]:
+			continue
+		for mecha in mechas.duplicate():
+			if not is_instance_valid(mecha) or not mecha.is_ready() \
+					or (mecha.pilot != null and mecha.pilot.player_index == projectile.owner_index):
+				continue
+			if not _segment_hits_rect(projectile.tail(), projectile.tip(), Projectile.RADIUS, mecha.body_rect()):
+				continue
+			match projectile.kind:
+				"balle":
+					_remove_projectile(projectile)
+					mecha.damage(MECHA_WEAR_BULLET)
+				"fleche":
+					projectile.drop()
+					mecha.damage(MECHA_WEAR_ARROW)
+				"lance":
+					projectile.drop()
+					mecha.damage(MECHA_WEAR_SPEAR)
+				"roquette":
+					projectile.finished = true  # elle explose tout de suite (voir _resolve_rocket)
+			break
+
+
+## Un mecha tire : les balles de la rafale (comme celles du pistolet, en plus rapide) ou une roquette.
+## Canon collé au décor : le tir s'arrête contre lui (sinon il partirait de l'intérieur du mur).
+func _on_mecha_fired(mecha: Mecha, kind: String, origin: Vector2, direction: Vector2, power: float) -> void:
+	if mecha.pilot == null:
+		return
+	var projectile := Projectile.new()
+	projectile.kind = kind
+	projectile.owner_index = mecha.pilot.player_index
+	projectile.rotation = direction.angle()
+	projectile.position = origin
+	var center := mecha.body_rect().get_center()
+	var wall := get_world_2d().direct_space_state.intersect_ray(PhysicsRayQueryParameters2D.create(center, origin, 1))
+	if kind == "balle":
+		if not wall.is_empty():
+			if wall.collider is BreakableWindow:
+				(wall.collider as BreakableWindow).smash()
+			projectile.free()
+			return
+		projectile.velocity = direction * MECHA_BULLET_SPEED
+		projectile.length = 18.0
+		projectile.knockback = BULLET_KNOCKBACK
+		projectile.color = Color(1.0, 0.9, 0.5)
+	else:
+		projectile.blast = power
+		projectile.velocity = direction * lerpf(ROCKET_SPEED[0], ROCKET_SPEED[1], power)
+		projectile.length = lerpf(30.0, 42.0, power)
+		projectile.color = mecha.pilot.color
+		if not wall.is_empty():
+			projectile.position = wall.position
+			projectile.finished = true  # elle explose contre le mur collé au canon
+	_add_projectile(projectile)
+
+
+## Une roquette : elle explose contre le décor, un mecha (voir _projectiles_hit_mechas), le premier
+## joueur sur son chemin, ou au bout de sa course. Plus elle était chargée, plus l'explosion est grosse.
+func _resolve_rocket(rocket: Projectile) -> void:
+	if not map.blast_zone.has_point(rocket.position):
+		_remove_projectile(rocket)
+		return
+	if not rocket.finished and _projectile_victim(rocket) == null:
+		return
+	var p := rocket.blast
+	_explode(rocket.tip() if not rocket.finished else rocket.position, lerpf(ROCKET_KNOCKBACK[0], ROCKET_KNOCKBACK[1], p),
+		lerpf(ROCKET_RADIUS[0], ROCKET_RADIUS[1], p), roundi(lerpf(MECHA_WEAR_ROCKET[0], MECHA_WEAR_ROCKET[1], p)), rocket.owner_index)
+	_remove_projectile(rocket)
+
+
+## Un mecha n'a plus de solidité : il explose. Son pilote est éjecté vers le haut, sonné (sans perdre
+## de vie). L'explosion casse les blocs autour, use les mechas voisins et repousse ceux qui sont à pied.
+func _on_mecha_destroyed(mecha: Mecha) -> void:
+	var center := mecha.body_rect().get_center()
+	mechas.erase(mecha)
+	var pilot := mecha.pilot
+	if pilot != null:
+		pilot.leave_mecha()
+		pilot.eject_from_mecha()
+		if _alive_count() == 2:
+			_stun_focus = [pilot, _closest_opponent(pilot)]
+	var wreck := MechaVisual.new()  # le dessin de l'explosion reste un instant à sa place
+	wreck.color = mecha.visual.color
+	wreck.hover = false
+	wreck.position = mecha.global_position
+	wreck.set_pose(MechaVisual.Pose.EXPLODE)
+	add_child(wreck)
+	get_tree().create_timer(MechaVisual.EXPLODE_TIME).timeout.connect(wreck.queue_free)
+	mecha.queue_free()
+	_spawn_explosion(center, Color(1.0, 0.55, 0.2))
+	_shake_left = SHAKE_TIME
+	map.smash_windows_in(center, MECHA_BLAST_RADIUS)
+	for loose: Node2D in _loose_objects():
+		var away := loose.position - center
+		if away.length() <= MECHA_BLAST_RADIUS:
+			loose.launch(((away.normalized() if away.length() > 1.0 else Vector2.UP) + Vector2(0.0, -0.6)).normalized() * LOOSE_BLAST_SPEED)
+	for other in mechas.duplicate():
+		if is_instance_valid(other) and other.is_ready() and _rect_distance(other.body_rect(), center) <= MECHA_BLAST_RADIUS:
+			other.damage(MECHA_WEAR_BLAST)
+	for fighter in fighters:
+		if fighter == pilot or fighter.eliminated or fighter.is_piloting():
+			continue
+		if _rect_distance(fighter.body_rect(), center) <= MECHA_BLAST_RADIUS:
+			var side := signf(fighter.global_position.x - center.x)
+			fighter.clash(Vector2(side if side != 0.0 else 1.0, -0.3).normalized() * MECHA_BLAST_PUSH, Fighter.CLASH_LOCKOUT, 300.0)
+
+
+## Distance entre un point et le bord d'un rectangle (0 s'il est dedans).
+func _rect_distance(rect: Rect2, point: Vector2) -> float:
+	return point.clamp(rect.position, rect.end).distance_to(point)
 
 
 ## Le mecha appelé se pose : onde de choc. Celui qui est dessous est écrasé (comme sous un gros
@@ -1441,19 +1611,25 @@ func _resolve_grenade(grenade: Projectile) -> void:
 ## L'explosion d'une grenade : tous ceux qui sont dans le rayon (le lanceur aussi) sont touchés
 ## et éjectés loin du centre. Un bouclier la bloque (et craque beaucoup).
 ## Les objets et armes par terre dans le rayon sont soufflés.
-func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK) -> void:
+## radius, mecha_wear : la taille de l'explosion et ce qu'elle use aux mechas (Ville) ; owner : le joueur
+## qui l'a provoquée (by_player, -1 = inconnu) : son propre mecha n'est pas usé.
+func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK, radius := GRENADE_RADIUS, mecha_wear := MECHA_WEAR_GRENADE, by_player := -1) -> void:
 	_spawn_explosion(where, Color(1.0, 0.55, 0.2))
-	map.smash_windows_in(where, GRENADE_RADIUS)
+	map.smash_windows_in(where, radius)
+	for mecha in mechas.duplicate():
+		if is_instance_valid(mecha) and mecha.is_ready() and _rect_distance(mecha.body_rect(), where) <= radius \
+				and not (mecha.pilot != null and mecha.pilot.player_index == by_player):
+			mecha.damage(mecha_wear)
 	for loose: Node2D in _loose_objects():
 		var away := loose.position - where
-		if away.length() <= GRENADE_RADIUS:
+		if away.length() <= radius:
 			var dir := (away.normalized() if away.length() > 1.0 else Vector2.UP) + Vector2(0.0, -0.5)
 			loose.launch(dir.normalized() * LOOSE_BLAST_SPEED)
 	for fighter in fighters:
 		if fighter.eliminated or fighter.is_invincible() or fighter.is_item_shielded() or fighter.is_piloting():
 			continue
 		var body := fighter.body_rect()
-		if where.clamp(body.position, body.end).distance_to(where) > GRENADE_RADIUS:
+		if where.clamp(body.position, body.end).distance_to(where) > radius:
 			continue
 		var away := fighter.global_position - where
 		var dir := (away.normalized() if away.length() > 1.0 else Vector2.UP) + Vector2(0.0, -0.4)
