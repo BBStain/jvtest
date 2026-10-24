@@ -13,7 +13,8 @@ const MAPS := [
 ]
 const SAVED_MAP_PREFIX := "carte:"
 const EDITOR_MAP := "editeur"
-## La Ville (easter egg) : pas dans MAPS, elle n'apparaît que si elle est débloquée (voir Ville.unlocked).
+## La Ville : construite en code (voir Ville.build), pas dans MAPS ; elle est dans le choix de la map
+## hors ligne (all_maps), pas encore en ligne.
 const VILLE_MAP := "ville"
 const MENU_SCENE := "res://scenes/menu.tscn"
 
@@ -87,8 +88,7 @@ static func all_maps() -> Array[String]:
 		var official := "%s/%s.json" % [MapData.BUNDLED_DIR, saved] in MAPS
 		if not official or FileAccess.file_exists(MapData.file_path(saved)):
 			maps.append(SAVED_MAP_PREFIX + saved)
-	if Ville.unlocked():
-		maps.append(VILLE_MAP)
+	maps.append(VILLE_MAP)  # la Ville : une map comme les autres (hors ligne pour l'instant)
 	return maps
 
 

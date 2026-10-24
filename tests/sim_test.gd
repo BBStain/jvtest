@@ -1000,7 +1000,33 @@ func _ready() -> void:
 		await step(180)
 		var weapons_landed := spawned.filter(func(w): return is_instance_valid(w) and w in game.projectiles and w.state == Projectile.State.STUCK).size()
 		check(weapons_landed == spawned.size(), "Contenu : sur %s, les armes apparues se posent (%d/%d)" % [path.get_file(), weapons_landed, spawned.size()])
-	check(not GameSetup.VILLE_MAP in GameSetup.all_maps(), "Contenu : la Ville reste cachée (pas dans le choix de la map sans ?ville)")
+	check(GameSetup.VILLE_MAP in GameSetup.all_maps(), "Contenu : la Ville est dans le choix de la map")
+	# Ville : beaucoup d'objets et d'armes, dans les immeubles et partout, qui se posent tous
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	GameSetup.player_devices = []
+	GameSetup.player_characters = []
+	await new_game()
+	game._item_spawn_timer = 1e9
+	game._weapon_spawn_timer = 1e9
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+		fi.equip(load(GameSetup.WEAPONS[1]), 0)
+		fi.item = "bouclier"  # main pleine : personne ne ramasse rien
+	check(game.map.item_spawn_points().size() >= 30 and game.map.weapon_spawn_points().size() >= 30 and game.map.max_pickups > game.MAX_PICKUPS \
+		and game.map.item_spawn_time < game.ITEM_SPAWN_TIME and game.map.weapon_spawn_time < game.WEAPON_SPAWN_TIME,
+		"Ville : beaucoup plus d'objets et d'armes (%d + %d points, plus souvent)" % [game.map.item_spawn_points().size(), game.map.weapon_spawn_points().size()])
+	var ville_items: Array[ItemPickup] = []
+	for where in game.map.item_spawn_points():
+		ville_items.append(game.spawn_pickup("pistolet", where))
+	var ville_weapons: Array[Projectile] = []
+	for where in game.map.weapon_spawn_points():
+		ville_weapons.append(game.spawn_weapon(load(GameSetup.WEAPONS[1]), where))
+	await step(180)
+	var items_down := ville_items.filter(func(p): return is_instance_valid(p) and p in game.pickups and p.velocity.length() < 1.0).size()
+	var weapons_down := ville_weapons.filter(func(w): return is_instance_valid(w) and w in game.projectiles and w.state == Projectile.State.STUCK).size()
+	check(items_down == ville_items.size() and weapons_down == ville_weapons.size(),
+		"Ville : les objets (%d/%d) et les armes (%d/%d) apparus dans les immeubles se posent" % [items_down, ville_items.size(), weapons_down, ville_weapons.size()])
+	await shot("ville_objets_partout")
 	# Ville : dans un immeuble, chaque perso monte d'un étage avec saut + double saut
 	GameSetup.map_path = GameSetup.VILLE_MAP
 	for c_path in GameSetup.CHARACTERS:
@@ -1297,7 +1323,7 @@ func _ready() -> void:
 	pilot.global_position = Vector2(mx, my - 40.0)
 	hitter.global_position = Vector2(mx + 400.0, my - 40.0)
 	await step(2)
-	var tank: Mecha = game.call_mecha(pilot)
+	var tank: Mecha = game.call_mecha(pilot, "roquette")
 	await step(100)
 	pilot._board(tank)
 	await step(2)
@@ -1356,7 +1382,7 @@ func _ready() -> void:
 	hitter.recover()
 	hitter.global_position = Vector2(mx + 550.0, my - 40.0)
 	await step(2)
-	var enemy: Mecha = game.call_mecha(hitter)
+	var enemy: Mecha = game.call_mecha(hitter, "roquette")
 	await step(100)
 	hitter._board(enemy)
 	await step(5)
@@ -1555,6 +1581,298 @@ func _ready() -> void:
 		check(piece != null and piece.state == FallingChunk.State.BURST and game.gauge.points >= gauge_chunk + 3.0,
 			"Ville : un gros morceau se casse en l'air sous %s (contre de lourde)" % ("une roquette" if test[0] == "roquette" else "3 balles"))
 		await step(200)
+	# Ville : le bouclier d'énergie du mecha (B) et son coup de poing (RB)
+	await new_game()
+	game._beacon_timer = 1e9
+	game._item_spawn_timer = 1e9
+	game._weapon_spawn_timer = 1e9
+	var knight: Fighter = game.fighters[0]
+	var walker: Fighter = game.fighters[1]
+	var kcmd := {"b": false, "rb": false, "u": false, "rt": false}
+	knight.input_source = Scripted.new(func(s, f):
+		s.block_held = kcmd.b
+		s.throw_pressed = kcmd.rb
+		s.ultimate_pressed = kcmd.u
+		s.attack_pressed = kcmd.u
+		s.heavy_pressed = kcmd.u
+		s.item_pressed = kcmd.rt
+		kcmd.rb = false
+		kcmd.u = false
+		kcmd.rt = false)
+	walker.input_source = Scripted.new(func(s, f): pass)
+	knight.global_position = Vector2(mx, my - 40.0)
+	walker.global_position = Vector2(mx + 500.0, my - 40.0)
+	await step(2)
+	var guard: Mecha = game.call_mecha(knight)
+	await step(100)
+	knight._board(guard)
+	await step(5)
+	var walker_at_mecha := func() -> void:
+		walker.recover()
+		walker._invincible_timer = 0.0
+		walker.velocity = Vector2.ZERO
+		walker.global_position = Vector2(guard.body_rect().end.x + walker.stats.body_size.x / 2.0 + 4.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	walker_at_mecha.call()
+	kcmd.b = true
+	await step(20)  # bouclier levé depuis longtemps : plus de blocage parfait
+	var hp_guard := guard.hp
+	light_now(walker, Vector2.LEFT)
+	await step(3)
+	check(guard.is_shielding() and guard.hp == hp_guard and guard.shield == Mecha.SHIELD_MAX - Game.MECHA_WEAR_LIGHT,
+		"Ville : B lève le bouclier du mecha, il encaisse à sa place (bouclier %d)" % guard.shield)
+	await shot("ville_mecha_bouclier")
+	kcmd.b = false
+	await step(30)
+	walker_at_mecha.call()
+	await step(2)
+	game.gauge.points = 0.0
+	var shield_now := guard.shield
+	kcmd.b = true
+	await step(2)
+	light_now(walker, Vector2.LEFT)
+	await step(3)
+	check(guard.hp == hp_guard and guard.shield == shield_now and game.gauge.points >= 1.0 and walker.attack_cooldown_left() > 0.5,
+		"Ville : B juste avant le coup = blocage parfait du mecha (rien d'usé, contre, l'attaquant ne frappe plus)")
+	kcmd.b = false
+	await step(70)
+	# Une balle sur un blocage parfait repart vers son tireur
+	walker.recover()
+	walker.global_position = Vector2(mx + 500.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	await step(5)
+	game._on_item_used(walker, "balle", (guard.body_rect().get_center() - walker.global_position).normalized(), 1.0, 0.0)
+	var bullet_back: Projectile = null
+	for i in 30:
+		if game.projectiles.size() > 0 and bullet_back == null:
+			var b_now: Projectile = game.projectiles[0]
+			if b_now.position.distance_to(guard.body_rect().get_center()) < 260.0:
+				kcmd.b = true
+		await step(1)
+		for p in game.projectiles:
+			if p.kind == "balle" and p.owner_index == knight.player_index:
+				bullet_back = p
+		if bullet_back != null:
+			break
+	check(bullet_back != null and bullet_back.velocity.x > 0.0 and guard.hp == hp_guard, "Ville : une balle sur le blocage parfait du mecha repart vers son tireur")
+	kcmd.b = false
+	await step(40)
+	# Le bouclier vide casse pour de bon
+	guard.shield = 1
+	walker_at_mecha.call()
+	kcmd.b = true
+	await step(20)
+	light_now(walker, Vector2.LEFT)
+	await step(3)
+	kcmd.b = false
+	await step(2)
+	kcmd.b = true
+	await step(3)
+	check(guard.shield_broken and not guard.is_shielding(), "Ville : le bouclier du mecha vide casse, B ne le relève plus")
+	kcmd.b = false
+	# RB : le coup de poing sonne le joueur à pied devant lui et le projette
+	await step(60)
+	walker_at_mecha.call()
+	await step(3)
+	var walker_x := walker.global_position.x
+	kcmd.rb = true
+	await step(4)
+	await shot("ville_mecha_poing")
+	await step(10)
+	check(walker.is_stunned() and walker.global_position.x > walker_x + 40.0, "Ville : RB, le coup de poing du mecha sonne et projette (%d px)" % (walker.global_position.x - walker_x))
+	# ... un blocage parfait l'arrête : contre, le mecha est repoussé et ne frappe plus
+	await step(150)
+	walker_at_mecha.call()
+	walker.input_source = Scripted.new(func(s, f): s.block_held = true)
+	await step(3)
+	game.gauge.points = 0.0
+	kcmd.rb = true
+	await step(8)
+	check(not walker.is_stunned() and game.gauge.points >= 3.0 and guard._punch_cooldown > 0.6,
+		"Ville : un blocage parfait arrête le poing du mecha (contre, le mecha ne frappe plus)")
+	walker.input_source = Scripted.new(func(s, f): pass)
+	# ... et il use un autre mecha de 3
+	await step(70)
+	walker.recover()
+	walker.global_position = Vector2(guard.body_rect().end.x + 200.0, my - 40.0)
+	await step(2)
+	var rival: Mecha = game.call_mecha(walker)
+	await step(100)
+	walker._board(rival)
+	await step(5)
+	rival.global_position.x = guard.body_rect().end.x + Mecha.BODY.x / 2.0 + 40.0
+	await step(3)
+	var rival_hp := rival.hp
+	kcmd.rb = true
+	await step(15)
+	check(rival.hp == rival_hp - Game.MECHA_WEAR_PUNCH, "Ville : le coup de poing use l'autre mecha de 3 (%d -> %d)" % [rival_hp, rival.hp])
+	# Missiles (objet, RT en mecha) : on ne les prend qu'en mecha ; 4 missiles suivent l'ennemi
+	walker.leave_mecha()
+	rival.queue_free()
+	await step(2)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(guard.global_position.x + 700.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	walker.velocity = Vector2.ZERO
+	await step(60)
+	check(not walker.take_item("missiles"), "Ville : à pied, on ne prend pas les missiles")
+	game.spawn_pickup("missiles", guard.body_rect().get_center())
+	await step(3)
+	check(knight.item == "missiles", "Ville : en mecha, on ramasse les missiles en passant dessus")
+	var walker_lives := walker.lives
+	kcmd.rt = true
+	var missiles_seen := {}
+	for i in 40:
+		await step(1)
+		for p in game.projectiles:
+			if p.kind == "missile":
+				missiles_seen[p.get_instance_id()] = true
+		if i == 20:
+			await shot("ville_mecha_missiles")
+	check(missiles_seen.size() == Mecha.MISSILES and knight.item == "", "Ville : RT tire %d missiles" % missiles_seen.size())
+	await step(120)
+	check(walker.is_stunned() or walker.lives < walker_lives, "Ville : les missiles suivent l'ennemi et le touchent")
+	# Ultimes en mecha (X + Y, jauge pleine). Barre : grand laser qui gèle (à pied et en mecha)
+	await step(200)
+	for pr in game.projectiles.duplicate():
+		game._remove_projectile(pr)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(guard.global_position.x + 600.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	walker.velocity = Vector2.ZERO
+	await step(30)
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(2)
+	check(guard.ultimate == "laser" and knight.ultimate_points == 0 and game.projectiles.is_empty(),
+		"Ville : X + Y avec la jauge pleine lance l'ultime en mecha (sans tirer en plus)")
+	await step(int((Mecha.ULT_LASER_STARTUP + 0.15) * 60.0))
+	await shot("ville_mecha_ultime_laser")
+	await step(20)
+	check(walker.is_frozen(), "Ville : le grand laser du mecha gèle celui qui est à pied")
+	await step(200)
+	walker.recover()
+	walker._frozen_timer = 0.0
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(guard.global_position.x + 600.0, my - 40.0)
+	await step(2)
+	var target_mecha: Mecha = game.call_mecha(walker)
+	await step(100)
+	walker._board(target_mecha)
+	await step(5)
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(int((Mecha.ULT_LASER_STARTUP + 0.2) * 60.0))
+	check(target_mecha.is_frozen() and target_mecha.hp == Mecha.WEAR_MAX - Game.MECHA_WEAR_ULT_LASER,
+		"Ville : le grand laser gèle l'autre mecha et l'use de 10 (%d)" % target_mecha.hp)
+	# Jumb : onde de 600 px (l'autre mecha s'use de 8 et recule)
+	await step(200)
+	knight.stats = knight.stats.duplicate()
+	knight.stats.ultimate = "onde"
+	var hp_wave := target_mecha.hp
+	var x_wave := target_mecha.global_position.x
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(int((Mecha.ULT_WAVE_STARTUP + 0.2) * 60.0))
+	await shot("ville_mecha_ultime_onde")
+	await step(20)
+	check(target_mecha.hp == hp_wave - Game.MECHA_WEAR_ULT_WAVE and target_mecha.global_position.x > x_wave + 30.0,
+		"Ville : l'onde du mecha use l'autre mecha de 8 et le repousse (%d px)" % (target_mecha.global_position.x - x_wave))
+	# Jib : 3 traversées, chacune use l'autre mecha
+	await step(120)
+	knight.stats.ultimate = "eclair"
+	target_mecha.global_position = Vector2(guard.global_position.x + 500.0, my)  # l'onde l'a fait tomber du toit
+	target_mecha.velocity = Vector2.ZERO
+	await step(10)
+	var hp_bolt := target_mecha.hp
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(90)
+	check(target_mecha.hp <= hp_bolt - 2 * Game.MECHA_WEAR_ULT_BOLT and guard.ultimate == "",
+		"Ville : l'éclair du mecha traverse l'autre mecha plusieurs fois (%d -> %d)" % [hp_bolt, target_mecha.hp])
+	# Un blocage parfait (du mecha visé) arrête l'ultime : contre
+	await step(60)
+	knight.stats.ultimate = "laser"
+	target_mecha.global_position = Vector2(guard.global_position.x + 500.0, my)
+	target_mecha.velocity = Vector2.ZERO
+	await step(10)
+	var hp_parry := target_mecha.hp
+	game.gauge.points = 0.0
+	walker.input_source = Scripted.new(func(s, f): s.block_held = f >= 20)
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(int((Mecha.ULT_LASER_STARTUP + 0.15) * 60.0))
+	check(target_mecha.hp == hp_parry and not target_mecha.is_frozen() and guard.ultimate == "" and game.gauge.points >= 3.0,
+		"Ville : un blocage parfait du mecha visé arrête le grand laser (contre)")
+	walker.input_source = Scripted.new(func(s, f): pass)
+	# Canon laser de mecha (l'arme lourde est tirée au hasard à l'arrivée : roquette ou laser)
+	var weapons_seen := {}
+	for i in 20:
+		var m: Mecha = game.call_mecha(knight)
+		weapons_seen[m.heavy_weapon] = true
+		game.mechas.erase(m)
+		m.queue_free()
+	check(weapons_seen.has("roquette") and weapons_seen.has("laser"), "Ville : l'arme lourde du mecha est tirée au hasard (roquette ou laser)")
+	await step(2)
+	var lcmd := {"yh": false}
+	walker.leave_mecha()
+	await step(2)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.input_source = Scripted.new(func(s, f): pass)
+	knight.leave_mecha()
+	await step(2)
+	for m in game.mechas.duplicate():
+		game.mechas.erase(m)
+		m.queue_free()
+	knight.global_position = Vector2(mx, my - 40.0)
+	knight.velocity = Vector2.ZERO
+	walker.global_position = Vector2(mx + 700.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	walker.velocity = Vector2.ZERO
+	await step(30)
+	var gunship: Mecha = game.call_mecha(knight, "laser")
+	await step(100)
+	knight._board(gunship)
+	knight.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = lcmd.yh and f % 1000 == 0
+		s.heavy_held = lcmd.yh)
+	await step(5)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(gunship.global_position.x + 700.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	await step(5)
+	var walker_lives_l := walker.lives
+	knight.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 0
+		s.heavy_held = f < 30)
+	await step(31)
+	await shot("ville_mecha_canon_laser")
+	await step(5)
+	check(walker.is_stunned() or walker.lives < walker_lives_l, "Ville : Y chargé, le canon laser touche tout de suite à distance")
+	# ... il s'arrête sur une roquette (les deux disparaissent)
+	await step(120)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(gunship.global_position.x + 900.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	await step(5)
+	game._fire_launcher(walker, Vector2.LEFT, 1.0)
+	await step(6)
+	var walker_lives_r := walker.lives
+	var enemy_rocket: Projectile = game.projectiles.filter(func(p): return p.kind == "roquette")[0]
+	var laser_origin := gunship.turret_muzzle(Vector2.RIGHT)
+	var to_rocket := laser_origin.direction_to(enemy_rocket.position)
+	game._fire_mecha_laser(gunship, laser_origin, to_rocket, 1.0)
+	await step(2)
+	check(game.projectiles.filter(func(p): return p.kind == "roquette").is_empty() and not walker.is_stunned() and walker.lives == walker_lives_r,
+		"Ville : le canon laser annule une roquette sur son chemin (et s'arrête là)")
+	# ... et il traverse au plus 2 blocs de la ville
+	var laser_wall_x: float = Ville.building_lefts()[3]
+	var line_y := -Ville.FLOOR_HEIGHT * 0.5
+	var gunship_spot := gunship.global_position
+	gunship.global_position += Vector2(laser_wall_x - 200.0, line_y) - gunship.body_rect().get_center()
+	var broken_before: int = game.map.windows().filter(func(w): return w is CityBlock and w.broken).size()
+	game._fire_mecha_laser(gunship, Vector2(laser_wall_x - 200.0, line_y), Vector2.RIGHT, 1.0)
+	gunship.global_position = gunship_spot
+	var broken_after: int = game.map.windows().filter(func(w): return w is CityBlock and w.broken).size()
+	check(broken_after - broken_before == Game.MECHA_LASER_BLOCKS, "Ville : le canon laser casse %d blocs puis s'arrête" % (broken_after - broken_before))
 	# Ville : le parc d'attractions et le parc arboré (captures)
 	if shot_dir != "":
 		for place in [["ville_fete_foraine", -8000.0, -6900.0], ["ville_parc", 6900.0, 8600.0]]:

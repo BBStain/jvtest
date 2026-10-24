@@ -8,11 +8,12 @@ extends Node2D
 ##   vie      : RT donne une vie en plus (jusqu'à Fighter.MAX_LIVES)
 ##   grappin  : 3 lancers vers l'adversaire le plus proche (voir Fighter._tick_grapple)
 ##   fusil, lance_roquette : Ville seulement (VILLE_KINDS), à 2 mains (voir Fighter.TWO_HANDED_ITEMS)
+##   missiles : Ville seulement, on le prend en MECHA (pas à pied) : RT tire 4 missiles qui suivent l'ennemi
 ##   balise   : Ville seulement (pas dans KINDS) : RT appelle un mecha, qui tombe du ciel (voir Game.call_mecha)
 ## Dessin très simple (une caisse de couleur avec une lettre) : à remplacer par un graphiste.
 
 const KINDS := ["pistolet", "grenade", "bouclier", "vie", "grappin"]
-const VILLE_KINDS := ["fusil", "lance_roquette"]  ## en plus dans la Ville
+const VILLE_KINDS := ["fusil", "lance_roquette", "missiles"]  ## en plus dans la Ville (missiles : seulement en mecha)
 const SIZE := 26.0
 const MAX_FALL := 600.0                 ## il tombe du ciel doucement (plus vite s'il est frappé)
 
@@ -48,6 +49,8 @@ static func color_of(item_kind: String) -> Color:
 			return Color(0.35, 0.4, 0.3)
 		"lance_roquette":
 			return Color(0.55, 0.45, 0.3)
+		"missiles":
+			return Color(0.9, 0.35, 0.55)
 	return Color.WHITE
 
 
