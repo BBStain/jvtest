@@ -56,6 +56,7 @@ const MECHA_BULLET_SPEED := 2100.0           ## les balles de la rafale vont plu
 const ROCKET_SPEED := [950.0, 1500.0]        ## roquette : non chargée, chargée à fond
 const ROCKET_RADIUS := [110.0, 160.0]        ## rayon de son explosion
 const ROCKET_KNOCKBACK := [1000.0, 1350.0]
+const ROCKET_CANCEL_BULLETS := 3             ## balles adverses pour annuler une roquette en vol
 const LAUNCHER_ROCKET_SPEED := 1300.0         ## la roquette du lance-roquette (à pied) : grosse mais esquivable
 const ITEM_TOSS_LOCK := 0.6                   ## arme à 2 mains jetée : son lanceur ne la reprend pas avant ce temps
 const WEAPON_BREAK_TIME_SCALE := 0.25       ## arme cassée (3e contre de sa lourde) : court ralenti...
@@ -273,6 +274,7 @@ func _physics_process(delta: float) -> void:
 	_resolve_waves()
 	_resolve_bolts()
 	_projectiles_hit_mechas()
+	_resolve_shot_cancels(delta)
 	_resolve_projectiles()
 	_hit_loose_objects()
 	_tick_pickups(delta)
@@ -1274,7 +1276,7 @@ func _resolve_bullet(bullet: Projectile) -> void:
 ## Renvoi de balle, selon le TIMING : frappée pile quand le coup sort (dans les DEFLECT_PERFECT
 ## premières secondes), elle repart droit sur le tireur. Plus le coup était déjà avancé, plus elle
 ## est déviée (jusqu'à DEFLECT_MAX_ANGLE à la toute fin du coup), toujours vers le haut.
-## Un renvoi parfait compte comme un contre.
+## Un renvoi parfait compte comme un contre (de lourde pour une roquette). Sert aussi aux roquettes.
 func _deflect_bullet(bullet: Projectile, deflector: Fighter) -> void:
 	deflector.mark_attack_hit()  # le coup est « utilisé » par la balle
 	var shooter: Fighter = fighters[bullet.owner_index]
@@ -1293,7 +1295,7 @@ func _deflect_bullet(bullet: Projectile, deflector: Fighter) -> void:
 	var perfect := error <= 0.0
 	_spawn_clash_mark(bullet.position, false, PARRY_COLOR if perfect else Color.WHITE)
 	if perfect:
-		_count_counter(false, [deflector])
+		_count_counter(bullet.kind == "roquette", [deflector])
 		deflector.recover()
 		deflector.reset_cooldown()
 
@@ -1471,6 +1473,86 @@ func _projectiles_hit_mechas() -> void:
 			break
 
 
+## Les tirs s'annulent, comme les coups qui se croisent : deux balles de joueurs différents qui se
+## rencontrent disparaissent toutes les deux ; une roquette disparaît après ROCKET_CANCEL_BULLETS balles
+## adverses (c'est un contre de lourde, compté triple pour celui qui tire la 3e), et deux roquettes
+## qui se croisent aussi. Un gros morceau qui tombe se casse en l'air comme sous les coups : une balle
+## compte comme un coup léger, une roquette comme une lourde (elle explose dessus) ; cassé, c'est
+## un contre de lourde pour le tireur. On compare le chemin fait pendant la frame, pour que deux
+## tirs rapides qui se croisent ne passent pas l'un à travers l'autre.
+func _resolve_shot_cancels(delta: float) -> void:
+	var shots: Array[Projectile] = []
+	for projectile in projectiles:
+		if (projectile.kind == "balle" or projectile.kind == "roquette") and not projectile.finished:
+			shots.append(projectile)
+	var gone := {}
+	for i in shots.size():
+		var a := shots[i]
+		for j in range(i + 1, shots.size()):
+			var b := shots[j]
+			if gone.has(a) or gone.has(b) or a.owner_index == b.owner_index:
+				continue
+			if not _shots_meet(a, b, delta):
+				continue
+			var where := (a.tip() + b.tip()) / 2.0
+			if a.kind == b.kind:
+				gone[a] = true
+				gone[b] = true
+				_spawn_clash_mark(where, a.kind == "roquette")
+				continue
+			var rocket := a if a.kind == "roquette" else b
+			var bullet := b if rocket == a else a
+			gone[bullet] = true
+			rocket.shot_hits += 1
+			if rocket.shot_hits >= ROCKET_CANCEL_BULLETS:
+				gone[rocket] = true
+				_spawn_clash_mark(where, true)
+				_count_counter(true, [fighters[bullet.owner_index]])
+			else:
+				_spawn_clash_mark(where, false)
+	for projectile: Projectile in gone:
+		_remove_projectile(projectile)
+	_shots_hit_chunks(delta)
+
+
+func _shots_meet(a: Projectile, b: Projectile, delta: float) -> bool:
+	var closest := Geometry2D.get_closest_points_between_segments(
+		a.tail() - a.velocity * delta, a.tip(), b.tail() - b.velocity * delta, b.tip())
+	return closest[0].distance_to(closest[1]) <= Projectile.RADIUS * 2.0
+
+
+func _shots_hit_chunks(delta: float) -> void:
+	var collapse := map.get_node_or_null("Ecroulement") as CityCollapse
+	if collapse == null:
+		return
+	for chunk in collapse.chunks:
+		if not is_instance_valid(chunk) or not chunk.is_dangerous():
+			continue
+		var parts := chunk.current_rects()
+		for projectile: Projectile in projectiles.duplicate():
+			if not (projectile.kind == "balle" or projectile.kind == "roquette") or projectile.finished:
+				continue
+			var from := projectile.tail() - projectile.velocity * delta
+			var part_hit := Rect2()
+			for r in parts:
+				if _segment_hits_rect(from, projectile.tip(), Projectile.RADIUS, r):
+					part_hit = r
+					break
+			if part_hit.size == Vector2.ZERO:
+				continue
+			var rocket := projectile.kind == "roquette"
+			if chunk.take_attack(rocket):
+				_spawn_clash_mark(part_hit.get_center(), true)
+				_count_counter(true, [fighters[projectile.owner_index]])
+			if rocket:
+				projectile.position = part_hit.get_center()
+				projectile.finished = true  # elle explose dessus (voir _resolve_rocket)
+			else:
+				_remove_projectile(projectile)
+			if not chunk.is_dangerous():
+				break
+
+
 ## Un mecha tire : les balles de la rafale (comme celles du pistolet, en plus rapide) ou une roquette.
 ## Canon collé au décor : le tir s'arrête contre lui (sinon il partirait de l'intérieur du mur).
 func _on_mecha_fired(mecha: Mecha, kind: String, origin: Vector2, direction: Vector2, power: float) -> void:
@@ -1506,15 +1588,36 @@ func _on_mecha_fired(mecha: Mecha, kind: String, origin: Vector2, direction: Vec
 
 ## Une roquette : elle explose contre le décor, un mecha (voir _projectiles_hit_mechas), le premier
 ## joueur sur son chemin, ou au bout de sa course. Plus elle était chargée, plus l'explosion est grosse.
+## Comme tout ce qui vole, elle se contre : frappée par un coup, elle est renvoyée comme une balle
+## (voir _deflect_bullet) ; prise en blocage parfait, elle est annulée sans exploser (contre de
+## lourde, compté triple).
 func _resolve_rocket(rocket: Projectile) -> void:
 	if not map.blast_zone.has_point(rocket.position):
 		_remove_projectile(rocket)
 		return
-	if not rocket.finished and _projectile_victim(rocket) == null:
-		return
+	if not rocket.finished:
+		for fighter in fighters:
+			if fighter.player_index != rocket.owner_index and not fighter.eliminated and fighter.is_attack_active() \
+					and _projectile_in_attack(rocket, fighter):
+				_deflect_bullet(rocket, fighter)
+				return
+		var victim := _projectile_victim(rocket)
+		if victim == null:
+			return
+		if victim.is_parrying():
+			_counter_rocket(rocket, victim)
+			return
 	var p := rocket.blast
 	_explode(rocket.tip() if not rocket.finished else rocket.position, lerpf(ROCKET_KNOCKBACK[0], ROCKET_KNOCKBACK[1], p),
 		lerpf(ROCKET_RADIUS[0], ROCKET_RADIUS[1], p), roundi(lerpf(MECHA_WEAR_ROCKET[0], MECHA_WEAR_ROCKET[1], p)), rocket.owner_index)
+	_remove_projectile(rocket)
+
+
+func _counter_rocket(rocket: Projectile, counterer: Fighter) -> void:
+	_spawn_clash_mark(rocket.tip(), true, PARRY_COLOR)
+	_count_counter(true, [counterer])
+	counterer.recover()
+	counterer.reset_cooldown()
 	_remove_projectile(rocket)
 
 
@@ -1636,6 +1739,12 @@ func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK, radius := GRENADE_
 			continue
 		var away := fighter.global_position - where
 		var dir := (away.normalized() if away.length() > 1.0 else Vector2.UP) + Vector2(0.0, -0.4)
+		if fighter.is_parrying():
+			# Blocage parfait au bon moment : il ne prend rien, c'est un contre (de lourde).
+			_spawn_clash_mark(fighter.body_rect().get_center(), true, PARRY_COLOR)
+			_count_counter(true, [fighter])
+			fighter.recover()
+			continue
 		if fighter.is_blocking() and not fighter.is_stunned():
 			var push := Vector2(signf(away.x) if away.x != 0.0 else 1.0, 0.0)
 			if fighter.absorb_hit(push, GRENADE_SHIELD_DAMAGE):
