@@ -33,6 +33,8 @@ const DUEL_GROUP_CAMERA_MARGIN := Vector2(480, 320)  ## à 3 ou 4 : tout le mond
 const SHIELD_BREAK_TIME_SCALE := 0.3        ## bouclier cassé : ralenti (3 fois moins vite)...
 const SHIELD_BREAK_SLOWMO := 1.2            ## ... pendant 1,2 vraie seconde
 const PARRY_COLOR := Color(0.55, 0.85, 1.0)  ## la marque d'un blocage parfait
+const CHUNK_SHIELD_DAMAGE := 6               ## Ville : un gros morceau qui tombe sur un bouclier
+const CHUNK_KNOCKBACK := 900.0               ## Ville : ... et sur quelqu'un qui ne bloque pas
 const WEAPON_BREAK_TIME_SCALE := 0.25       ## arme cassée (3e contre de sa lourde) : court ralenti...
 const WEAPON_BREAK_SLOWMO := 0.8            ## ... pendant 0,8 vraie seconde...
 const WEAPON_BREAK_CAMERA_MARGIN := Vector2(260, 180)  ## ... et la caméra zoome fort sur l'arme qui casse
@@ -238,6 +240,7 @@ func _physics_process(delta: float) -> void:
 
 	_resolve_clashes()
 	_resolve_hits()
+	_resolve_chunks()
 	_resolve_lasers()
 	_resolve_waves()
 	_resolve_bolts()
@@ -1262,6 +1265,60 @@ func _deflect_bullet(bullet: Projectile, deflector: Fighter) -> void:
 		_count_counter(false, [deflector])
 		deflector.recover()
 		deflector.reset_cooldown()
+
+
+## Ville : les gros morceaux d'immeuble qui tombent. Ils font mal comme une attaque lourde venue du
+## ciel (une seule fois par joueur), et se contrent pareil : un coup lourd (ou 3 légers) le casse en
+## l'air, un blocage parfait le fait éclater sur le bouclier (contre), un dash passe à travers.
+## Un blocage normal l'arrête mais le bouclier craque fort.
+func _resolve_chunks() -> void:
+	var collapse := map.get_node_or_null("Ecroulement") as CityCollapse
+	if collapse == null:
+		return
+	for chunk in collapse.chunks:
+		if not is_instance_valid(chunk) or not chunk.is_dangerous():
+			continue
+		var parts := chunk.current_rects()
+		for fighter in fighters:
+			if fighter.eliminated or not fighter.is_attack_active():
+				continue
+			for r in parts:
+				if _segment_hits_rect(fighter.attack_start(), fighter.attack_center(), fighter.attack_radius(), r):
+					fighter.mark_attack_hit()
+					if chunk.take_attack(fighter.is_heavy_attack()):
+						_spawn_clash_mark(r.get_center(), true)
+						_count_counter(true, [fighter])
+						fighter.recover()
+					break
+		if not chunk.is_dangerous():
+			continue
+		for fighter in fighters:
+			if fighter.eliminated or chunk.hit_fighters.has(fighter) or fighter.is_dodging() or not fighter.can_be_hit():
+				continue
+			var body := fighter.body_rect()
+			if not parts.any(func(r: Rect2) -> bool: return r.intersects(body)):
+				continue
+			chunk.hit_fighters[fighter] = true
+			var side := Vector2(signf(body.get_center().x - chunk.bounds().get_center().x), 0.0)
+			if side.x == 0.0:
+				side.x = 1.0
+			if fighter.is_item_shielded():
+				chunk.burst()
+			elif fighter.is_parrying():
+				chunk.burst()
+				_spawn_clash_mark(body.get_center(), true, PARRY_COLOR)
+				_count_counter(true, [fighter])
+				fighter.recover()
+			elif fighter.is_blocking() and not fighter.is_stunned():
+				chunk.burst()
+				if fighter.absorb_hit(side, CHUNK_SHIELD_DAMAGE):
+					fighter.shield_burst(side, true)
+			else:
+				fighter.take_hit((side + Vector2.DOWN).normalized(), CHUNK_KNOCKBACK)
+				if fighter.is_stunned() and _alive_count() == 2:
+					_stun_focus = [fighter, _closest_opponent(fighter)]
+			if not chunk.is_dangerous():
+				break
 
 
 ## Une grenade : un coup la décolle et la repousse ; au bout de sa mèche, elle explose.

@@ -7,8 +7,12 @@ extends RefCounted
 ##
 ## La ville est fabriquée ici, pas dessinée dans une scène : chaque immeuble est une liste d'étages.
 ## Un immeuble est creux : deux murs, un plancher traversable par étage, un toit traversable.
-## Un étage sur deux a une porte de chaque côté (on entre, on traverse, on monte d'étage en étage).
+## Le rez-de-chaussée est fermé (ses murs posent l'immeuble sur la rue). Les étages impairs ont une
+## porte, d'un seul côté à la fois (gauche, puis droite deux étages plus haut...) : l'autre mur continue
+## de tenir l'immeuble. On entre par l'étage 1 en sautant depuis la rue, ou par une passerelle.
 ## Murs, planchers et passerelles sont des blocs cassables (CityBlock) : seule la rue est indestructible.
+## Ce qui ne touche plus le sol s'écroule (CityCollapse). Au centre, la grande tour, reliée à ses
+## voisins par de grosses passerelles en bas.
 ## À gauche de la ville, un parc d'attractions (grande roue, grand huit) ; à droite, un parc arboré.
 
 const BLOCK := 80.0                 ## taille d'un bloc cassable
@@ -16,20 +20,25 @@ const FLOOR_BLOCKS := 3             ## hauteur d'un étage en blocs (240 px : un
 const FLOOR_HEIGHT := BLOCK * FLOOR_BLOCKS
 const SLAB := 24.0                  ## épaisseur d'un plancher, d'un toit, d'une passerelle
 const DOOR_BLOCKS := 2              ## hauteur d'une porte en blocs (le 3e bloc reste au-dessus)
-const HALF_WIDTH := 9000.0          ## la rue va de -9000 à 9000 : au-delà, c'est le vide
-const PARK_START := 6180.0          ## les deux parcs commencent à cette distance du centre
+const HALF_WIDTH := 9300.0          ## la rue va de -9300 à 9300 : au-delà, c'est le vide
+const PARK_START := 6500.0          ## les deux parcs commencent à cette distance du centre
 const STREET_DEPTH := 200.0
 const SKY := 8000.0                 ## hauteur de la ville (la zone de jeu monte jusque-là)
 const GAP := 200.0                  ## écart entre deux immeubles voisins (on saute de toit en toit)
 
-## Les immeubles de gauche à droite : [largeur en blocs, nombre d'étages]. 20 étages = 4 800 px.
+## Les immeubles de gauche à droite : [largeur en blocs, nombre d'étages, épaisseur des murs en blocs].
+## 20 étages = 4 800 px. Au milieu, la grande tour : 30 étages (7 200 px) et des murs de 2 blocs.
 const BUILDINGS := [
-	[4, 3], [5, 5], [4, 4], [6, 7], [5, 6], [4, 9], [5, 8], [6, 12], [4, 10], [5, 14],
-	[6, 20],
-	[5, 14], [4, 10], [6, 12], [5, 8], [4, 9], [5, 6], [6, 7], [4, 4], [5, 5], [4, 3],
+	[4, 3, 1], [5, 5, 1], [4, 4, 1], [6, 7, 1], [5, 6, 1], [4, 9, 1], [5, 8, 1], [6, 12, 1], [4, 10, 1], [5, 14, 1],
+	[12, 30, 2],
+	[5, 14, 1], [4, 10, 1], [6, 12, 1], [5, 8, 1], [4, 9, 1], [5, 6, 1], [6, 7, 1], [4, 4, 1], [5, 5, 1], [4, 3, 1],
 ]
-## Passerelles entre deux voisins : [index de l'immeuble de gauche, étage] (un étage avec portes).
-const BRIDGES := [[3, 4], [7, 8], [9, 10], [10, 10], [12, 8], [16, 4]]
+const TOWER := 10                   ## l'index de la grande tour
+## Passerelles entre deux voisins : [index de l'immeuble de gauche, étage] (un étage où les deux
+## immeubles ont leur porte face à face, voir has_door).
+const BRIDGES := [[3, 5], [7, 9], [9, 9], [10, 11], [12, 7], [16, 3]]
+## Grosses passerelles pleines (un bloc d'épaisseur) entre la tour et ses voisins, en bas.
+const BIG_BRIDGES := [[9, 1], [9, 5], [10, 3], [10, 7]]
 
 const STREET_COLOR := "#3a3d45"
 const WALL_COLOR := "#9ea3ad"
@@ -41,6 +50,7 @@ const GRASS_COLOR := "#3f6b45"
 const BLOCK_HP := 6                 ## PV d'un bloc (une attaque légère : 1, une lourde : 3)
 
 static var _next_id := 0
+static var _all_blocks: Array[CityBlock] = []
 
 
 ## La ville peut-elle être choisie dans le menu ? (?ville dans l'adresse, en attendant l'accès secret)
@@ -68,6 +78,16 @@ static func roof_top(index: int) -> float:
 	return -BUILDINGS[index][1] * FLOOR_HEIGHT
 
 
+## L'étage "floor" de l'immeuble n° index a-t-il une porte du côté "side" (-1 : gauche, 1 : droite) ?
+## Étages impairs seulement, un côté à la fois ; un immeuble sur deux commence par l'autre côté,
+## pour que deux voisins aient des portes face à face.
+static func has_door(index: int, floor: int, side: int) -> bool:
+	if floor % 2 == 0:
+		return false
+	var left_first := (floor % 4 == 1) == (index % 2 == 0)
+	return left_first == (side < 0)
+
+
 ## Le milieu (en x) de l'immeuble n° index.
 static func building_center(index: int) -> float:
 	return building_lefts()[index] + BUILDINGS[index][0] * BLOCK / 2.0
@@ -75,6 +95,7 @@ static func building_center(index: int) -> float:
 
 static func build() -> GameMap:
 	_next_id = 0
+	_all_blocks = []
 	var map := GameMap.new()
 	map.name = "Ville"
 	map.map_name = "Ville"
@@ -87,12 +108,21 @@ static func build() -> GameMap:
 	_add(decor, "sol", Rect2(PARK_START, 0.0, HALF_WIDTH - PARK_START, STREET_DEPTH), GRASS_COLOR)
 	var lefts := building_lefts()
 	for i in BUILDINGS.size():
-		_building(decor, lefts[i], BUILDINGS[i][0], BUILDINGS[i][1])
+		_building(decor, i, lefts[i])
 	for bridge in BRIDGES:
 		var i: int = bridge[0]
 		var from: float = lefts[i] + BUILDINGS[i][0] * BLOCK
 		var y: float = -float(bridge[1]) * FLOOR_HEIGHT
 		_blocks(decor, Rect2(from - BLOCK, y, GAP + BLOCK * 2.0, SLAB), BRIDGE_COLOR, true)
+	for bridge in BIG_BRIDGES:
+		var i: int = bridge[0]
+		var from: float = lefts[i] + BUILDINGS[i][0] * BLOCK
+		var y: float = -float(bridge[1]) * FLOOR_HEIGHT
+		_blocks(decor, Rect2(from, y, GAP, BLOCK), BRIDGE_COLOR, false)
+	var collapse := CityCollapse.new()
+	collapse.name = "Ecroulement"
+	collapse.setup(_all_blocks)
+	map.add_child(collapse)
 	_fair(decor)
 	_park(decor)
 	# Les départs : sur les toits autour du centre ; on réapparaît en tombant du ciel au milieu
@@ -105,7 +135,7 @@ static func build() -> GameMap:
 		spawns.add_child(marker)
 	var respawn := Marker2D.new()
 	respawn.name = "RespawnPoint"
-	respawn.position = Vector2(building_center(10), roof_top(10) - 400.0)
+	respawn.position = Vector2(building_center(TOWER), roof_top(TOWER) - 400.0)
 	map.add_child(respawn)
 	var items := Node2D.new()
 	items.name = "ItemSpawns"
@@ -117,7 +147,7 @@ static func build() -> GameMap:
 		var marker := Marker2D.new()
 		marker.position = Vector2(building_center(i), roof_top(i) - 200.0)
 		(weapons if i in [6, 8, 12, 14] else items).add_child(marker)
-	for x in [-7000.0, 7600.0]:  # un objet dans chaque parc
+	for x in [-7320.0, 7920.0]:  # un objet dans chaque parc
 		var marker := Marker2D.new()
 		marker.position = Vector2(x, -200.0)
 		items.add_child(marker)
@@ -125,8 +155,11 @@ static func build() -> GameMap:
 	return map
 
 
-## Un immeuble creux de "width" blocs et "floors" étages, posé sur la rue à partir de x = left.
-static func _building(decor: Node2D, left: float, width: int, floors: int) -> void:
+## L'immeuble creux n° index de BUILDINGS, posé sur la rue à partir de x = left.
+static func _building(decor: Node2D, index: int, left: float) -> void:
+	var width: int = BUILDINGS[index][0]
+	var floors: int = BUILDINGS[index][1]
+	var wall: int = BUILDINGS[index][2]
 	var w: float = width * BLOCK
 	# L'intérieur, un peu plus clair que le ciel (juste du décor, on passe au travers)
 	var inside := ColorRect.new()
@@ -139,12 +172,10 @@ static func _building(decor: Node2D, left: float, width: int, floors: int) -> vo
 	for f in floors:
 		var bottom: float = -f * FLOOR_HEIGHT     # le bas de l'étage
 		var top := bottom - FLOOR_HEIGHT
-		# Un étage sur deux (le rez-de-chaussée compris) a une porte de chaque côté
-		var wall_height := FLOOR_HEIGHT
-		if f % 2 == 0:
-			wall_height = FLOOR_HEIGHT - DOOR_BLOCKS * BLOCK
-		for x in [left, left + w - BLOCK]:
-			_blocks(decor, Rect2(x, top, BLOCK, wall_height), WALL_COLOR, false)
+		for side in [-1, 1]:
+			var x: float = left if side < 0 else left + w - wall * BLOCK
+			var wall_height := FLOOR_HEIGHT - (DOOR_BLOCKS * BLOCK if has_door(index, f, side) else 0.0)
+			_blocks(decor, Rect2(x, top, wall * BLOCK, wall_height), WALL_COLOR, false)
 		# Le plafond de l'étage : un plancher traversable, en haut de l'étage (le dernier est le toit)
 		_blocks(decor, Rect2(left, top, w, SLAB), FLOOR_COLOR if f < floors - 1 else WALL_COLOR, true)
 
@@ -162,20 +193,21 @@ static func _blocks(decor: Node2D, rect: Rect2, color: String, floor_blocks: boo
 			_next_id += 1
 			block.name = "bloc_%d" % _next_id
 			decor.add_child(block)
+			_all_blocks.append(block)
 
 
 ## Le parc d'attractions, à gauche de la ville : une grande roue et un petit grand huit.
 static func _fair(decor: Node2D) -> void:
 	var wheel := FerrisWheel.new()
 	wheel.name = "GrandeRoue"
-	wheel.position = Vector2(-8250.0, -wheel.radius - 120.0)
+	wheel.position = Vector2(-8570.0, -wheel.radius - 120.0)
 	decor.add_child(wheel)
 	var coaster := Coaster.new()
 	coaster.name = "GrandHuit"
 	var track := PackedVector2Array()
 	for p in [[-7550, -40], [-7420, -160], [-7280, -330], [-7120, -430], [-6960, -360], [-6820, -220],
 			[-6700, -200], [-6570, -320], [-6430, -400], [-6300, -260], [-6230, -60]]:
-		track.append(Vector2(p[0], p[1]))
+		track.append(Vector2(p[0] - 320.0, p[1]))
 	coaster.setup(track)
 	decor.add_child(coaster)
 
@@ -187,9 +219,9 @@ static func _park(decor: Node2D) -> void:
 	for t in trees:
 		var tree := ParkTree.new()
 		tree.setup(t[1], t[2])
-		tree.position = Vector2(t[0], 0.0)
+		tree.position = Vector2(t[0] + 320.0, 0.0)
 		decor.add_child(tree)
-	for x in [6620.0, 7330.0, 8080.0, 8460.0]:  # les bancs
+	for x in [6940.0, 7650.0, 8400.0, 8780.0]:  # les bancs
 		_add(decor, "plateforme", Rect2(x - 60.0, -44.0, 120.0, 12.0), "#8a6a4a")
 
 

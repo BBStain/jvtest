@@ -17,6 +17,7 @@ const EXPLOSION_DAMAGE := 4   ## une explosion (grenade) enlève 4 PV à tous le
 var hp := 6
 var _lock := 0.0
 var _flash := 0.0             ## petit éclair clair quand il prend un coup
+var collapse: CityCollapse    ## prévenu quand le bloc casse (ce qui ne tient plus va tomber)
 
 
 ## À appeler avant de l'ajouter à la map : sa forme existe tout de suite (l'aperçu du menu la voit).
@@ -58,7 +59,6 @@ func hit(damage: int) -> bool:
 	set_physics_process(true)
 	if hp == 0:
 		set_broken(true)
-		_shatter = DUST_TIME
 		return true
 	queue_redraw()
 	return false
@@ -74,6 +74,18 @@ func set_broken(value: bool) -> void:
 	super.set_broken(value)
 	_shatter = DUST_TIME if value else 0.0
 	set_physics_process(true)
+	if value and collapse != null:
+		collapse.block_broken()
+
+
+## Le bloc part avec un morceau qui tombe (FallingChunk le dessine) : il disparaît d'ici, sans poussière.
+func vanish() -> void:
+	if broken:
+		return
+	broken = true
+	_shatter = 0.0
+	_shape.set_deferred("disabled", true)
+	queue_redraw()
 
 
 func _physics_process(delta: float) -> void:
