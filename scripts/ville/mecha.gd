@@ -10,7 +10,8 @@ extends CharacterBody2D
 ##   LT : turbo (plus vite, brûle du carburant)    LB : dash (casse les blocs qu'il percute)
 ##   bas + A gardés 0,5 s : sortir (le mecha reste là, vide)
 ##   X : fusil d'assaut, une rafale de 3 balles (visée auto, ou stick droit)
-##   Y : lance-roquette, garder pour charger (plus loin, plus fort), lâcher pour tirer
+##   Y : l'arme lourde, tirée au hasard à son arrivée (heavy_weapon) : lance-roquette (garder pour
+##       charger, lâcher pour tirer) ou canon laser (charge de 0,3 à 1 s, puis un trait instantané)
 ##   B : bouclier d'énergie (il encaisse à la place du mecha ; vide, il est cassé pour de bon) ;
 ##       levé juste avant le coup (PARRY_WINDOW) = blocage parfait, un contre
 ##   RB : coup de poing devant soi
@@ -64,6 +65,10 @@ const BURST_GAP := 0.07                 ## ... une toutes les 0,07 s...
 const BURST_COOLDOWN := 0.45            ## ... et une nouvelle rafale au plus toutes les 0,45 s
 const ROCKET_FULL_CHARGE := 1.0         ## Y gardé 1 s : roquette chargée au maximum (elle part toute seule)
 const ROCKET_COOLDOWN := 0.8
+const LASER_MIN_CHARGE := 0.3           ## canon laser : au moins 0,3 s de charge...
+const LASER_FULL_CHARGE := 1.0          ## ... et au plus 1 s (il tire tout seul)
+const LASER_COOLDOWN := 1.0
+const HEAVY_WEAPONS := ["roquette", "laser"]
 const GUN_MOUNT := Vector2(94.0, -125.0)  ## la mitrailleuse sous le nez (x vers l'avant) : d'où partent les balles...
 const GUN_LENGTH := 99.0
 const TURRET_PIVOT := Vector2(0.0, -270.0)  ## ... et la tourelle sur le dos, d'où partent les roquettes
@@ -288,16 +293,20 @@ func _tick_weapons(input: InputState, delta: float) -> void:
 		_charge = 0.0
 	if _charge >= 0.0:
 		_charge += delta
-		if not input.heavy_held or _charge >= ROCKET_FULL_CHARGE:
+		var laser := heavy_weapon == "laser"
+		var full := LASER_FULL_CHARGE if laser else ROCKET_FULL_CHARGE
+		if (not input.heavy_held and (not laser or _charge >= LASER_MIN_CHARGE)) or _charge >= full:
 			var dir := aim_direction(TURRET_PIVOT)
 			_face(dir)
-			fired.emit(self, "roquette", turret_muzzle(dir), dir, clampf(_charge / ROCKET_FULL_CHARGE, 0.0, 1.0))
+			var power := clampf((_charge - LASER_MIN_CHARGE) / (full - LASER_MIN_CHARGE), 0.0, 1.0) if laser else clampf(_charge / full, 0.0, 1.0)
+			fired.emit(self, heavy_weapon, turret_muzzle(dir), dir, power)
 			_charge = -1.0
-			_rocket_cooldown = ROCKET_COOLDOWN
+			_rocket_cooldown = LASER_COOLDOWN if laser else ROCKET_COOLDOWN
 			visual.turret_barrel = _barrel
 			visual.turret_shot_time = 0.0
 			_barrel = (_barrel + 1) % MechaVisual.BARRELS
-	visual.turret_charge = clampf(_charge / ROCKET_FULL_CHARGE, 0.0, 1.0) if _charge >= 0.0 else -1.0
+	var full_charge := LASER_FULL_CHARGE if heavy_weapon == "laser" else ROCKET_FULL_CHARGE
+	visual.turret_charge = clampf(_charge / full_charge, 0.0, 1.0) if _charge >= 0.0 else -1.0
 
 
 ## X + Y, jauge d'ultime du pilote pleine : l'ultime de son perso, en plus gros.

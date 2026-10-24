@@ -68,6 +68,12 @@ const ROCKET_SPEED := [950.0, 1500.0]        ## roquette : non chargée, chargé
 const ROCKET_RADIUS := [110.0, 160.0]        ## rayon de son explosion
 const ROCKET_KNOCKBACK := [1000.0, 1350.0]
 const ROCKET_CANCEL_BULLETS := 3             ## balles adverses pour annuler une roquette en vol
+const MECHA_LASER_RANGE := [900.0, 1600.0]    ## canon laser de mecha : non chargé, chargé à fond
+const MECHA_WEAR_LASER := [6, 8]
+const MECHA_LASER_BLOCKS := 2                 ## il traverse et casse jusqu'à 2 blocs de la ville, puis s'arrête
+const MECHA_LASER_BULLETS := 3                ## ... il efface les balles sur son chemin et s'arrête à la 3e
+const MECHA_LASER_KNOCKBACK := 1100.0
+const MECHA_LASER_RADIUS := 14.0
 const MISSILE_SPEED := 950.0                  ## missiles de mecha (objet) : ils suivent l'ennemi le plus proche...
 const MISSILE_RADIUS := 75.0                  ## ... et font une petite explosion
 const MISSILE_KNOCKBACK := 900.0
@@ -1416,8 +1422,10 @@ func _tick_mechas(delta: float) -> void:
 
 ## La balise d'appel est activée (RT) : un viseur rouge marque l'endroit où le mecha va se poser,
 ## à la verticale du joueur, sur ce qu'il y a de plus haut (un toit plutôt que l'intérieur d'un immeuble).
-func call_mecha(fighter: Fighter) -> Mecha:
+## weapon : son arme lourde ("roquette" ou "laser") ; par défaut tirée au hasard.
+func call_mecha(fighter: Fighter, weapon := "") -> Mecha:
 	var mecha := Mecha.new()
+	mecha.heavy_weapon = weapon if weapon != "" else Mecha.HEAVY_WEAPONS[rng.randi() % Mecha.HEAVY_WEAPONS.size()]
 	mecha.caller = fighter
 	mecha.position = _mecha_landing(fighter.global_position.x, fighter.global_position.y + fighter.stats.body_size.y / 2.0)
 	mecha.facing = fighter.facing
@@ -1793,6 +1801,9 @@ func _shots_hit_chunks(delta: float) -> void:
 func _on_mecha_fired(mecha: Mecha, kind: String, origin: Vector2, direction: Vector2, power: float) -> void:
 	if mecha.pilot == null:
 		return
+	if kind == "laser":
+		_fire_mecha_laser(mecha, origin, direction, power)
+		return
 	var projectile := Projectile.new()
 	projectile.kind = kind
 	projectile.owner_index = mecha.pilot.player_index
@@ -1826,6 +1837,109 @@ func _on_mecha_fired(mecha: Mecha, kind: String, origin: Vector2, direction: Vec
 			projectile.position = wall.position
 			projectile.finished = true  # elle explose contre le mur collé au canon
 	_add_projectile(projectile)
+
+
+## Canon laser de mecha : un trait instantané, plus long s'il est chargé. Il traverse les joueurs et
+## les mechas sur son chemin, casse jusqu'à MECHA_LASER_BLOCKS blocs puis s'arrête (un mur, le sol
+## l'arrêtent tout de suite). Les tirs adverses sur son chemin : il efface les balles et s'arrête à
+## la 3e (contre de lourde pour son tireur) ; une roquette ou un missile l'annule (les deux disparaissent).
+## Ce qu'il touche : un joueur à pied comme une lourde (blocage parfait = contre, blocage normal =
+## le bouclier craque fort) ; un mecha s'use (son bouclier et son blocage parfait marchent).
+func _fire_mecha_laser(mecha: Mecha, origin: Vector2, direction: Vector2, power: float) -> void:
+	var shooter := mecha.pilot
+	var length := lerpf(MECHA_LASER_RANGE[0], MECHA_LASER_RANGE[1], power)
+	# 1) Le décor : les blocs qu'il casse, et où il s'arrête
+	var space := get_world_2d().direct_space_state
+	var stop := length
+	var to_break: Array = []  # [distance, bloc]
+	var exclude: Array[RID] = []
+	var from := origin
+	var head := origin + direction * length
+	if not space.intersect_ray(PhysicsRayQueryParameters2D.create(mecha.body_rect().get_center(), origin, 1)).is_empty():
+		from = mecha.body_rect().get_center()  # canon collé au mur : le rayon part du corps (il ne passe pas à travers)
+	while true:
+		var query := PhysicsRayQueryParameters2D.create(from, head, 1)
+		query.exclude = exclude
+		var hit := space.intersect_ray(query)
+		if hit.is_empty():
+			break
+		var distance: float = origin.distance_to(hit.position) * signf((hit.position - origin).dot(direction))
+		var block := hit.collider as BreakableWindow
+		if block != null and (not block is CityBlock or to_break.filter(func(b): return b[1] is CityBlock).size() < MECHA_LASER_BLOCKS):
+			to_break.append([distance, block])
+			exclude.append(hit.rid)
+			continue
+		stop = maxf(distance, 0.0)
+		break
+	# 2) Les tirs adverses sur son chemin
+	var shots: Array = []
+	for projectile in projectiles:
+		if projectile.owner_index == shooter.player_index or projectile.finished or not projectile.kind in ["balle", "roquette", "missile"]:
+			continue
+		var along := (projectile.position - origin).dot(direction)
+		if along < 0.0 or along > stop:
+			continue
+		if Geometry2D.get_closest_point_to_segment(projectile.position, origin, origin + direction * stop).distance_to(projectile.position) <= MECHA_LASER_RADIUS + Projectile.RADIUS:
+			shots.append([along, projectile])
+	shots.sort_custom(func(a, b): return a[0] < b[0])
+	var bullets := 0
+	for entry in shots:
+		var projectile: Projectile = entry[1]
+		_remove_projectile(projectile)
+		if projectile.kind == "balle":
+			bullets += 1
+			if bullets < MECHA_LASER_BULLETS:
+				continue
+			_count_counter(true, [fighters[projectile.owner_index]])
+		stop = entry[0]
+		_spawn_clash_mark(origin + direction * stop, true)
+		break
+	var end := origin + direction * stop
+	for entry in to_break:
+		if entry[0] <= stop:
+			var block: BreakableWindow = entry[1]
+			if block is CityBlock:
+				(block as CityBlock).hit(Ville.BLOCK_HP)
+			else:
+				block.smash()
+	var trace := LaserTrace.new()
+	trace.from = origin
+	trace.to = end
+	trace.width = MECHA_LASER_RADIUS
+	add_child(trace)
+	# 3) Ce qu'il traverse
+	var wear := roundi(lerpf(MECHA_WEAR_LASER[0], MECHA_WEAR_LASER[1], power))
+	for victim in fighters:
+		if victim == shooter or victim.eliminated or victim.is_piloting() or victim.is_dodging() \
+				or not _segment_hits_rect(origin, end, MECHA_LASER_RADIUS, victim.body_rect()):
+			continue
+		if victim.is_item_shielded() or not victim.can_be_hit():
+			continue
+		if victim.is_parrying():
+			_spawn_clash_mark(victim.global_position, true, PARRY_COLOR)
+			_count_counter(true, [victim])
+			victim.recover()
+			victim.reset_cooldown()
+		elif victim.is_blocking() and not victim.is_stunned():
+			var side := Vector2(signf(direction.x) if direction.x != 0.0 else 1.0, 0.0)
+			if victim.absorb_hit(side, CHUNK_SHIELD_DAMAGE):
+				victim.shield_burst(side, true)
+		else:
+			victim.take_hit(direction, MECHA_LASER_KNOCKBACK)
+			_spawn_clash_mark(victim.global_position, true, Fighter.LASER_COLOR)
+			if victim.is_stunned() and _alive_count() == 2:
+				_stun_focus = [shooter, victim]
+	for other in mechas.duplicate():
+		if other != mecha and is_instance_valid(other) and other.is_ready() \
+				and _segment_hits_rect(origin, end, MECHA_LASER_RADIUS, other.body_rect()):
+			_wear_mecha(other, wear, true)
+	var collapse := map.get_node_or_null("Ecroulement") as CityCollapse
+	if collapse != null:
+		for chunk in collapse.chunks:
+			if is_instance_valid(chunk) and chunk.is_dangerous() and chunk.current_rects().any(
+					func(r: Rect2) -> bool: return _segment_hits_rect(origin, end, MECHA_LASER_RADIUS, r)):
+				if chunk.take_attack(true):
+					_count_counter(true, [shooter])
 
 
 ## Ce qu'un missile suit pour toucher ce joueur : son mecha s'il pilote, sinon lui.

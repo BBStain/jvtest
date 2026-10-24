@@ -1,9 +1,8 @@
 class_name Ville
 extends RefCounted
-## La Ville : la map cachée (easter egg) des combats de mechas. Très large et surtout très haute,
-## pour les combats aériens, avec des toits proches pour se battre à pied de toit en toit.
-## Pour l'ouvrir en attendant l'accès secret : https://bbstain.github.io/jvtest/?ville
-## (elle s'ajoute alors au choix de la map).
+## La Ville : la map des combats de mechas (une map comme les autres, avec en plus la balise
+## d'appel du mecha). Très large et surtout très haute, pour les combats aériens, avec des toits
+## proches pour se battre à pied de toit en toit. Pas encore en ligne.
 ##
 ## La ville est fabriquée ici, pas dessinée dans une scène : chaque immeuble est une liste d'étages.
 ## Un immeuble est creux : deux murs, un plancher traversable par étage, un toit traversable.
@@ -51,13 +50,6 @@ const BLOCK_HP := 6                 ## PV d'un bloc (une attaque légère : 1, u
 
 static var _next_id := 0
 static var _all_blocks: Array[CityBlock] = []
-
-
-## La ville peut-elle être choisie dans le menu ? (?ville dans l'adresse, en attendant l'accès secret)
-static func unlocked() -> bool:
-	if not OS.has_feature("web"):
-		return false
-	return str(JavaScriptBridge.eval("new URLSearchParams(window.location.search).has('ville')")) == "true"
 
 
 ## Le bord gauche de chaque immeuble (ils sont centrés dans la rue).
