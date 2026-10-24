@@ -56,6 +56,8 @@ const MECHA_BULLET_SPEED := 2100.0           ## les balles de la rafale vont plu
 const ROCKET_SPEED := [950.0, 1500.0]        ## roquette : non chargée, chargée à fond
 const ROCKET_RADIUS := [110.0, 160.0]        ## rayon de son explosion
 const ROCKET_KNOCKBACK := [1000.0, 1350.0]
+const LAUNCHER_ROCKET_SPEED := 1300.0         ## la roquette du lance-roquette (à pied) : grosse mais esquivable
+const ITEM_TOSS_LOCK := 0.6                   ## arme à 2 mains jetée : son lanceur ne la reprend pas avant ce temps
 const WEAPON_BREAK_TIME_SCALE := 0.25       ## arme cassée (3e contre de sa lourde) : court ralenti...
 const WEAPON_BREAK_SLOWMO := 0.8            ## ... pendant 0,8 vraie seconde...
 const WEAPON_BREAK_CAMERA_MARGIN := Vector2(260, 180)  ## ... et la caméra zoome fort sur l'arme qui casse
@@ -183,6 +185,7 @@ func _ready() -> void:
 		fighter.arrow_shot.connect(_on_arrow_shot)
 		fighter.weapon_tossed.connect(_on_weapon_tossed)
 		fighter.item_used.connect(_on_item_used)
+		fighter.item_tossed.connect(_on_item_tossed)
 		fighter.grapple_parried.connect(_on_grapple_parried)
 		fighter.ultimate_used.connect(_on_ultimate_used)
 		if _ultimate_test:
@@ -1704,10 +1707,14 @@ func _bounce_off_item_shield(attacker: Fighter, victim: Fighter) -> void:
 
 # --- Objets ---
 
-## Un objet utilisé : une balle tirée, ou une grenade lancée (ou lâchée, ou qui explose en main).
+## Un objet utilisé : une balle tirée (pistolet, fusil : "power" = vitesse), une roquette
+## (lance-roquette : "power" = sa force), ou une grenade lancée (ou lâchée, ou qui explose en main).
 func _on_item_used(fighter: Fighter, kind: String, direction: Vector2, power: float, fuse: float) -> void:
 	if kind == "balise":
 		call_mecha(fighter)
+		return
+	if kind == "roquette":
+		_fire_launcher(fighter, direction, power)
 		return
 	var projectile := Projectile.new()
 	projectile.kind = kind
@@ -1725,7 +1732,7 @@ func _on_item_used(fighter: Fighter, kind: String, direction: Vector2, power: fl
 				projectile.free()
 				return
 			projectile.position += direction * 24.0
-			projectile.velocity = direction * BULLET_SPEED
+			projectile.velocity = direction * BULLET_SPEED * power
 			projectile.rotation = direction.angle()
 			projectile.length = 16.0
 			projectile.knockback = BULLET_KNOCKBACK
@@ -1743,6 +1750,39 @@ func _on_item_used(fighter: Fighter, kind: String, direction: Vector2, power: fl
 				var lob := (direction + Vector2(0.0, -GRENADE_LOB)).normalized()
 				projectile.velocity = lob * lerpf(GRENADE_MIN_THROW, GRENADE_MAX_THROW, power)
 	_add_projectile(projectile)
+
+
+## Lance-roquette : sa seule roquette part de l'épaule. Tube collé à un mur : elle y explose tout de suite.
+func _fire_launcher(fighter: Fighter, direction: Vector2, blast: float) -> void:
+	var rocket := Projectile.new()
+	rocket.kind = "roquette"
+	rocket.owner_index = fighter.player_index
+	rocket.blast = blast
+	rocket.rotation = direction.angle()
+	rocket.velocity = direction * LAUNCHER_ROCKET_SPEED
+	rocket.length = 46.0
+	rocket.color = fighter.color
+	rocket.position = fighter.global_position + direction * 30.0
+	var wall := get_world_2d().direct_space_state.intersect_ray(PhysicsRayQueryParameters2D.create(
+		fighter.global_position, rocket.position + direction * 20.0, 1))
+	if not wall.is_empty():
+		rocket.position = wall.position
+		rocket.finished = true
+	_add_projectile(rocket)
+
+
+## RB avec une arme à 2 mains : elle part vers l'adversaire le plus proche (sans faire mal) et
+## retombe par terre comme un objet, avec ce qu'il reste dedans. N'importe qui peut la ramasser.
+func _on_item_tossed(fighter: Fighter, kind: String, ammo: int) -> void:
+	var dir := Vector2(fighter.facing, 0.0)
+	var target := _closest_opponent(fighter)
+	if target != null:
+		dir = (target.global_position - fighter.global_position).normalized()
+	var pickup := spawn_pickup(kind, fighter.global_position)
+	pickup.ammo = ammo
+	pickup.thrown_by = fighter.player_index
+	pickup.thrown_lock = ITEM_TOSS_LOCK
+	pickup.launch(dir * TOSS_SPEED + Vector2(0.0, -TOSS_LIFT))
 
 
 ## Toutes les ITEM_SPAWN_TIME secondes, un objet tiré au sort apparaît à un des points prévus
@@ -1784,7 +1824,8 @@ func _tick_pickups(delta: float) -> void:
 		_item_spawn_timer = ITEM_SPAWN_TIME
 		if pickups.size() < MAX_PICKUPS:
 			var points := map.item_spawn_points()
-			spawn_pickup(ItemPickup.KINDS[rng.randi() % ItemPickup.KINDS.size()], points[rng.randi() % points.size()])
+			var kinds: Array = ItemPickup.KINDS + ItemPickup.VILLE_KINDS if map.has_mechas else ItemPickup.KINDS
+			spawn_pickup(kinds[rng.randi() % kinds.size()], points[rng.randi() % points.size()])
 	if map.has_mechas:
 		_tick_beacons(delta)
 	for pickup: ItemPickup in pickups.duplicate():
@@ -1792,7 +1833,9 @@ func _tick_pickups(delta: float) -> void:
 			_remove_pickup(pickup)
 			continue
 		for fighter in fighters:
-			if not fighter.eliminated and fighter.body_rect().intersects(pickup.rect()) and fighter.take_item(pickup.kind):
+			if pickup.thrown_lock > 0.0 and fighter.player_index == pickup.thrown_by:
+				continue
+			if not fighter.eliminated and fighter.body_rect().intersects(pickup.rect()) and fighter.take_item(pickup.kind, pickup.ammo):
 				_remove_pickup(pickup)
 				break
 

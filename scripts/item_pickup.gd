@@ -7,14 +7,19 @@ extends Node2D
 ##   bouclier : levé pendant 5 s, qui frappe dedans est projeté très loin
 ##   vie      : RT donne une vie en plus (jusqu'à Fighter.MAX_LIVES)
 ##   grappin  : 3 lancers vers l'adversaire le plus proche (voir Fighter._tick_grapple)
+##   fusil, lance_roquette : Ville seulement (VILLE_KINDS), à 2 mains (voir Fighter.TWO_HANDED_ITEMS)
 ##   balise   : Ville seulement (pas dans KINDS) : RT appelle un mecha, qui tombe du ciel (voir Game.call_mecha)
 ## Dessin très simple (une caisse de couleur avec une lettre) : à remplacer par un graphiste.
 
 const KINDS := ["pistolet", "grenade", "bouclier", "vie", "grappin"]
+const VILLE_KINDS := ["fusil", "lance_roquette"]  ## en plus dans la Ville
 const SIZE := 26.0
 const MAX_FALL := 600.0                 ## il tombe du ciel doucement (plus vite s'il est frappé)
 
 var kind := "pistolet"
+var ammo := -1                          ## arme à 2 mains jetée : ce qu'il reste dedans (-1 = neuve)
+var thrown_by := -1                     ## jetée par ce joueur : il ne la reprend pas tout de suite...
+var thrown_lock := 0.0                  ## ... pendant ce temps
 var velocity := Vector2.ZERO
 var body := LooseBody.new()             ## tombe, se pose, suit les plateformes, valdingue quand on le frappe
 var hit_lock := 0.0                     ## vient d'être frappé : le même coup ne le refrappe pas
@@ -39,6 +44,10 @@ static func color_of(item_kind: String) -> Color:
 			return Color(0.85, 0.6, 0.3)
 		"balise":
 			return Color(1.0, 0.2, 0.2)
+		"fusil":
+			return Color(0.35, 0.4, 0.3)
+		"lance_roquette":
+			return Color(0.55, 0.45, 0.3)
 	return Color.WHITE
 
 
@@ -46,6 +55,7 @@ func _physics_process(delta: float) -> void:
 	if not simulate:
 		return
 	hit_lock -= delta
+	thrown_lock -= delta
 	if not _launched:
 		velocity.y = minf(velocity.y, MAX_FALL)  # chute tranquille quand personne ne l'a frappé
 	velocity = body.step(self, velocity, SIZE / 2.0, delta)
@@ -97,4 +107,6 @@ func _draw() -> void:
 	draw_rect(box, Color(1, 1, 1, 0.8), false, 2.0)
 	var font := ThemeDB.fallback_font
 	var letter := "Gr" if kind == "grappin" else kind.left(1).to_upper()  # grenade = G
+	if kind == "lance_roquette":
+		letter = "R"
 	draw_string(font, Vector2(-SIZE / 2.0, 6.0), letter, HORIZONTAL_ALIGNMENT_CENTER, SIZE, 16, Color(0.08, 0.09, 0.13))

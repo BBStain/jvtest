@@ -1386,6 +1386,76 @@ func _ready() -> void:
 	var hp_before_grenade := tank.hp
 	game._explode(tank.body_rect().get_center())
 	check(tank.hp == hp_before_grenade - Game.MECHA_WEAR_GRENADE and pilot.is_piloting() and untouched(pilot), "Ville : une grenade use le mecha de 4, pas son pilote")
+	# Ville : fusil d'assaut et lance-roquette à pied, des objets à 2 mains
+	await new_game()
+	game._beacon_timer = 1e9
+	game._item_spawn_timer = 1e9
+	var gunner: Fighter = game.fighters[0]
+	var foe: Fighter = game.fighters[1]
+	var gcmd := {"x": false, "rt": false, "rb": false}
+	gunner.input_source = Scripted.new(func(s, f):
+		s.attack_pressed = gcmd.x
+		s.item_pressed = gcmd.rt
+		s.item_held = gcmd.rt
+		s.throw_pressed = gcmd.rb
+		gcmd.x = false
+		gcmd.rt = false
+		gcmd.rb = false)
+	foe.input_source = Scripted.new(func(s, f): pass)
+	gunner.global_position = Vector2(mx, my - 40.0)
+	foe.global_position = Vector2(mx + 350.0, my - 40.0)
+	await step(20)
+	check(gunner.take_item("fusil") and gunner.item_ammo == Fighter.RIFLE_AMMO and gunner.has_two_handed_item(), "Ville : le fusil d'assaut a 30 balles")
+	gcmd.x = true
+	await step(3)
+	check(not gunner.is_attacking(), "Ville : avec le fusil (2 mains), X n'attaque plus")
+	var rifle_seen := {}
+	gcmd.rt = true
+	for i in 14:
+		await step(1)
+		for p in game.projectiles:
+			if p.kind == "balle":
+				rifle_seen[p.get_instance_id()] = true
+	check(rifle_seen.size() == Fighter.RIFLE_BURST and gunner.item_ammo == Fighter.RIFLE_AMMO - Fighter.RIFLE_BURST,
+		"Ville : RT tire une rafale de 3 balles (%d vues, %d restent)" % [rifle_seen.size(), gunner.item_ammo])
+	await step(30)
+	check(touched(foe), "Ville : la rafale du fusil touche l'adversaire")
+	await shot("ville_fusil")
+	gcmd.rb = true
+	await step(2)
+	var tossed_rifle: Array = game.pickups.filter(func(p): return p.kind == "fusil")
+	check(gunner.item == "" and tossed_rifle.size() == 1 and tossed_rifle[0].ammo == Fighter.RIFLE_AMMO - Fighter.RIFLE_BURST,
+		"Ville : RB jette le fusil par terre avec ses balles, on retrouve son arme")
+	gcmd.x = true
+	await step(3)
+	check(gunner.is_attacking(), "Ville : fusil jeté, X attaque de nouveau")
+	await step(40)
+	# Il vole vers l'adversaire, qui peut le ramasser (ici il passe dessus) ; on le lui reprend.
+	check(foe.item == "fusil" and foe.item_ammo == Fighter.RIFLE_AMMO - Fighter.RIFLE_BURST, "Ville : l'adversaire ramasse le fusil jeté, avec ses balles")
+	foe.item = ""
+	gunner.take_item("fusil", Fighter.RIFLE_AMMO - Fighter.RIFLE_BURST)
+	gunner.item_ammo = 2
+	await step(30)
+	gcmd.rt = true
+	await step(12)
+	check(gunner.item == "", "Ville : fusil vide, il disparaît")
+	# Le lance-roquette : une seule roquette, très violente
+	await step(200)
+	foe.recover()
+	foe._invincible_timer = 0.0
+	foe.global_position = Vector2(mx + 350.0, my - foe.stats.body_size.y / 2.0 - 1.0)
+	gunner.global_position = Vector2(mx, my - gunner.stats.body_size.y / 2.0 - 1.0)
+	await step(5)
+	check(gunner.take_item("lance_roquette") and gunner.item_ammo == 1, "Ville : le lance-roquette a 1 roquette")
+	var foe_x := foe.global_position.x
+	gcmd.rt = true
+	await step(2)
+	var foot_rockets: Array = game.projectiles.filter(func(p): return p.kind == "roquette")
+	check(foot_rockets.size() == 1 and gunner.item == "", "Ville : RT tire la roquette, le lance-roquette disparaît")
+	await step(8)
+	await shot("ville_lance_roquette")
+	await step(20)
+	check(touched(foe) and foe.global_position.x > foe_x + 60.0, "Ville : la roquette touche et projette loin (%d px)" % (foe.global_position.x - foe_x))
 	# Ville : le parc d'attractions et le parc arboré (captures)
 	if shot_dir != "":
 		for place in [["ville_fete_foraine", -8000.0, -6900.0], ["ville_parc", 6900.0, 8600.0]]:
