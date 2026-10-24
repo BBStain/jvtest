@@ -52,6 +52,9 @@ var _code_cursor := 0
 
 
 func _ready() -> void:
+	if MechaShowroom.requested():  # ?vitrine dans l'adresse : la vitrine des mechas (Ville, étape 4)
+		get_tree().change_scene_to_file.call_deferred(MechaShowroom.SCENE)
+		return
 	InputBindings.fix_web_triggers()
 	GameSetup.return_scene = ""  # une partie lancée d'ici revient ici
 	var background := ColorRect.new()
