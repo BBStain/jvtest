@@ -49,9 +49,13 @@ const MECHA_WEAR_SPEAR := 3
 const MECHA_WEAR_GRENADE := 4                ## explosion de grenade
 const MECHA_WEAR_ROCKET := [5, 7]            ## roquette : non chargée, chargée à fond
 const MECHA_WEAR_CHUNK := 8                  ## gros morceau d'immeuble
+const MECHA_WEAR_PUNCH := 3                  ## coup de poing d'un autre mecha
 const MECHA_WEAR_BLAST := 4                  ## un mecha qui explose use ceux d'à côté
 const MECHA_BLAST_RADIUS := 230.0            ## l'explosion d'un mecha : rayon (blocs, mechas, joueurs repoussés)
 const MECHA_BLAST_PUSH := 1000.0
+const PUNCH_KNOCKBACK := 1300.0               ## coup de poing de mecha sur un joueur à pied (comme une grosse lourde)
+const PUNCH_BLOCK_DAMAGE := 2                 ## ... et sur les blocs de la ville
+const MECHA_PARRY_PUSH := 900.0               ## mecha dont le coup est bloqué parfaitement : repoussé
 const MECHA_BULLET_SPEED := 2100.0           ## les balles de la rafale vont plus vite que celles du pistolet
 const ROCKET_SPEED := [950.0, 1500.0]        ## roquette : non chargée, chargée à fond
 const ROCKET_RADIUS := [110.0, 160.0]        ## rayon de son explosion
@@ -269,6 +273,7 @@ func _physics_process(delta: float) -> void:
 	_resolve_clashes()
 	_resolve_hits()
 	_resolve_mecha_hits()
+	_resolve_punches()
 	_resolve_chunks()
 	_resolve_lasers()
 	_resolve_waves()
@@ -1348,7 +1353,7 @@ func _resolve_chunks() -> void:
 			if parts.any(func(r: Rect2) -> bool: return r.intersects(hull)):
 				chunk.hit_fighters[mecha] = true
 				chunk.burst()
-				mecha.damage(MECHA_WEAR_CHUNK)
+				_wear_mecha(mecha, MECHA_WEAR_CHUNK, true)
 				break
 
 
@@ -1440,7 +1445,10 @@ func _resolve_mecha_hits() -> void:
 			if _segment_hits_rect(attacker.attack_start(), attacker.attack_center(), attacker.attack_radius(), mecha.body_rect()):
 				mecha.hit_by[attacker] = true
 				attacker.mark_attack_hit()
-				mecha.damage(MECHA_WEAR_HEAVY if attacker.is_heavy_attack() else MECHA_WEAR_LIGHT)
+				var heavy := attacker.is_heavy_attack()
+				if _wear_mecha(mecha, MECHA_WEAR_HEAVY if heavy else MECHA_WEAR_LIGHT, heavy) == "parry":
+					# Blocage parfait du mecha : comme sur un joueur, l'attaquant est repoussé et ne frappe plus 1 s
+					attacker.clash(_push_dir_from(mecha.body_rect().get_center(), attacker) * Fighter.CLASH_PUSH, Fighter.PARRY_COOLDOWN)
 				if mecha.is_destroyed():
 					break
 
@@ -1458,19 +1466,115 @@ func _projectiles_hit_mechas() -> void:
 				continue
 			if not _segment_hits_rect(projectile.tail(), projectile.tip(), Projectile.RADIUS, mecha.body_rect()):
 				continue
+			if (projectile.kind == "balle" or projectile.kind == "roquette") and mecha.is_parrying():
+				# Blocage parfait du mecha : la balle (ou la roquette) repart droit sur son tireur
+				_wear_mecha(mecha, 0, projectile.kind == "roquette")
+				_send_back(projectile, mecha.pilot)
+				break
 			match projectile.kind:
 				"balle":
 					_remove_projectile(projectile)
-					mecha.damage(MECHA_WEAR_BULLET)
+					_wear_mecha(mecha, MECHA_WEAR_BULLET, false)
 				"fleche":
 					projectile.drop()
-					mecha.damage(MECHA_WEAR_ARROW)
+					_wear_mecha(mecha, MECHA_WEAR_ARROW, false)
 				"lance":
 					projectile.drop()
-					mecha.damage(MECHA_WEAR_SPEAR)
+					_wear_mecha(mecha, MECHA_WEAR_SPEAR, true)
 				"roquette":
 					projectile.finished = true  # elle explose tout de suite (voir _resolve_rocket)
 			break
+
+
+## Un mecha s'use de "amount" (voir Mecha.absorb) : son bouclier levé encaisse à sa place, et un
+## blocage parfait n'use rien du tout et compte comme un contre pour son pilote ("heavy" : de lourde).
+## Renvoie ce qui s'est passé : "parry", "shield" ou "hit".
+func _wear_mecha(mecha: Mecha, amount: int, heavy: bool) -> String:
+	var result := mecha.absorb(amount)
+	if result == "parry":
+		_spawn_clash_mark(mecha.body_rect().get_center(), heavy, PARRY_COLOR)
+		if mecha.pilot != null:
+			_count_counter(heavy, [mecha.pilot])
+	return result
+
+
+## Une balle ou une roquette renvoyée droit sur celui qui l'a tirée ; elle appartient maintenant à "by".
+func _send_back(projectile: Projectile, by: Fighter) -> void:
+	var shooter: Fighter = fighters[projectile.owner_index]
+	var dir := -projectile.velocity.normalized()
+	var aim_at := shooter.mecha.body_rect().get_center() if shooter.is_piloting() else shooter.global_position
+	if not shooter.eliminated:
+		dir = (aim_at - projectile.position).normalized()
+	projectile.velocity = dir * projectile.velocity.length() * DEFLECT_SPEED
+	projectile.rotation = dir.angle()
+	projectile.position += dir * 30.0  # qu'il ne retouche pas tout de suite le bouclier
+	if by != null:
+		projectile.owner_index = by.player_index
+
+
+## Du point "from" vers le joueur, à plat (pour repousser).
+func _push_dir_from(from: Vector2, fighter: Fighter) -> Vector2:
+	var side := signf(fighter.global_position.x - from.x)
+	return Vector2(side if side != 0.0 else 1.0, 0.0)
+
+
+## RB en mecha : le coup de poing. Il frappe une fois chacun de ce qu'il touche devant lui :
+##   un joueur à pied : comme une lourde (blocage parfait = contre et le mecha est repoussé ;
+##   blocage normal : le bouclier craque fort ; sinon sonné, ou une vie en moins) ;
+##   un autre mecha : MECHA_WEAR_PUNCH d'usure (son bouclier et son blocage parfait marchent) ;
+##   les blocs de la ville : PUNCH_BLOCK_DAMAGE, les fenêtres cassent ; les objets par terre valdinguent.
+func _resolve_punches() -> void:
+	for mecha in mechas.duplicate():
+		if not is_instance_valid(mecha) or not mecha.is_ready() or not mecha.is_punch_active():
+			continue
+		var zone: Rect2 = mecha.punch_rect()
+		var push := Vector2(mecha.facing, -0.25).normalized()
+		for victim in fighters:
+			if victim.eliminated or victim.is_piloting() or victim == mecha.pilot or victim in mecha.punch_hit \
+					or victim.is_dodging() or not zone.intersects(victim.body_rect()):
+				continue
+			mecha.punch_hit.append(victim)
+			if victim.is_item_shielded():
+				_spawn_clash_mark(victim.global_position, false, ItemPickup.color_of("bouclier"))
+			elif victim.is_parrying():
+				_spawn_clash_mark(victim.global_position, true, PARRY_COLOR)
+				_count_counter(true, [victim])
+				victim.recover()
+				victim.reset_cooldown()
+				mecha.parried(-push * MECHA_PARRY_PUSH)
+				break
+			elif victim.is_blocking() and not victim.is_stunned():
+				var side := Vector2(mecha.facing, 0.0)
+				if victim.absorb_hit(side, CHUNK_SHIELD_DAMAGE):
+					victim.shield_burst(side, true)
+			elif victim.can_be_hit():
+				victim.take_hit(push, PUNCH_KNOCKBACK)
+				_spawn_clash_mark(victim.global_position, false)
+				if victim.is_stunned() and _alive_count() == 2 and mecha.pilot != null:
+					_stun_focus = [mecha.pilot, victim]
+		if not mecha.is_punch_active():
+			continue  # blocage parfait : le poing s'est arrêté
+		for other in mechas.duplicate():
+			if other == mecha or not is_instance_valid(other) or not other.is_ready() or other in mecha.punch_hit \
+					or not zone.intersects(other.body_rect()):
+				continue
+			mecha.punch_hit.append(other)
+			if _wear_mecha(other, MECHA_WEAR_PUNCH, true) == "parry":
+				mecha.parried(-push * MECHA_PARRY_PUSH)
+				break
+			_spawn_clash_mark(zone.get_center(), false)
+		if mecha.is_punch_active() and not mecha.punch_hit.has(map):
+			mecha.punch_hit.append(map)  # les blocs : une seule fois par coup de poing
+			for block in map.windows():
+				if block.broken or not zone.intersects(block.rect()):
+					continue
+				if block is CityBlock:
+					(block as CityBlock).hit(PUNCH_BLOCK_DAMAGE)
+				else:
+					block.smash()
+			for loose: Node2D in _loose_objects():
+				if zone.has_point(loose.position):
+					loose.launch(push * LOOSE_BLAST_SPEED)
 
 
 ## Les tirs s'annulent, comme les coups qui se croisent : deux balles de joueurs différents qui se
@@ -1649,7 +1753,7 @@ func _on_mecha_destroyed(mecha: Mecha) -> void:
 			loose.launch(((away.normalized() if away.length() > 1.0 else Vector2.UP) + Vector2(0.0, -0.6)).normalized() * LOOSE_BLAST_SPEED)
 	for other in mechas.duplicate():
 		if is_instance_valid(other) and other.is_ready() and _rect_distance(other.body_rect(), center) <= MECHA_BLAST_RADIUS:
-			other.damage(MECHA_WEAR_BLAST)
+			_wear_mecha(other, MECHA_WEAR_BLAST, true)
 	for fighter in fighters:
 		if fighter == pilot or fighter.eliminated or fighter.is_piloting():
 			continue
@@ -1725,7 +1829,7 @@ func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK, radius := GRENADE_
 	for mecha in mechas.duplicate():
 		if is_instance_valid(mecha) and mecha.is_ready() and _rect_distance(mecha.body_rect(), where) <= radius \
 				and not (mecha.pilot != null and mecha.pilot.player_index == by_player):
-			mecha.damage(mecha_wear)
+			_wear_mecha(mecha, mecha_wear, true)
 	for loose: Node2D in _loose_objects():
 		var away := loose.position - where
 		if away.length() <= radius:

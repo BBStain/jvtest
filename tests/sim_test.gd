@@ -1555,6 +1555,123 @@ func _ready() -> void:
 		check(piece != null and piece.state == FallingChunk.State.BURST and game.gauge.points >= gauge_chunk + 3.0,
 			"Ville : un gros morceau se casse en l'air sous %s (contre de lourde)" % ("une roquette" if test[0] == "roquette" else "3 balles"))
 		await step(200)
+	# Ville : le bouclier d'énergie du mecha (B) et son coup de poing (RB)
+	await new_game()
+	game._beacon_timer = 1e9
+	game._item_spawn_timer = 1e9
+	game._weapon_spawn_timer = 1e9
+	var knight: Fighter = game.fighters[0]
+	var walker: Fighter = game.fighters[1]
+	var kcmd := {"b": false, "rb": false}
+	knight.input_source = Scripted.new(func(s, f):
+		s.block_held = kcmd.b
+		s.throw_pressed = kcmd.rb
+		kcmd.rb = false)
+	walker.input_source = Scripted.new(func(s, f): pass)
+	knight.global_position = Vector2(mx, my - 40.0)
+	walker.global_position = Vector2(mx + 500.0, my - 40.0)
+	await step(2)
+	var guard: Mecha = game.call_mecha(knight)
+	await step(100)
+	knight._board(guard)
+	await step(5)
+	var walker_at_mecha := func() -> void:
+		walker.recover()
+		walker._invincible_timer = 0.0
+		walker.velocity = Vector2.ZERO
+		walker.global_position = Vector2(guard.body_rect().end.x + walker.stats.body_size.x / 2.0 + 4.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	walker_at_mecha.call()
+	kcmd.b = true
+	await step(20)  # bouclier levé depuis longtemps : plus de blocage parfait
+	var hp_guard := guard.hp
+	light_now(walker, Vector2.LEFT)
+	await step(3)
+	check(guard.is_shielding() and guard.hp == hp_guard and guard.shield == Mecha.SHIELD_MAX - Game.MECHA_WEAR_LIGHT,
+		"Ville : B lève le bouclier du mecha, il encaisse à sa place (bouclier %d)" % guard.shield)
+	await shot("ville_mecha_bouclier")
+	kcmd.b = false
+	await step(30)
+	walker_at_mecha.call()
+	await step(2)
+	game.gauge.points = 0.0
+	var shield_now := guard.shield
+	kcmd.b = true
+	await step(2)
+	light_now(walker, Vector2.LEFT)
+	await step(3)
+	check(guard.hp == hp_guard and guard.shield == shield_now and game.gauge.points >= 1.0 and walker.attack_cooldown_left() > 0.5,
+		"Ville : B juste avant le coup = blocage parfait du mecha (rien d'usé, contre, l'attaquant ne frappe plus)")
+	kcmd.b = false
+	await step(70)
+	# Une balle sur un blocage parfait repart vers son tireur
+	walker.recover()
+	walker.global_position = Vector2(mx + 500.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	await step(5)
+	game._on_item_used(walker, "balle", (guard.body_rect().get_center() - walker.global_position).normalized(), 1.0, 0.0)
+	var bullet_back: Projectile = null
+	for i in 30:
+		if game.projectiles.size() > 0 and bullet_back == null:
+			var b_now: Projectile = game.projectiles[0]
+			if b_now.position.distance_to(guard.body_rect().get_center()) < 260.0:
+				kcmd.b = true
+		await step(1)
+		for p in game.projectiles:
+			if p.kind == "balle" and p.owner_index == knight.player_index:
+				bullet_back = p
+		if bullet_back != null:
+			break
+	check(bullet_back != null and bullet_back.velocity.x > 0.0 and guard.hp == hp_guard, "Ville : une balle sur le blocage parfait du mecha repart vers son tireur")
+	kcmd.b = false
+	await step(40)
+	# Le bouclier vide casse pour de bon
+	guard.shield = 1
+	walker_at_mecha.call()
+	kcmd.b = true
+	await step(20)
+	light_now(walker, Vector2.LEFT)
+	await step(3)
+	kcmd.b = false
+	await step(2)
+	kcmd.b = true
+	await step(3)
+	check(guard.shield_broken and not guard.is_shielding(), "Ville : le bouclier du mecha vide casse, B ne le relève plus")
+	kcmd.b = false
+	# RB : le coup de poing sonne le joueur à pied devant lui et le projette
+	await step(60)
+	walker_at_mecha.call()
+	await step(3)
+	var walker_x := walker.global_position.x
+	kcmd.rb = true
+	await step(4)
+	await shot("ville_mecha_poing")
+	await step(10)
+	check(walker.is_stunned() and walker.global_position.x > walker_x + 40.0, "Ville : RB, le coup de poing du mecha sonne et projette (%d px)" % (walker.global_position.x - walker_x))
+	# ... un blocage parfait l'arrête : contre, le mecha est repoussé et ne frappe plus
+	await step(150)
+	walker_at_mecha.call()
+	walker.input_source = Scripted.new(func(s, f): s.block_held = true)
+	await step(3)
+	game.gauge.points = 0.0
+	kcmd.rb = true
+	await step(8)
+	check(not walker.is_stunned() and game.gauge.points >= 3.0 and guard._punch_cooldown > 0.6,
+		"Ville : un blocage parfait arrête le poing du mecha (contre, le mecha ne frappe plus)")
+	walker.input_source = Scripted.new(func(s, f): pass)
+	# ... et il use un autre mecha de 3
+	await step(70)
+	walker.recover()
+	walker.global_position = Vector2(guard.body_rect().end.x + 200.0, my - 40.0)
+	await step(2)
+	var rival: Mecha = game.call_mecha(walker)
+	await step(100)
+	walker._board(rival)
+	await step(5)
+	rival.global_position.x = guard.body_rect().end.x + Mecha.BODY.x / 2.0 + 40.0
+	await step(3)
+	var rival_hp := rival.hp
+	kcmd.rb = true
+	await step(15)
+	check(rival.hp == rival_hp - Game.MECHA_WEAR_PUNCH, "Ville : le coup de poing use l'autre mecha de 3 (%d -> %d)" % [rival_hp, rival.hp])
 	# Ville : le parc d'attractions et le parc arboré (captures)
 	if shot_dir != "":
 		for place in [["ville_fete_foraine", -8000.0, -6900.0], ["ville_parc", 6900.0, 8600.0]]:

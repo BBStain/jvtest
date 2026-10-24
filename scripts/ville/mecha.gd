@@ -11,6 +11,9 @@ extends CharacterBody2D
 ##   bas + A gardés 0,5 s : sortir (le mecha reste là, vide)
 ##   X : fusil d'assaut, une rafale de 3 balles (visée auto, ou stick droit)
 ##   Y : lance-roquette, garder pour charger (plus loin, plus fort), lâcher pour tirer
+##   B : bouclier d'énergie (il encaisse à la place du mecha ; vide, il est cassé pour de bon) ;
+##       levé juste avant le coup (PARRY_WINDOW) = blocage parfait, un contre
+##   RB : coup de poing devant soi
 ## Il s'use : WEAR_MAX points de solidité, les coups et les tirs en enlèvent (voir game.gd), on le voit
 ## aux fissures. À 0 il explose (signal destroyed) : le pilote est éjecté et sonné, sans perdre de vie.
 ## Gros et lourd, mais vif : il démarre et s'arrête vite, il ne traverse jamais les planchers.
@@ -64,6 +67,16 @@ const TURRET_PIVOT := Vector2(0.0, -270.0)  ## ... et la tourelle sur le dos, d'
 const TURRET_LENGTH := 182.0
 const AIM_UP_MAX := 1.3                 ## les armes visent jusqu'à presque droit au-dessus...
 const AIM_DOWN_MAX := 1.0               ## ... et assez bas devant soi
+const SHIELD_MAX := 20                  ## B : le bouclier d'énergie encaisse 20 points d'usure, puis casse pour de bon
+const SHIELD_WALK_MULT := 0.4           ## bouclier levé : il avance lentement, ne tire pas, ne dashe pas
+const PARRY_WINDOW := Fighter.PARRY_WINDOW  ## B levé depuis au plus ça au moment du coup : blocage parfait
+const PARRY_LOCK := 1.0                 ## frappé sur un blocage parfait : plus de poing ni de tir pendant 1 s
+const PUNCH_STARTUP := 0.06             ## RB : le poing part...
+const PUNCH_ACTIVE := 0.12              ## ... frappe pendant ce temps...
+const PUNCH_COOLDOWN := 0.5             ## ... et revient au plus toutes les 0,5 s
+const PUNCH_REACH := 150.0              ## jusqu'où il frappe devant le corps
+const PUNCH_HEIGHT := 220.0             ## haute zone : il touche aussi un joueur à pied, tout petit devant lui
+const PUNCH_Y := -120.0                 ## hauteur du poing (bas du corps, vers ceux qui sont à pied)
 
 var state := State.CALLED
 var caller: Fighter                     ## celui qui l'a appelé (l'onde de choc l'épargne)
@@ -90,6 +103,14 @@ var _gun_cooldown := 0.0
 var _rocket_cooldown := 0.0
 var _charge := -1.0                     ## Y gardé depuis ce temps (-1 = pas de charge)
 var _barrel := 0
+var shield := SHIELD_MAX                ## ce qu'il reste au bouclier d'énergie
+var shield_broken := false
+var _shielding := false
+var _shield_hold := 0.0                 ## B gardé depuis ce temps (blocage parfait au début)
+var _shield_flash := 0.0                ## le bouclier vient d'encaisser (ou de casser) : il brille
+var _punch_time := -1.0                 ## RB : temps depuis le début du coup de poing (-1 = pas de poing)
+var _punch_cooldown := 0.0
+var punch_hit := []                     ## ce que ce coup de poing a déjà touché (une fois chacun)
 
 
 func _ready() -> void:
@@ -145,10 +166,11 @@ func tick(input: InputState, delta: float) -> void:
 	if _empty_tank and fuel >= FUEL_RESTART:
 		_empty_tank = false
 	var has_fuel := fuel > 0.0 and not _empty_tank
-	var turbo := input.sprint_held and has_fuel and absf(input.stick.x) > 0.2
+	_tick_shield(input, delta)
+	var turbo := input.sprint_held and has_fuel and absf(input.stick.x) > 0.2 and not _shielding
 	_thrusting = false
 
-	if input.dash_pressed and _dash_cooldown <= 0.0:
+	if input.dash_pressed and _dash_cooldown <= 0.0 and not _shielding:
 		_dash_dir = input.stick.normalized() if input.stick.length() >= 0.3 else Vector2(facing, 0.0)
 		_dash_timer = DASH_TIME
 		_dash_cooldown = DASH_COOLDOWN
@@ -157,7 +179,7 @@ func tick(input: InputState, delta: float) -> void:
 		if _dash_timer <= delta:
 			velocity *= DASH_END_KEEP
 	else:
-		var speed := (WALK_SPEED if on_floor else FLY_SPEED) * (TURBO_MULT if turbo else 1.0)
+		var speed := (WALK_SPEED if on_floor else FLY_SPEED) * (TURBO_MULT if turbo else 1.0) * (SHIELD_WALK_MULT if _shielding else 1.0)
 		velocity.x = move_toward(velocity.x, input.stick.x * speed, (GROUND_ACCEL if on_floor else AIR_ACCEL) * delta)
 		if on_floor and input.jump_pressed and not exiting:
 			velocity.y = -JUMP_SPEED
@@ -181,6 +203,7 @@ func tick(input: InputState, delta: float) -> void:
 	_fuel_show_timer = FUEL_SHOW_TIME if fuel < FUEL_MAX else _fuel_show_timer - delta
 
 	_tick_weapons(input, delta)
+	_tick_punch(input, delta)
 	_move()
 	_update_visual(on_floor)
 	queue_redraw()
@@ -193,7 +216,7 @@ func _tick_weapons(input: InputState, delta: float) -> void:
 	_rocket_cooldown -= delta
 	_burst_timer -= delta
 	_hit_flash -= delta
-	if pilot == null:
+	if pilot == null or _shielding:
 		_burst_left = 0
 		_charge = -1.0
 		visual.turret_charge = -1.0
@@ -224,6 +247,76 @@ func _tick_weapons(input: InputState, delta: float) -> void:
 			visual.turret_shot_time = 0.0
 			_barrel = (_barrel + 1) % MechaVisual.BARRELS
 	visual.turret_charge = clampf(_charge / ROCKET_FULL_CHARGE, 0.0, 1.0) if _charge >= 0.0 else -1.0
+
+
+## B : le bouclier d'énergie se lève (pas pendant un dash ni un coup de poing ; plus jamais une fois cassé).
+func _tick_shield(input: InputState, delta: float) -> void:
+	_shield_flash -= delta
+	_shielding = pilot != null and input.block_held and not shield_broken and _dash_timer <= 0.0 and _punch_time < 0.0
+	_shield_hold = _shield_hold + delta if _shielding else 0.0
+
+
+func is_shielding() -> bool:
+	return _shielding
+
+
+## Bouclier levé juste avant le coup : blocage parfait.
+func is_parrying() -> bool:
+	return _shielding and _shield_hold <= PARRY_WINDOW
+
+
+## Quelque chose l'use de "amount" : blocage parfait ("parry", rien n'est usé), bouclier levé
+## ("shield", c'est lui qui s'use, et il casse à 0), sinon le mecha s'use ("hit", voir damage).
+func absorb(amount: int) -> String:
+	if is_parrying():
+		_shield_flash = HIT_FLASH_TIME
+		return "parry"
+	if _shielding:
+		shield = maxi(shield - amount, 0)
+		_shield_flash = HIT_FLASH_TIME * 2.0
+		if shield <= 0:
+			shield_broken = true
+			_shielding = false
+		return "shield"
+	damage(amount)
+	return "hit"
+
+
+## Ce qu'il a frappé était en blocage parfait : repoussé, et plus de poing ni de tir un instant.
+func parried(push: Vector2) -> void:
+	velocity = push
+	_punch_time = -1.0
+	_burst_left = 0
+	_charge = -1.0
+	_punch_cooldown = PARRY_LOCK
+	_gun_cooldown = PARRY_LOCK
+	_rocket_cooldown = PARRY_LOCK
+
+
+## RB : coup de poing devant soi (game.gd applique ce qu'il touche, voir punch_rect).
+func _tick_punch(input: InputState, delta: float) -> void:
+	_punch_cooldown -= delta
+	if _punch_time >= 0.0:
+		_punch_time += delta
+		if _punch_time >= PUNCH_STARTUP + PUNCH_ACTIVE:
+			_punch_time = -1.0
+	elif pilot != null and input.throw_pressed and _punch_cooldown <= 0.0 and not _shielding:
+		_punch_time = 0.0
+		_punch_cooldown = PUNCH_COOLDOWN
+		punch_hit.clear()
+		var target_dir := aim_direction(Vector2(0.0, PUNCH_Y))
+		_face(target_dir)
+
+
+func is_punch_active() -> bool:
+	return _punch_time >= PUNCH_STARTUP
+
+
+## La zone que le poing frappe, devant le corps.
+func punch_rect() -> Rect2:
+	var front := global_position.x + facing * BODY.x / 2.0
+	var left := front if facing > 0.0 else front - PUNCH_REACH
+	return Rect2(left, global_position.y + PUNCH_Y - PUNCH_HEIGHT / 2.0, PUNCH_REACH, PUNCH_HEIGHT)
 
 
 ## Vers l'adversaire visé par le pilote (depuis cette arme), sinon droit devant.
@@ -352,6 +445,8 @@ func _draw() -> void:
 	if state != State.READY:
 		_draw_target()
 		return
+	_draw_shield()
+	_draw_punch()
 	# Sortie en cours : un anneau qui se remplit au-dessus du mecha
 	if _exit_hold > 0.0:
 		var center := Vector2(0.0, -BODY.y - 70.0)
@@ -362,6 +457,36 @@ func _draw() -> void:
 		draw_rect(bar, Color(0, 0, 0, 0.5))
 		var fill := Color(1.0, 0.35, 0.25) if _empty_tank else Color(1.0, 0.7, 0.2)
 		draw_rect(Rect2(bar.position, Vector2(bar.size.x * fuel / FUEL_MAX, bar.size.y)), fill)
+
+
+## Le bouclier d'énergie : une bulle bleu clair autour du corps, plus pâle quand il est usé,
+## blanche au moment du blocage parfait.
+func _draw_shield() -> void:
+	if not _shielding and _shield_flash <= 0.0:
+		return
+	var center := Vector2(0.0, -BODY.y / 2.0)
+	var left := float(shield) / SHIELD_MAX
+	var color := Color(1, 1, 1) if is_parrying() or (_shield_flash > 0.0 and not _shielding) else Fighter.LASER_COLOR
+	var points := PackedVector2Array()
+	for i in 33:
+		var a := TAU * i / 32.0
+		points.append(center + Vector2(cos(a) * (BODY.x / 2.0 + 45.0), sin(a) * (BODY.y / 2.0 + 40.0)))
+	draw_colored_polygon(points, Color(color, 0.12 + 0.18 * left))
+	draw_polyline(points, Color(color, 0.5 + 0.5 * left), 5.0 if _shield_flash > 0.0 else 3.0)
+
+
+## Le poing : un gros bloc de sa couleur qui jaillit devant le corps.
+func _draw_punch() -> void:
+	if _punch_time < 0.0:
+		return
+	var out := clampf(_punch_time / PUNCH_STARTUP, 0.0, 1.0)
+	var front := BODY.x / 2.0 - 30.0
+	var length := lerpf(30.0, PUNCH_REACH + 30.0, out)
+	var arm := Rect2(Vector2(front if facing > 0.0 else -front - length, PUNCH_Y - 18.0), Vector2(length, 36.0))
+	var fist := Rect2(Vector2(arm.end.x - 50.0 if facing > 0.0 else arm.position.x, PUNCH_Y - 40.0), Vector2(50.0, 80.0))
+	draw_rect(arm, visual.color.darkened(0.2))
+	draw_rect(fist, visual.color)
+	draw_rect(fist, Color(1, 1, 1, 0.9), false, 3.0)
 
 
 ## Le viseur rouge qui marque le sol avant l'arrivée : il clignote de plus en plus vite.
