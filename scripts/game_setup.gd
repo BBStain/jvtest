@@ -13,6 +13,8 @@ const MAPS := [
 ]
 const SAVED_MAP_PREFIX := "carte:"
 const EDITOR_MAP := "editeur"
+## La Ville (easter egg) : pas dans MAPS, elle n'apparaît que si elle est débloquée (voir Ville.unlocked).
+const VILLE_MAP := "ville"
 const MENU_SCENE := "res://scenes/menu.tscn"
 
 ## Tous les personnages du jeu. Pour en ajouter un : crée son fichier dans characters/ et ajoute-le ici.
@@ -85,6 +87,8 @@ static func all_maps() -> Array[String]:
 		var official := "%s/%s.json" % [MapData.BUNDLED_DIR, saved] in MAPS
 		if not official or FileAccess.file_exists(MapData.file_path(saved)):
 			maps.append(SAVED_MAP_PREFIX + saved)
+	if Ville.unlocked():
+		maps.append(VILLE_MAP)
 	return maps
 
 
@@ -93,6 +97,8 @@ static func all_maps() -> Array[String]:
 static func make_map(path: String) -> GameMap:
 	if path == EDITOR_MAP and not editor_map.is_empty():
 		return MapBuilder.build(editor_map)
+	if path == VILLE_MAP:
+		return Ville.build()
 	if path.begins_with(SAVED_MAP_PREFIX):
 		var data := MapData.load_saved(path.trim_prefix(SAVED_MAP_PREFIX))
 		if not data.is_empty():
