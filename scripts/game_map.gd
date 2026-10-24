@@ -108,7 +108,10 @@ func smash_windows_in(center: Vector2, radius: float) -> void:
 	for window in windows():
 		var r := window.rect()
 		if center.clamp(r.position, r.end).distance_to(center) <= radius:
-			window.smash()
+			if window is CityBlock:
+				(window as CityBlock).hit(CityBlock.EXPLOSION_DAMAGE)
+			else:
+				window.smash()
 
 
 ## Jeu en ligne (hôte) : quelles fenêtres sont cassées.
