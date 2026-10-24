@@ -1,21 +1,27 @@
 class_name MechaVisual
 extends Node2D
 ## Le dessin du mecha de la Ville (étape 4 du plan : son design, pas encore jouable).
-## Un mecha bipède 4 fois plus grand que son pilote : un corps dans la couleur du joueur, un cockpit
-## où l'on voit le pilote, deux jambes articulées, une arme de chaque côté qui vise (la rafale sur
-## l'épaule de devant, l'arme lourde posée sur celle de derrière) et des réacteurs sous les pieds.
+## Le même mecha pour tout le monde, inspiré du Juggernaut de Command & Conquer 3 : une grosse coque
+## blindée dans la couleur du joueur, posée sur deux jambes épaisses, avec une tourelle à TROIS
+## canons sur le dos (l'arme lourde : roquettes ou laser) et une petite mitrailleuse sous le nez (la
+## rafale). On voit le pilote dans la vitre du cockpit. Des réacteurs sous les pieds pour voler.
+## Gros et lourd mais vif : des pas rapides, et chaque pied écrase le sol (le corps s'enfonce, poussière).
 ## Tout est dessiné avec des formes simples (une forme + une couleur par chose).
 ## La position du nœud est entre les deux pieds, au sol.
 
 enum Pose { IDLE, WALK, FLY, SHOOT, HEAVY, WORN, LAND, EXPLODE }
 
-const SCALE := 4.0                    ## le mecha fait 4 fois la taille de son pilote
+const SIZE := Vector2(260, 330)       ## largeur de la coque, hauteur totale (pieds au sommet de la tourelle)
 const LAND_TIME := 0.7                ## chute du ciel...
 const SHOCKWAVE_TIME := 0.5           ## ... puis onde de choc
 const SHOCKWAVE_RADIUS := 300.0
 const EXPLODE_TIME := 1.2
+const HEAVY_CYCLE := 1.6              ## pose « tir lourd » : charge 1 s puis les 3 canons tirent l'un après l'autre
+const HEAVY_CHARGE := 1.0
+const BARRELS := 3
+const STEP_SPEED := 6.5              ## vitesse des pas (marche)
 
-var stats: CharacterStats
+var stats: CharacterStats             ## le pilote (sa taille dans le cockpit)
 var color := Color(0.95, 0.35, 0.35)
 var pose := Pose.IDLE
 var facing := 1.0                     ## 1 = regarde à droite
@@ -26,10 +32,9 @@ var heavy_weapon := "roquette"        ## "roquette" ou "laser"
 var _time := 0.0
 
 
-## Largeur et hauteur du mecha (pieds compris), d'après la taille de son pilote.
+## Largeur et hauteur du mecha (pieds compris) : la même pour tous les pilotes.
 func mecha_size() -> Vector2:
-	var body := stats.body_size if stats != null else Vector2(20, 60)
-	return body * SCALE
+	return SIZE
 
 
 func set_pose(value: Pose) -> void:
@@ -44,9 +49,8 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	var s := mecha_size()
-	var w := s.x
-	var h := s.y
+	var w := SIZE.x
+	var h := SIZE.y
 	if pose == Pose.EXPLODE:
 		_draw_explosion(w, h)
 		return
@@ -58,8 +62,11 @@ func _draw() -> void:
 		Pose.IDLE, Pose.SHOOT, Pose.HEAVY, Pose.WORN:
 			bob = sin(_time * 2.0) * h * 0.008
 		Pose.WALK:
-			stride = sin(_time * 5.0)
-			bob = absf(cos(_time * 5.0)) * h * 0.025
+			stride = sin(_time * STEP_SPEED)
+			# Juste après chaque pas, le corps s'enfonce d'un coup puis remonte : ça pèse lourd
+			var since_step := fmod(_time * STEP_SPEED, PI) / PI
+			bob = h * 0.04 * maxf(0.0, 1.0 - since_step * 4.0) - h * 0.015
+			_draw_stomp(since_step, -signf(stride) * facing * w * 0.22)
 		Pose.FLY:
 			lift = h * 0.35 + sin(_time * 3.0) * h * 0.03
 			tuck = 0.6
@@ -69,46 +76,53 @@ func _draw() -> void:
 			tuck = 0.4 * (1.0 - k)
 			if pose_time >= LAND_TIME:
 				_draw_shockwave(pose_time - LAND_TIME)
-				bob = -h * 0.04 * maxf(0.0, 1.0 - (pose_time - LAND_TIME) * 5.0)  # s'écrase un peu
-	var hip_y := -h * 0.42 - lift + bob
+				bob = -h * 0.05 * maxf(0.0, 1.0 - (pose_time - LAND_TIME) * 5.0)  # s'écrase un peu
+	var hip_y := -h * 0.4 - lift + bob
 	var body := color.darkened(wear * 0.35)
-	# Les jambes (celle de derrière plus sombre), avec la flamme des réacteurs en vol
+	# Les jambes, épaisses (celle de derrière plus sombre), avec la flamme des réacteurs en vol
 	for side: float in [-1.0, 1.0]:
 		var phase := stride * side
-		var hip := Vector2(side * w * 0.22, hip_y)
-		var foot := Vector2(side * w * 0.26 + phase * w * 0.35 * facing, -lift + bob * 0.2)
+		var hip := Vector2(side * w * 0.2, hip_y)
+		var foot := Vector2(side * w * 0.22 + phase * w * 0.25 * facing, -lift + bob * 0.2)
 		foot.y -= maxf(0.0, phase * facing * side) * h * 0.06 if pose == Pose.WALK else 0.0
-		foot = foot.lerp(hip + Vector2(side * w * 0.1, h * 0.22), tuck)
+		foot = foot.lerp(hip + Vector2(side * w * 0.08, h * 0.2), tuck)
 		var knee := _knee(hip, foot, h * 0.22)
-		var leg := body.darkened(0.25 if side * facing < 0.0 else 0.1)
+		var leg := body.darkened(0.3 if side * facing < 0.0 else 0.12)
 		draw_line(hip, knee, leg, w * 0.2)
 		draw_line(knee, foot, leg, w * 0.17)
-		draw_circle(knee, w * 0.11, leg.darkened(0.2))
-		draw_rect(Rect2(foot + Vector2(-w * 0.22, -h * 0.03), Vector2(w * 0.44, h * 0.045)), leg.darkened(0.3))
+		draw_circle(hip, w * 0.13, leg.darkened(0.15))
+		draw_circle(knee, w * 0.11, leg.darkened(0.25))
+		# Le pied : large et plat, un orteil devant
+		draw_rect(Rect2(foot + Vector2(-w * 0.13, -h * 0.04), Vector2(w * 0.26, h * 0.04)), leg.darkened(0.35))
+		draw_colored_polygon(PackedVector2Array([foot + Vector2(facing * w * 0.13, -h * 0.04),
+			foot + Vector2(facing * w * 0.2, 0.0), foot + Vector2(facing * w * 0.13, 0.0)]), leg.darkened(0.35))
 		if pose == Pose.FLY or (pose == Pose.LAND and pose_time < LAND_TIME):
 			var flame := h * 0.16 * (0.85 + 0.15 * sin(_time * 40.0 + side))
-			var base := foot + Vector2(0.0, h * 0.015)
-			draw_colored_polygon(PackedVector2Array([base + Vector2(-w * 0.15, 0.0), base + Vector2(w * 0.15, 0.0),
+			var base := foot + Vector2(0.0, h * 0.01)
+			draw_colored_polygon(PackedVector2Array([base + Vector2(-w * 0.1, 0.0), base + Vector2(w * 0.1, 0.0),
 				base + Vector2(0.0, flame)]), Color(1.0, 0.6, 0.15))
-			draw_colored_polygon(PackedVector2Array([base + Vector2(-w * 0.07, 0.0), base + Vector2(w * 0.07, 0.0),
+			draw_colored_polygon(PackedVector2Array([base + Vector2(-w * 0.05, 0.0), base + Vector2(w * 0.05, 0.0),
 				base + Vector2(0.0, flame * 0.6)]), Color(1.0, 0.92, 0.45))
-	var shoulder_y := hip_y - h * 0.4
-	# Le corps : un bloc, le cockpit (on voit le pilote), une petite tête avec une antenne
-	var torso := Rect2(Vector2(-w * 0.5, hip_y - h * 0.5), Vector2(w, h * 0.52))
-	draw_rect(torso, body)
-	draw_rect(Rect2(torso.position.x, torso.position.y, w, h * 0.04), body.lightened(0.25))
-	var cockpit := Rect2(Vector2(facing * w * 0.06 - w * 0.22, torso.position.y + h * 0.09), Vector2(w * 0.44, h * 0.15))
-	draw_rect(cockpit, Color(0.1, 0.12, 0.17))
-	var pilot := Vector2(w * 0.09, h * 0.11)
-	draw_rect(Rect2(cockpit.get_center() - pilot / 2.0 + Vector2(0.0, h * 0.02), pilot), color.lightened(0.35))
-	draw_rect(Rect2(Vector2(-w * 0.16, torso.position.y - h * 0.06), Vector2(w * 0.32, h * 0.06)), body.darkened(0.15))
-	var antenna := Vector2(-facing * w * 0.1, torso.position.y - h * 0.06)
-	draw_line(antenna, antenna + Vector2(0.0, -h * 0.08), body.darkened(0.3), 3.0)
-	draw_circle(antenna + Vector2(0.0, -h * 0.08), 4.0, Color(1.0, 0.3, 0.3) if fmod(_time, 1.0) < 0.5 else body)
-	_draw_wear(torso)
-	# L'arme lourde, posée sur l'épaule de derrière (au-dessus du corps), puis la rafale sur celle de devant
-	_draw_weapon(Vector2(-facing * w * 0.3, torso.position.y - h * 0.02), true, body)
-	_draw_weapon(Vector2(facing * w * 0.5, shoulder_y), false, body)
+	# La coque : un gros bloc blindé, l'avant en pente (comme le Juggernaut)
+	var hull := Rect2(Vector2(-w * 0.5, hip_y - h * 0.34), Vector2(w, h * 0.38))
+	var f := facing
+	var top := hull.position.y
+	var bottom := hull.end.y
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(-f * w * 0.5, top), Vector2(f * w * 0.28, top), Vector2(f * w * 0.5, top + h * 0.14),
+		Vector2(f * w * 0.42, bottom), Vector2(-f * w * 0.46, bottom)]), body)
+	draw_rect(Rect2(Vector2(-w * 0.5 if f > 0.0 else -w * 0.28, top), Vector2(w * 0.78, h * 0.03)), body.lightened(0.25))
+	draw_rect(Rect2(Vector2(-w * 0.46, bottom - h * 0.05), Vector2(w * 0.88, h * 0.05)), body.darkened(0.25))
+	# Le cockpit : une vitre à l'avant de la pente, on y voit le pilote (à sa taille)
+	var glass := Rect2(Vector2(f * w * 0.24 - w * 0.13, top + h * 0.07), Vector2(w * 0.26, h * 0.13))
+	draw_rect(glass, Color(0.1, 0.12, 0.17))
+	var pilot := (stats.body_size if stats != null else Vector2(20, 60)) * 0.42
+	draw_rect(Rect2(Vector2(glass.get_center().x - pilot.x / 2.0, glass.end.y - pilot.y), pilot), color.lightened(0.35))
+	draw_rect(Rect2(glass.position, Vector2(glass.size.x, h * 0.02)), Color(0.55, 0.75, 0.95, 0.5))
+	_draw_wear(hull)
+	# La mitrailleuse sous le nez, puis la tourelle à trois canons sur le dos
+	_draw_chin_gun(Vector2(f * w * 0.36, bottom - h * 0.02), body)
+	_draw_turret(Vector2(-f * w * 0.12, top), body)
 
 
 ## Le genou : entre la hanche et le pied, plié vers l'avant (deux os de longueur "bone").
@@ -123,32 +137,66 @@ func _knee(hip: Vector2, foot: Vector2, bone: float) -> Vector2:
 	return mid + out * bend
 
 
-## Une arme d'épaule : la rafale (fine, deux canons) ou l'arme lourde (roquette : gros tube ;
-## laser : tube fin et lumineux). Recul et éclair quand elle tire, lueur quand elle charge.
-func _draw_weapon(shoulder: Vector2, heavy: bool, body: Color) -> void:
-	var s := mecha_size()
-	var dir := Vector2(facing, 0.0).rotated(aim * facing)
-	var length := s.x * (0.75 if heavy else 0.65)
-	var thick := s.y * (0.085 if heavy else 0.05)
-	var firing := (pose == Pose.SHOOT and not heavy) or (pose == Pose.HEAVY and heavy and fmod(pose_time, 1.4) > 1.0)
-	var cycle := fmod(pose_time, 0.25 if not heavy else 1.4) - (0.0 if not heavy else 1.0)
-	var recoil := -dir * 10.0 * maxf(0.0, 1.0 - cycle * 10.0) if firing else Vector2.ZERO
-	var base := shoulder + recoil
-	var tip := base + dir * length
-	var metal := body.darkened(0.45)
-	draw_circle(shoulder, thick * 1.1, body.darkened(0.2))
-	draw_line(base, tip, metal, thick)
-	if heavy and heavy_weapon == "laser":
-		draw_line(base + dir * length * 0.3, tip, Color(0.55, 0.85, 1.0), thick * 0.35)
-	elif not heavy:
-		var side := Vector2(-dir.y, dir.x) * thick * 0.9
-		draw_line(base + side, tip + side - dir * length * 0.15, metal, thick * 0.6)
-	if heavy and pose == Pose.HEAVY and fmod(pose_time, 1.4) <= 1.0:
-		var charge := fmod(pose_time, 1.4)
-		var glow := Color(0.55, 0.85, 1.0) if heavy_weapon == "laser" else Color(1.0, 0.6, 0.2)
-		draw_circle(tip, thick * (0.4 + charge), Color(glow, 0.35 + 0.4 * charge))
-	if firing and cycle < 0.07:
-		draw_circle(tip + dir * thick, thick * 1.2, Color(1.0, 0.9, 0.5))
+## La direction des armes (devant le mecha, tournée de "aim").
+func _aim_dir() -> Vector2:
+	return Vector2(facing, 0.0).rotated(aim * facing)
+
+
+## La rafale : une petite mitrailleuse à deux canons sous le nez, qui recule et crache à chaque tir.
+func _draw_chin_gun(mount: Vector2, body: Color) -> void:
+	var dir := _aim_dir()
+	var length := SIZE.x * 0.38
+	var thick := SIZE.y * 0.045
+	var cycle := fmod(pose_time, 0.2)
+	var firing := pose == Pose.SHOOT
+	var base := mount - (dir * 8.0 * maxf(0.0, 1.0 - cycle * 10.0) if firing else Vector2.ZERO)
+	var side := Vector2(-dir.y, dir.x) * thick * 0.8
+	var metal := body.darkened(0.5)
+	draw_circle(mount, thick * 1.5, body.darkened(0.3))
+	draw_line(base - side, base - side + dir * length, metal, thick * 0.7)
+	draw_line(base + side, base + side + dir * length * 0.9, metal, thick * 0.7)
+	if firing and cycle < 0.06:
+		draw_circle(base + dir * (length + thick), thick * 1.4, Color(1.0, 0.9, 0.5))
+
+
+## L'arme lourde : une tourelle sur le dos, avec TROIS gros canons l'un au-dessus de l'autre.
+## Roquettes : bouches larges ; laser : un cœur bleu lumineux dans chaque canon. En pose « tir lourd »,
+## les canons chargent (lueur) puis tirent l'un après l'autre, chacun avec son recul.
+func _draw_turret(base: Vector2, body: Color) -> void:
+	var w := SIZE.x
+	var h := SIZE.y
+	var dir := _aim_dir()
+	var up := Vector2(dir.y, -dir.x) * facing   # perpendiculaire, vers le haut
+	var turret := Rect2(base + Vector2(-w * 0.26, -h * 0.16), Vector2(w * 0.52, h * 0.16))
+	draw_rect(turret, body.darkened(0.12))
+	draw_rect(Rect2(turret.position, Vector2(turret.size.x, h * 0.025)), body.lightened(0.2))
+	var pivot := turret.get_center() + Vector2(facing * w * 0.12, 0.0)
+	var laser := heavy_weapon == "laser"
+	var glow := Color(0.55, 0.85, 1.0) if laser else Color(1.0, 0.6, 0.2)
+	var length := w * 0.7
+	var thick := h * 0.05
+	var t := fmod(pose_time, HEAVY_CYCLE)
+	var charging := pose == Pose.HEAVY and t < HEAVY_CHARGE
+	for i in BARRELS:
+		var offset := up * thick * 1.15 * (i - 1)
+		var shot_t := t - HEAVY_CHARGE - i * 0.12   # chaque canon tire 0.12 s après le précédent
+		var recoil := 12.0 * maxf(0.0, 1.0 - shot_t * 6.0) if pose == Pose.HEAVY and shot_t >= 0.0 else 0.0
+		var start := pivot + offset - dir * recoil
+		var tip := start + dir * length
+		draw_line(start, tip, body.darkened(0.5), thick)
+		if laser:
+			draw_line(start + dir * length * 0.35, tip, glow, thick * 0.35)
+		else:
+			draw_line(tip - dir * thick * 1.2, tip, body.darkened(0.6), thick * 1.35)   # la bouche
+		if charging:
+			draw_circle(tip, thick * (0.3 + 0.7 * t / HEAVY_CHARGE), Color(glow, 0.35 + 0.4 * t / HEAVY_CHARGE))
+		if pose == Pose.HEAVY and shot_t >= 0.0 and shot_t < 0.08:
+			draw_circle(tip + dir * thick, thick * 1.8, Color(1.0, 0.9, 0.5) if not laser else glow.lightened(0.4))
+	draw_circle(pivot, h * 0.08, body.darkened(0.3))
+	# L'antenne à l'arrière de la tourelle
+	var antenna := Vector2(turret.get_center().x - facing * w * 0.16, turret.position.y)
+	draw_line(antenna, antenna + Vector2(0.0, -h * 0.08), body.darkened(0.3), 3.0)
+	draw_circle(antenna + Vector2(0.0, -h * 0.08), 4.0, Color(1.0, 0.3, 0.3) if fmod(_time, 1.0) < 0.5 else body)
 
 
 ## L'usure : des fissures de plus en plus nombreuses, puis des étincelles et de la fumée.
@@ -176,6 +224,15 @@ func _draw_wear(torso: Rect2) -> void:
 			for j in 4:
 				var d := Vector2.RIGHT.rotated(j * 1.7 + _time)
 				draw_line(spark, spark + d * 14.0, Color(1.0, 0.9, 0.4), 2.0)
+
+
+## La poussière d'un pas qui écrase le sol, sous le pied qui vient de se poser (x).
+func _draw_stomp(k: float, x: float) -> void:
+	if k > 0.35:
+		return
+	var t := k / 0.35
+	for side: float in [-1.0, 1.0]:
+		draw_circle(Vector2(x + side * SIZE.x * (0.1 + 0.15 * t), -6.0), 6.0 + 14.0 * t, Color(0.75, 0.75, 0.8, 0.55 * (1.0 - t)))
 
 
 ## L'arrivée du ciel : une onde de choc au sol qui s'étend jusqu'à SHOCKWAVE_RADIUS.

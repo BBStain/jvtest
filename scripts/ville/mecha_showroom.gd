@@ -1,7 +1,7 @@
 class_name MechaShowroom
 extends Node2D
-## La vitrine des mechas (étape 4 du plan : leur design). Les trois mechas (Barre, Jumb, Jib) côte à
-## côte font la même pose ; elle change toute seule toutes les POSE_TIME secondes.
+## La vitrine des mechas (étape 4 du plan : leur design). Le même mecha piloté par Barre, Jumb et Jib,
+## côte à côte, fait la même pose ; elle change toute seule toutes les POSE_TIME secondes.
 ## Gauche / droite (ou les flèches) : pose précédente / suivante. Échap ou B : retour au menu.
 ## Pour l'ouvrir : https://bbstain.github.io/jvtest/?vitrine
 
@@ -34,14 +34,14 @@ func _ready() -> void:
 	add_child(background)
 	var ground := ColorRect.new()
 	ground.color = Color("#3a3d45")
-	ground.position = Vector2(-1000, 0)
-	ground.size = Vector2(2000, 200)
+	ground.position = Vector2(-2000, 0)
+	ground.size = Vector2(4000, 400)
 	add_child(ground)
 	for i in GameSetup.CHARACTERS.size():
 		var mecha := MechaVisual.new()
 		mecha.stats = load(GameSetup.CHARACTERS[i]) as CharacterStats
 		mecha.color = Game.PLAYER_COLORS[i]
-		mecha.position = Vector2((i - 1) * 380.0, 0.0)
+		mecha.position = Vector2((i - 1) * 540.0, 0.0)
 		mecha.heavy_weapon = "laser" if i == 1 else "roquette"
 		add_child(mecha)
 		mechas.append(mecha)
@@ -51,8 +51,8 @@ func _ready() -> void:
 		name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		add_child(name_label)
 	var camera := Camera2D.new()
-	camera.position = Vector2(0, -260)
-	camera.zoom = Vector2.ONE * 0.85
+	camera.position = Vector2(0, -280)
+	camera.zoom = Vector2.ONE * 0.7
 	add_child(camera)
 	camera.make_current()
 	var hud := CanvasLayer.new()

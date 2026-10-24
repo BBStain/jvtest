@@ -1107,15 +1107,15 @@ func _ready() -> void:
 			game.fighters[1].global_position = Vector2(place[2], -300.0)
 			await step(120)
 			await shot(place[0])
-	# Ville : la vitrine des mechas (design) montre les 3 mechas dans chaque pose, à la taille de leur pilote
+	# Ville : la vitrine des mechas (design) montre le même mecha avec chaque pilote, dans chaque pose
 	game.queue_free()
 	game = null
 	var showroom := (load(MechaShowroom.SCENE) as PackedScene).instantiate() as MechaShowroom
 	add_child(showroom)
 	await step(2)
 	var sizes_ok := showroom.mechas.size() == GameSetup.CHARACTERS.size() and showroom.mechas.all(
-		func(m: MechaVisual) -> bool: return m.mecha_size() == m.stats.body_size * MechaVisual.SCALE)
-	check(sizes_ok, "Ville : vitrine, un mecha par perso, 4 fois la taille de son pilote")
+		func(m: MechaVisual) -> bool: return m.mecha_size() == MechaVisual.SIZE)
+	check(sizes_ok, "Ville : vitrine, un mecha par perso, le même pour tous")
 	for i in MechaShowroom.POSE_NAMES.size():
 		showroom.show_pose(i)
 		await step(50 if i != MechaVisual.Pose.LAND else 60)
