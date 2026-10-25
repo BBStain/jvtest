@@ -28,6 +28,9 @@ var weapon_spawn_time := 0.0
 var max_loose_weapons := 0
 
 var _windows: Array[BreakableWindow] = []
+var _collapse: CityCollapse = null
+var _near_ready := false
+var _few_windows: Array[BreakableWindow] = []
 
 
 func spawn_position(player_index: int) -> Vector2:
@@ -104,6 +107,20 @@ func windows() -> Array[BreakableWindow]:
 	return _windows
 
 
+## Les fenêtres et blocs qui peuvent toucher le rectangle r. Dans la Ville (des milliers de blocs),
+## on ne regarde que ceux d'à côté ; sinon toutes les fenêtres (il y en a peu).
+func windows_near(r: Rect2) -> Array[BreakableWindow]:
+	if not _near_ready:
+		_near_ready = true
+		_collapse = get_node_or_null("Ecroulement") as CityCollapse
+		_few_windows.assign(windows().filter(func(w: BreakableWindow) -> bool: return not w is CityBlock))
+	if _collapse == null:
+		return windows()
+	var found: Array[BreakableWindow] = _few_windows.duplicate()
+	found.append_array(_collapse.blocks_in(r))
+	return found
+
+
 func _find_windows(node: Node, found: Array[BreakableWindow]) -> void:
 	for child in node.get_children():
 		if child is BreakableWindow:
@@ -113,7 +130,7 @@ func _find_windows(node: Node, found: Array[BreakableWindow]) -> void:
 
 ## Casse les fenêtres touchées par une zone ronde (explosion).
 func smash_windows_in(center: Vector2, radius: float) -> void:
-	for window in windows():
+	for window in windows_near(Rect2(center, Vector2.ZERO).grow(radius)):
 		var r := window.rect()
 		if center.clamp(r.position, r.end).distance_to(center) <= radius:
 			if window is CityBlock:

@@ -931,7 +931,8 @@ func _resolve_hits() -> void:
 	for attacker in fighters:
 		if not attacker.is_attack_active():
 			continue
-		for window in map.windows():  # un coup casse les fenêtres qu'il frappe
+		var swing := Rect2(attacker.attack_start(), Vector2.ZERO).expand(attacker.attack_center()).grow(attacker.attack_radius())
+		for window in map.windows_near(swing):  # un coup casse les fenêtres qu'il frappe
 			if not window.broken and _segment_hits_rect(
 					attacker.attack_start(), attacker.attack_center(), attacker.attack_radius(), window.rect()):
 				if window is CityBlock:  # un bloc de la Ville : une lourde l'abîme plus
@@ -1567,7 +1568,7 @@ func _resolve_mecha_ultimates() -> void:
 				var b: Vector2 = mecha.laser_end()
 				if not mecha.laser_blocks_done:
 					mecha.laser_blocks_done = true
-					for block in map.windows():
+					for block in map.windows_near(Rect2(a, Vector2.ZERO).expand(b).grow(Mecha.ULT_LASER_RADIUS)):
 						if not block.broken and _segment_hits_rect(a, b, Mecha.ULT_LASER_RADIUS, block.rect()):
 							if block is CityBlock:
 								(block as CityBlock).hit(Ville.BLOCK_HP)
@@ -1584,7 +1585,7 @@ func _resolve_mecha_ultimates() -> void:
 				var r: float = mecha.wave_radius()
 				if r <= 0.0:
 					continue
-				for block in map.windows():
+				for block in map.windows_near(Rect2(center, Vector2.ZERO).grow(r)):
 					if not block.broken and not mecha.ult_blocks.has(block) and _rect_distance(block.rect(), center) <= r:
 						mecha.ult_blocks[block] = true
 						if block is CityBlock:
@@ -1699,7 +1700,7 @@ func _resolve_punches() -> void:
 			_spawn_clash_mark(zone.get_center(), false)
 		if mecha.is_punch_active() and not mecha.punch_hit.has(map):
 			mecha.punch_hit.append(map)  # les blocs : une seule fois par coup de poing
-			for block in map.windows():
+			for block in map.windows_near(zone):
 				if block.broken or not zone.intersects(block.rect()):
 					continue
 				if block is CityBlock:
@@ -2038,7 +2039,7 @@ func _rect_distance(rect: Rect2, point: Vector2) -> float:
 func _on_mecha_landed(mecha: Mecha) -> void:
 	var center := mecha.global_position
 	_shake_left = SHAKE_TIME
-	for window in map.windows():
+	for window in map.windows_near(Rect2(center, Vector2.ZERO).grow(Mecha.SHOCKWAVE_RADIUS)):
 		var r := window.rect()
 		if window.broken or center.clamp(r.position, r.end).distance_to(center) > Mecha.SHOCKWAVE_RADIUS:
 			continue

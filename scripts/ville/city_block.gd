@@ -75,7 +75,7 @@ func set_broken(value: bool) -> void:
 	_shatter = DUST_TIME if value else 0.0
 	set_physics_process(true)
 	if value and collapse != null:
-		collapse.block_broken()
+		collapse.block_broken(self)
 
 
 ## Le bloc part avec un morceau qui tombe (FallingChunk le dessine) : il disparaît d'ici, sans poussière.
