@@ -1730,6 +1730,13 @@ func _ready() -> void:
 	check(missiles_seen.size() == Mecha.MISSILES and knight.item == "", "Ville : RT tire %d missiles" % missiles_seen.size())
 	await step(120)
 	check(walker.is_stunned() or walker.lives < walker_lives, "Ville : les missiles suivent l'ennemi et le touchent")
+	# Bug (Stain) : un joueur sorti du mecha avec ses missiles ne pouvait plus prendre aucun objet
+	knight.item = "missiles"
+	knight.leave_mecha()
+	check(knight.item == "" and knight.take_item("pistolet"), "Ville : sorti du mecha avec des missiles, on peut reprendre des objets")
+	knight.item = ""
+	knight._board(guard)
+	await step(2)
 	# Ultimes en mecha (X + Y, jauge pleine). Barre : grand laser qui gèle (à pied et en mecha)
 	await step(200)
 	for pr in game.projectiles.duplicate():

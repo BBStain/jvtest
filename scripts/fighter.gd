@@ -908,6 +908,8 @@ func leave_mecha() -> void:
 	var top := mecha.body_rect().position.y
 	mecha.leave()
 	mecha = null
+	if item == "missiles":
+		item = ""  # les missiles ne se tirent qu'en mecha : gardés à pied, ils bloqueraient les autres objets
 	_mecha_reboard_timer = MECHA_REBOARD_TIME
 	global_position = Vector2(global_position.x, top - stats.body_size.y / 2.0 - 4.0)
 	velocity = Vector2.ZERO

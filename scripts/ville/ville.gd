@@ -47,10 +47,10 @@ const INSIDE_COLOR := "#242833"
 const FAIR_GROUND_COLOR := "#4a3f55"
 const GRASS_COLOR := "#3f6b45"
 ## Beaucoup d'objets et d'armes : dans les immeubles (un étage sur deux), sur les toits et dans les parcs.
-const ITEM_SPAWN_TIME := 3.0        ## un objet toutes les 3 s...
-const MAX_PICKUPS := 10             ## ... jusqu'à 10 par terre
-const WEAPON_SPAWN_TIME := 4.0      ## une arme toutes les 4 s...
-const MAX_LOOSE_WEAPONS := 8        ## ... jusqu'à 8 qui traînent
+const ITEM_SPAWN_TIME := 1.5        ## un objet toutes les 1,5 s...
+const MAX_PICKUPS := 20             ## ... jusqu'à 20 par terre
+const WEAPON_SPAWN_TIME := 2.5      ## une arme toutes les 2,5 s...
+const MAX_LOOSE_WEAPONS := 12       ## ... jusqu'à 12 qui traînent
 const BLOCK_HP := 6                 ## PV d'un bloc (une attaque légère : 1, une lourde : 3)
 
 static var _next_id := 0
