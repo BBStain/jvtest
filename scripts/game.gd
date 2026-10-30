@@ -110,6 +110,10 @@ const GRENADE_MAX_POWER := 1.4             ## ... et pleine charge, son explosio
 const GRENADE_HIT_SPEED := 900.0           ## frappée par un coup, elle repart dans le sens du coup
 const GRENADE_RADIUS := 140.0              ## rayon de l'explosion
 const GRENADE_KNOCKBACK := 1150.0
+# --- Ville : tonneaux explosifs (voir ExplosiveBarrel) ---
+const BARREL_RADIUS := 220.0               ## plus gros qu'une grenade
+const BARREL_KNOCKBACK := 1400.0
+const MECHA_WEAR_BARREL := 6
 const GRENADE_SHIELD_DAMAGE := 3
 
 # --- Blocage parfait : l'arme de celui qui frappait lui saute des mains ---
@@ -164,6 +168,7 @@ var _beacon_timer := BEACON_FIRST_TIME
 var rng := RandomNumberGenerator.new()     ## où et quel objet tombe (seul l'hôte tire au sort)
 var _item_spawn_timer := ITEM_SPAWN_TIME
 var _weapon_spawn_timer := WEAPON_SPAWN_TIME
+var _barrels_to_explode: Array[Vector2] = []  ## Ville : tonneaux touchés, qui explosent à l'image suivante
 var _bow_count := 0                     ## pour donner un numéro à chaque arc (voir _new_bow_id)
 @onready var _end_screen: Control = $UI/EndScreen
 @onready var _winner_label: Label = $UI/EndScreen/Winner
@@ -180,6 +185,9 @@ func _ready() -> void:
 	map = GameSetup.make_map(GameSetup.map_path)
 	add_child(map)
 	move_child(map, 0)  # le décor est dessiné derrière les joueurs
+	for window in map.windows():
+		if window is ExplosiveBarrel:
+			(window as ExplosiveBarrel).exploded.connect(_on_barrel_exploded)
 	if map.item_spawn_time > 0.0:
 		_item_spawn_timer = map.item_spawn_time
 	if map.weapon_spawn_time > 0.0:
@@ -272,6 +280,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	gauge.tick(delta)
+	_explode_barrels()
 	for fighter in fighters:
 		fighter.target = _closest_opponent(fighter)
 	for fighter in fighters:
@@ -2122,6 +2131,22 @@ func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK, radius := GRENADE_
 		fighter.take_hit(dir.normalized(), knockback)
 		if fighter.is_stunned() and _alive_count() == 2:
 			_stun_focus = [fighter, _closest_opponent(fighter)]  # sonné par la grenade : zoom et ralenti aussi
+
+
+## Ville : un tonneau explosif a pris un dégât. Il explose à l'image suivante (une explosion qui en
+## touche d'autres les fait sauter à leur tour, image après image : une réaction en chaîne).
+func _on_barrel_exploded(barrel: ExplosiveBarrel) -> void:
+	_barrels_to_explode.append(barrel.global_position)
+
+
+func _explode_barrels() -> void:
+	if _barrels_to_explode.is_empty():
+		return
+	var now := _barrels_to_explode
+	_barrels_to_explode = []
+	for where in now:
+		_explode(where, BARREL_KNOCKBACK, BARREL_RADIUS, MECHA_WEAR_BARREL)
+	_shake_left = SHAKE_TIME
 
 
 ## Le joueur qu'un objet en vol touche (pas son lanceur), ou null. Celui qui esquive (dash) le

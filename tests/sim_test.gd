@@ -60,6 +60,7 @@ func shot(name: String) -> void:
 
 func _ready() -> void:
 	shot_dir = OS.get_environment("SHOT_DIR")
+	Ville.variety = false  # la Ville toujours pareille pour les tests (sauf ceux de la variété, plus bas)
 	var p1: Fighter
 	var p2: Fighter
 
@@ -1001,6 +1002,52 @@ func _ready() -> void:
 		var weapons_landed := spawned.filter(func(w): return is_instance_valid(w) and w in game.projectiles and w.state == Projectile.State.STUCK).size()
 		check(weapons_landed == spawned.size(), "Contenu : sur %s, les armes apparues se posent (%d/%d)" % [path.get_file(), weapons_landed, spawned.size()])
 	check(GameSetup.VILLE_MAP in GameSetup.all_maps(), "Contenu : la Ville est dans le choix de la map")
+	# Ville : à chaque partie, des murs fins (un PV de moins), des fenêtres et des tonneaux explosifs au hasard
+	Ville.variety = true
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	GameSetup.player_devices = []
+	GameSetup.player_characters = []
+	await new_game()
+	game._item_spawn_timer = 1e9
+	game._weapon_spawn_timer = 1e9
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	var v_city_blocks: Array = game.map.windows().filter(func(w): return w is CityBlock)
+	var v_thin_walls: Array = v_city_blocks.filter(func(w): return not w is ExplosiveBarrel and w.max_hp == Ville.THIN_WALL_HP)
+	var v_glass: Array = v_city_blocks.filter(func(w): return not w is ExplosiveBarrel and w.max_hp == Ville.WINDOW_HP)
+	var v_barrels: Array = v_city_blocks.filter(func(w): return w is ExplosiveBarrel)
+	check(v_thin_walls.size() > 50 and v_thin_walls.filter(func(w): return w.size.x < Ville.BLOCK).size() > 50 and v_glass.size() > 5 and v_barrels.size() == Ville.BARRELS,
+		"Ville : murs fins à 5 PV (%d blocs), fenêtres (%d), %d tonneaux" % [v_thin_walls.size(), v_glass.size(), v_barrels.size()])
+	await step(30)
+	check(v_barrels.all(func(b): return not b.broken), "Ville : les tonneaux tiennent sur les planchers (aucun n'a sauté au départ)")
+	await shot("ville_variete")
+	# Un tonneau touché explose (l'image d'après), et fait sauter un tonneau proche (réaction en chaîne)
+	var v_first: ExplosiveBarrel = v_barrels[0]
+	var v_second := ExplosiveBarrel.new()
+	v_second.setup_barrel()
+	v_second.position = v_first.position + Vector2(120.0, 0.0)
+	v_second.exploded.connect(game._on_barrel_exploded)
+	game.map.add_child(v_second)
+	game.map._windows.append(v_second)
+	var barrel_city: CityCollapse = game.map.get_node("Ecroulement")
+	for cell in barrel_city._cells(v_second.rect().grow(1.0)):
+		if not barrel_city._cells_map.has(cell):
+			barrel_city._cells_map[cell] = []
+		barrel_city._cells_map[cell].append(v_second)
+	var barrel_victim: Fighter = game.fighters[0]
+	barrel_victim.global_position = v_first.global_position + Vector2(-110.0, -10.0)
+	barrel_victim.velocity = Vector2.ZERO
+	barrel_victim._invincible_timer = 0.0
+	await step(2)
+	barrel_victim.global_position = v_first.global_position + Vector2(-110.0, -10.0)
+	v_first.hit(1)
+	check(v_first.broken and game._barrels_to_explode.size() == 1, "Ville : un seul dégât et le tonneau saute")
+	await step(1)
+	await step(2)
+	check(v_second.broken, "Ville : l'explosion d'un tonneau fait sauter le tonneau d'à côté")
+	check(barrel_victim.is_stunned() or barrel_victim.lives < GameSetup.lives, "Ville : l'explosion d'un tonneau touche le joueur à côté")
+	await shot("ville_tonneau")
+	Ville.variety = false
 	# Ville : beaucoup d'objets et d'armes, dans les immeubles et partout, qui se posent tous
 	GameSetup.map_path = GameSetup.VILLE_MAP
 	GameSetup.player_devices = []

@@ -51,9 +51,19 @@ const ITEM_SPAWN_TIME := 1.5        ## un objet toutes les 1,5 s...
 const MAX_PICKUPS := 20             ## ... jusqu'à 20 par terre
 const WEAPON_SPAWN_TIME := 2.5      ## une arme toutes les 2,5 s...
 const MAX_LOOSE_WEAPONS := 12       ## ... jusqu'à 12 qui traînent
+## Un peu de variété, tirée au hasard à chaque partie (voir build) :
+const THIN_WALL_CHANCE := 0.3       ## un pan de mur (un étage, un côté) sur 3 est fin : moitié moins épais...
+const THIN_WALL_HP := 5             ## ... et un PV de moins
+const WINDOW_CHANCE := 0.15         ## un pan de mur plein sur 7 a une fenêtre (le bloc du milieu, en verre)
+const WINDOW_HP := 1                ## une fenêtre casse au premier coup
+const WINDOW_COLOR := "#9fd3ea"
+const BARRELS := 30                 ## tonneaux explosifs posés au hasard dans les immeubles
 const BLOCK_HP := 6                 ## PV d'un bloc (une attaque légère : 1, une lourde : 3)
 
 static var _next_id := 0
+## false : la ville toujours pareille (sans murs fins, fenêtres ni tonneaux), pour les tests.
+static var variety := true
+static var _rng := RandomNumberGenerator.new()
 static var _all_blocks: Array[CityBlock] = []
 
 
@@ -93,6 +103,7 @@ static func building_center(index: int) -> float:
 static func build() -> GameMap:
 	_next_id = 0
 	_all_blocks = []
+	_rng.randomize()
 	var map := GameMap.new()
 	map.name = "Ville"
 	map.map_name = "Ville"
@@ -117,6 +128,8 @@ static func build() -> GameMap:
 		var from: float = lefts[i] + BUILDINGS[i][0] * BLOCK
 		var y: float = -float(bridge[1]) * FLOOR_HEIGHT
 		_blocks(decor, Rect2(from, y, GAP, BLOCK), BRIDGE_COLOR, false)
+	if variety:
+		_barrels(decor)
 	var collapse := CityCollapse.new()
 	collapse.name = "Ecroulement"
 	collapse.setup(_all_blocks)
@@ -184,27 +197,66 @@ static func _building(decor: Node2D, index: int, left: float) -> void:
 		var bottom: float = -f * FLOOR_HEIGHT     # le bas de l'étage
 		var top := bottom - FLOOR_HEIGHT
 		for side in [-1, 1]:
-			var x: float = left if side < 0 else left + w - wall * BLOCK
-			var wall_height := FLOOR_HEIGHT - (DOOR_BLOCKS * BLOCK if has_door(index, f, side) else 0.0)
-			_blocks(decor, Rect2(x, top, wall * BLOCK, wall_height), WALL_COLOR, false)
+			var thin := variety and _rng.randf() < THIN_WALL_CHANCE
+			var thickness: float = wall * BLOCK / (2.0 if thin else 1.0)
+			var hp := THIN_WALL_HP if thin else BLOCK_HP
+			var x: float = left if side < 0 else left + w - thickness
+			var door := has_door(index, f, side)
+			var wall_height := FLOOR_HEIGHT - (DOOR_BLOCKS * BLOCK if door else 0.0)
+			if variety and not door and _rng.randf() < WINDOW_CHANCE:
+				# Une fenêtre au milieu du mur : un bloc en verre entre deux blocs de mur
+				_blocks(decor, Rect2(x, top, thickness, BLOCK), WALL_COLOR, false, hp)
+				_blocks(decor, Rect2(x, top + BLOCK, thickness, BLOCK), WINDOW_COLOR, false, WINDOW_HP)
+				_blocks(decor, Rect2(x, top + BLOCK * 2.0, thickness, BLOCK), WALL_COLOR, false, hp)
+			else:
+				_blocks(decor, Rect2(x, top, thickness, wall_height), WALL_COLOR, false, hp)
 		# Le plafond de l'étage : un plancher traversable, en haut de l'étage (le dernier est le toit)
 		_blocks(decor, Rect2(left, top, w, SLAB), FLOOR_COLOR if f < floors - 1 else WALL_COLOR, true)
 
 
 ## Remplit un rectangle de blocs cassables d'environ BLOCK de côté (des planchers si "floor_blocks").
-static func _blocks(decor: Node2D, rect: Rect2, color: String, floor_blocks: bool) -> void:
+static func _blocks(decor: Node2D, rect: Rect2, color: String, floor_blocks: bool, hp := BLOCK_HP) -> void:
 	var columns := maxi(1, roundi(rect.size.x / BLOCK))
 	var rows := maxi(1, roundi(rect.size.y / BLOCK))
 	var piece := rect.size / Vector2(columns, rows)
 	for c in columns:
 		for r in rows:
 			var block := CityBlock.new()
-			block.setup(piece, Color(color), floor_blocks, BLOCK_HP)
+			block.setup(piece, Color(color), floor_blocks, hp)
 			block.position = rect.position + piece * Vector2(c + 0.5, r + 0.5)
 			_next_id += 1
 			block.name = "bloc_%d" % _next_id
 			decor.add_child(block)
 			_all_blocks.append(block)
+
+
+## Les tonneaux explosifs : BARRELS posés au hasard sur les planchers, à l'intérieur des immeubles
+## (pas deux au même endroit).
+static func _barrels(decor: Node2D) -> void:
+	var lefts := building_lefts()
+	var placed: Array[Rect2] = []
+	var tries := 0
+	while placed.size() < BARRELS and tries < BARRELS * 20:
+		tries += 1
+		var i := _rng.randi() % BUILDINGS.size()
+		var wall: float = BUILDINGS[i][2] * BLOCK
+		var inner_left: float = lefts[i] + wall + ExplosiveBarrel.SIZE.x
+		var inner_right: float = lefts[i] + BUILDINGS[i][0] * BLOCK - wall - ExplosiveBarrel.SIZE.x
+		if inner_right <= inner_left:
+			continue
+		var f := _rng.randi() % int(BUILDINGS[i][1])
+		var spot := Vector2(_rng.randf_range(inner_left, inner_right), -f * FLOOR_HEIGHT - ExplosiveBarrel.SIZE.y / 2.0)
+		var box := Rect2(spot - ExplosiveBarrel.SIZE / 2.0, ExplosiveBarrel.SIZE).grow(40.0)
+		if placed.any(func(r: Rect2) -> bool: return r.intersects(box)):
+			continue
+		placed.append(box)
+		var barrel := ExplosiveBarrel.new()
+		barrel.setup_barrel()
+		barrel.position = spot
+		_next_id += 1
+		barrel.name = "tonneau_%d" % _next_id
+		decor.add_child(barrel)
+		_all_blocks.append(barrel)
 
 
 ## Le parc d'attractions, à gauche de la ville : une grande roue et un petit grand huit.
