@@ -1539,6 +1539,7 @@ func _ready() -> void:
 			fi.velocity = Vector2.ZERO
 		gunner.global_position = Vector2(mx, my - gunner.stats.body_size.y / 2.0 - 1.0)
 		foe.global_position = Vector2(mx + 400.0, my - foe.stats.body_size.y / 2.0 - 1.0)
+		game.gauge.points = 0.0  # pas de passage de phase (son explosion casserait le toit sous eux)
 	await step(200)
 	reset_pair.call()
 	await step(5)
@@ -2367,6 +2368,28 @@ func _ready() -> void:
 	for k in 10:
 		g.add_counter(true)
 	check(g.points == CounterGauge.MAX_POINTS, "Jauge : elle ne dépasse pas %.0f points" % CounterGauge.MAX_POINTS)
+	# Le contre qui fait passer une phase déclenche une explosion autour de celui qui a contré
+	# (lui n'est pas touché), de plus en plus grosse à chaque phase
+	g.points = CounterGauge.PHASE_POINTS[0] - 1
+	p1.position = Vector2(500, 540); p2.position = Vector2(580, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	game._count_counter(false, [p1])
+	check(g.phase() == 2 and p2.is_stunned() and not p1.is_stunned(),
+		"Jauge : passer en phase 2 fait exploser autour de celui qui contre (l'autre est sonné, lui non)")
+	var no_blast_lives := p2.lives
+	p2.recover()
+	p2._invincible_timer = 0.0
+	p2.position = Vector2(580, 540)
+	p2.velocity = Vector2.ZERO
+	await step(2)
+	game._count_counter(false, [p1])
+	check(not p2.is_stunned() and p2.lives == no_blast_lives, "Jauge : un contre sans changer de phase n'explose pas")
+	check(Game.PHASE_BLAST_RADIUS[0] < Game.PHASE_BLAST_RADIUS[1] and Game.PHASE_BLAST_RADIUS[1] < Game.PHASE_BLAST_RADIUS[2],
+		"Jauge : l'explosion grandit à chaque phase (%s)" % [Game.PHASE_BLAST_RADIUS])
+	g.points = 0.0
+	p2.recover()
+	await step(80)
 	# Recharge plus courte selon la phase
 	var cooldowns := []
 	for points in [0.0, CounterGauge.PHASE_POINTS[0], CounterGauge.PHASE_POINTS[1], CounterGauge.PHASE_POINTS[2]]:

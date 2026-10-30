@@ -110,6 +110,9 @@ const GRENADE_MAX_POWER := 1.4             ## ... et pleine charge, son explosio
 const GRENADE_HIT_SPEED := 900.0           ## frappée par un coup, elle repart dans le sens du coup
 const GRENADE_RADIUS := 140.0              ## rayon de l'explosion
 const GRENADE_KNOCKBACK := 1150.0
+# --- Passage de phase de la jauge de contres : une explosion autour de celui qui a contré ---
+const PHASE_BLAST_RADIUS := [110.0, 170.0, 250.0]     ## phase 2, phase 3, berserk
+const PHASE_BLAST_KNOCKBACK := [900.0, 1200.0, 1600.0]
 # --- Ville : tonneaux explosifs (voir ExplosiveBarrel) ---
 const BARREL_RADIUS := 220.0               ## plus gros qu'une grenade
 const BARREL_KNOCKBACK := 1400.0
@@ -659,9 +662,24 @@ func _clash(a: Fighter, b: Fighter, where: Vector2, counterer: Fighter = null) -
 ## Un contre a eu lieu : la jauge de contre (partagée) monte, et la jauge d'ultime de chacun de ceux
 ## qui ont contré aussi (voir Fighter.add_ultimate_points).
 func _count_counter(countered_heavy: bool, counterers: Array) -> void:
+	var phase_before := gauge.phase()
 	gauge.add_counter(countered_heavy)
 	for fighter: Fighter in counterers:
 		fighter.add_ultimate_points(countered_heavy)
+	if gauge.phase() > phase_before:
+		_phase_blast(gauge.phase(), counterers)
+
+
+## Le contre qui fait passer la jauge à une nouvelle phase déclenche une explosion autour de celui
+## qui a contré (lui n'est pas touché) : petite en phase 2, plus grosse en 3, énorme en berserk.
+func _phase_blast(phase: int, counterers: Array) -> void:
+	var i := clampi(phase - 2, 0, PHASE_BLAST_RADIUS.size() - 1)
+	for fighter: Fighter in counterers:
+		if fighter.eliminated:
+			continue
+		_explode(fighter.body_rect().get_center(), PHASE_BLAST_KNOCKBACK[i], PHASE_BLAST_RADIUS[i],
+				MECHA_WEAR_GRENADE, fighter.player_index, [fighter])
+	_shake_left = SHAKE_TIME
 
 
 ## X + Y avec la jauge d'ultime pleine. Pour l'instant, seule l'onde blanche autour du perso
@@ -2097,7 +2115,7 @@ func _resolve_grenade(grenade: Projectile) -> void:
 ## Les objets et armes par terre dans le rayon sont soufflés.
 ## radius, mecha_wear : la taille de l'explosion et ce qu'elle use aux mechas (Ville) ; owner : le joueur
 ## qui l'a provoquée (by_player, -1 = inconnu) : son propre mecha n'est pas usé.
-func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK, radius := GRENADE_RADIUS, mecha_wear := MECHA_WEAR_GRENADE, by_player := -1) -> void:
+func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK, radius := GRENADE_RADIUS, mecha_wear := MECHA_WEAR_GRENADE, by_player := -1, spared: Array = []) -> void:
 	_spawn_explosion(where, Color(1.0, 0.55, 0.2))
 	map.smash_windows_in(where, radius)
 	for mecha in mechas.duplicate():
@@ -2110,7 +2128,7 @@ func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK, radius := GRENADE_
 			var dir := (away.normalized() if away.length() > 1.0 else Vector2.UP) + Vector2(0.0, -0.5)
 			loose.launch(dir.normalized() * LOOSE_BLAST_SPEED)
 	for fighter in fighters:
-		if fighter.eliminated or fighter.is_invincible() or fighter.is_item_shielded() or fighter.is_piloting():
+		if fighter.eliminated or fighter.is_invincible() or fighter.is_item_shielded() or fighter.is_piloting() or fighter in spared:
 			continue
 		var body := fighter.body_rect()
 		if where.clamp(body.position, body.end).distance_to(where) > radius:
