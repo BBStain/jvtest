@@ -111,9 +111,7 @@ func blocks_in(r: Rect2) -> Array[CityBlock]:
 ## Le haut de ce qu'il y a sous x0..x1 à partir de la hauteur y (les blocs encore là, sinon la rue).
 func ground_below(x0: float, x1: float, y: float) -> float:
 	var top := 0.0 if x1 > -Ville.HALF_WIDTH and x0 < Ville.HALF_WIDTH else INF
-	for block in blocks:
-		if block.broken:
-			continue
+	for block in blocks_in(Rect2(x0, y - 1.0, x1 - x0, maxf(-y, 0.0) + 2.0)):
 		var r := block.rect()
 		if r.end.x > x0 and r.position.x < x1 and r.position.y >= y - 0.5 and r.position.y < top:
 			top = r.position.y

@@ -1341,11 +1341,11 @@ func _resolve_chunks() -> void:
 	for chunk in collapse.chunks:
 		if not is_instance_valid(chunk) or not chunk.is_dangerous():
 			continue
-		var parts := chunk.current_rects()
 		for fighter in fighters:
 			if fighter.eliminated or not fighter.is_attack_active():
 				continue
-			for r in parts:
+			var swing := Rect2(fighter.attack_start(), Vector2.ZERO).expand(fighter.attack_center()).grow(fighter.attack_radius())
+			for r in chunk.rects_near(swing):
 				if _segment_hits_rect(fighter.attack_start(), fighter.attack_center(), fighter.attack_radius(), r):
 					fighter.mark_attack_hit()
 					if chunk.take_attack(fighter.is_heavy_attack()):
@@ -1359,7 +1359,7 @@ func _resolve_chunks() -> void:
 			if fighter.eliminated or chunk.hit_fighters.has(fighter) or fighter.is_dodging() or not fighter.can_be_hit():
 				continue
 			var body := fighter.body_rect()
-			if not parts.any(func(r: Rect2) -> bool: return r.intersects(body)):
+			if chunk.rects_near(body).is_empty():
 				continue
 			chunk.hit_fighters[fighter] = true
 			var side := Vector2(signf(body.get_center().x - chunk.bounds().get_center().x), 0.0)
@@ -1375,7 +1375,7 @@ func _resolve_chunks() -> void:
 			if not is_instance_valid(mecha) or not mecha.is_ready() or chunk.hit_fighters.has(mecha):
 				continue
 			var hull: Rect2 = mecha.body_rect()
-			if parts.any(func(r: Rect2) -> bool: return r.intersects(hull)):
+			if not chunk.rects_near(hull).is_empty():
 				chunk.hit_fighters[mecha] = true
 				chunk.burst()
 				_wear_mecha(mecha, MECHA_WEAR_CHUNK, true)
@@ -1776,13 +1776,12 @@ func _shots_hit_chunks(delta: float) -> void:
 	for chunk in collapse.chunks:
 		if not is_instance_valid(chunk) or not chunk.is_dangerous():
 			continue
-		var parts := chunk.current_rects()
 		for projectile: Projectile in projectiles.duplicate():
 			if not projectile.kind in ["balle", "roquette", "missile"] or projectile.finished:
 				continue
 			var from := projectile.tail() - projectile.velocity * delta
 			var part_hit := Rect2()
-			for r in parts:
+			for r in chunk.rects_near(Rect2(from, Vector2.ZERO).expand(projectile.tip()).grow(Projectile.RADIUS)):
 				if _segment_hits_rect(from, projectile.tip(), Projectile.RADIUS, r):
 					part_hit = r
 					break
@@ -1941,7 +1940,7 @@ func _fire_mecha_laser(mecha: Mecha, origin: Vector2, direction: Vector2, power:
 	var collapse := map.get_node_or_null("Ecroulement") as CityCollapse
 	if collapse != null:
 		for chunk in collapse.chunks:
-			if is_instance_valid(chunk) and chunk.is_dangerous() and chunk.current_rects().any(
+			if is_instance_valid(chunk) and chunk.is_dangerous() and chunk.rects_near(Rect2(origin, Vector2.ZERO).expand(end).grow(MECHA_LASER_RADIUS)).any(
 					func(r: Rect2) -> bool: return _segment_hits_rect(origin, end, MECHA_LASER_RADIUS, r)):
 				if chunk.take_attack(true):
 					_count_counter(true, [shooter])
