@@ -931,7 +931,8 @@ func _resolve_hits() -> void:
 	for attacker in fighters:
 		if not attacker.is_attack_active():
 			continue
-		for window in map.windows():  # un coup casse les fenêtres qu'il frappe
+		var swing := Rect2(attacker.attack_start(), Vector2.ZERO).expand(attacker.attack_center()).grow(attacker.attack_radius())
+		for window in map.windows_near(swing):  # un coup casse les fenêtres qu'il frappe
 			if not window.broken and _segment_hits_rect(
 					attacker.attack_start(), attacker.attack_center(), attacker.attack_radius(), window.rect()):
 				if window is CityBlock:  # un bloc de la Ville : une lourde l'abîme plus
@@ -1340,11 +1341,11 @@ func _resolve_chunks() -> void:
 	for chunk in collapse.chunks:
 		if not is_instance_valid(chunk) or not chunk.is_dangerous():
 			continue
-		var parts := chunk.current_rects()
 		for fighter in fighters:
 			if fighter.eliminated or not fighter.is_attack_active():
 				continue
-			for r in parts:
+			var swing := Rect2(fighter.attack_start(), Vector2.ZERO).expand(fighter.attack_center()).grow(fighter.attack_radius())
+			for r in chunk.rects_near(swing):
 				if _segment_hits_rect(fighter.attack_start(), fighter.attack_center(), fighter.attack_radius(), r):
 					fighter.mark_attack_hit()
 					if chunk.take_attack(fighter.is_heavy_attack()):
@@ -1358,7 +1359,7 @@ func _resolve_chunks() -> void:
 			if fighter.eliminated or chunk.hit_fighters.has(fighter) or fighter.is_dodging() or not fighter.can_be_hit():
 				continue
 			var body := fighter.body_rect()
-			if not parts.any(func(r: Rect2) -> bool: return r.intersects(body)):
+			if chunk.rects_near(body).is_empty():
 				continue
 			chunk.hit_fighters[fighter] = true
 			var side := Vector2(signf(body.get_center().x - chunk.bounds().get_center().x), 0.0)
@@ -1374,7 +1375,7 @@ func _resolve_chunks() -> void:
 			if not is_instance_valid(mecha) or not mecha.is_ready() or chunk.hit_fighters.has(mecha):
 				continue
 			var hull: Rect2 = mecha.body_rect()
-			if parts.any(func(r: Rect2) -> bool: return r.intersects(hull)):
+			if not chunk.rects_near(hull).is_empty():
 				chunk.hit_fighters[mecha] = true
 				chunk.burst()
 				_wear_mecha(mecha, MECHA_WEAR_CHUNK, true)
@@ -1567,7 +1568,7 @@ func _resolve_mecha_ultimates() -> void:
 				var b: Vector2 = mecha.laser_end()
 				if not mecha.laser_blocks_done:
 					mecha.laser_blocks_done = true
-					for block in map.windows():
+					for block in map.windows_near(Rect2(a, Vector2.ZERO).expand(b).grow(Mecha.ULT_LASER_RADIUS)):
 						if not block.broken and _segment_hits_rect(a, b, Mecha.ULT_LASER_RADIUS, block.rect()):
 							if block is CityBlock:
 								(block as CityBlock).hit(Ville.BLOCK_HP)
@@ -1584,7 +1585,7 @@ func _resolve_mecha_ultimates() -> void:
 				var r: float = mecha.wave_radius()
 				if r <= 0.0:
 					continue
-				for block in map.windows():
+				for block in map.windows_near(Rect2(center, Vector2.ZERO).grow(r)):
 					if not block.broken and not mecha.ult_blocks.has(block) and _rect_distance(block.rect(), center) <= r:
 						mecha.ult_blocks[block] = true
 						if block is CityBlock:
@@ -1699,7 +1700,7 @@ func _resolve_punches() -> void:
 			_spawn_clash_mark(zone.get_center(), false)
 		if mecha.is_punch_active() and not mecha.punch_hit.has(map):
 			mecha.punch_hit.append(map)  # les blocs : une seule fois par coup de poing
-			for block in map.windows():
+			for block in map.windows_near(zone):
 				if block.broken or not zone.intersects(block.rect()):
 					continue
 				if block is CityBlock:
@@ -1775,13 +1776,12 @@ func _shots_hit_chunks(delta: float) -> void:
 	for chunk in collapse.chunks:
 		if not is_instance_valid(chunk) or not chunk.is_dangerous():
 			continue
-		var parts := chunk.current_rects()
 		for projectile: Projectile in projectiles.duplicate():
 			if not projectile.kind in ["balle", "roquette", "missile"] or projectile.finished:
 				continue
 			var from := projectile.tail() - projectile.velocity * delta
 			var part_hit := Rect2()
-			for r in parts:
+			for r in chunk.rects_near(Rect2(from, Vector2.ZERO).expand(projectile.tip()).grow(Projectile.RADIUS)):
 				if _segment_hits_rect(from, projectile.tip(), Projectile.RADIUS, r):
 					part_hit = r
 					break
@@ -1940,7 +1940,7 @@ func _fire_mecha_laser(mecha: Mecha, origin: Vector2, direction: Vector2, power:
 	var collapse := map.get_node_or_null("Ecroulement") as CityCollapse
 	if collapse != null:
 		for chunk in collapse.chunks:
-			if is_instance_valid(chunk) and chunk.is_dangerous() and chunk.current_rects().any(
+			if is_instance_valid(chunk) and chunk.is_dangerous() and chunk.rects_near(Rect2(origin, Vector2.ZERO).expand(end).grow(MECHA_LASER_RADIUS)).any(
 					func(r: Rect2) -> bool: return _segment_hits_rect(origin, end, MECHA_LASER_RADIUS, r)):
 				if chunk.take_attack(true):
 					_count_counter(true, [shooter])
@@ -2038,7 +2038,7 @@ func _rect_distance(rect: Rect2, point: Vector2) -> float:
 func _on_mecha_landed(mecha: Mecha) -> void:
 	var center := mecha.global_position
 	_shake_left = SHAKE_TIME
-	for window in map.windows():
+	for window in map.windows_near(Rect2(center, Vector2.ZERO).grow(Mecha.SHOCKWAVE_RADIUS)):
 		var r := window.rect()
 		if window.broken or center.clamp(r.position, r.end).distance_to(center) > Mecha.SHOCKWAVE_RADIUS:
 			continue

@@ -8,14 +8,15 @@ extends Node2D
 
 var blocks: Array[CityBlock] = []
 var chunks: Array[FallingChunk] = []     ## les morceaux en train de tomber (ou de trembler)
-var _neighbors := {}                     ## bloc -> les blocs qu'il touche
-var _dirty := false
+var _neighbors := {}                     ## bloc -> les blocs qu'il touche (le plus bas en dernier)
+var _cells_map := {}                     ## case de BLOCK px -> les blocs qui la touchent
+var _just_broken: Array[CityBlock] = []  ## les blocs cassés cette frame (on vérifie autour d'eux)
 
 
 ## À appeler une fois tous les blocs créés (ils ne bougent jamais) : qui touche qui.
 func setup(all_blocks: Array[CityBlock]) -> void:
 	blocks = all_blocks
-	var cells := {}
+	var cells := _cells_map
 	for block in blocks:
 		block.collapse = self
 		for cell in _cells(block.rect().grow(1.0)):
@@ -29,7 +30,9 @@ func setup(all_blocks: Array[CityBlock]) -> void:
 			for other: CityBlock in cells[cell]:
 				if other != block and r.intersects(other.rect()):
 					around[other] = true
-		_neighbors[block] = around.keys()
+		var list: Array = around.keys()
+		list.sort_custom(func(a: CityBlock, b: CityBlock) -> bool: return a.rect().end.y < b.rect().end.y)
+		_neighbors[block] = list  # le plus bas en dernier : la recherche du sol descend d'abord
 
 
 func _cells(r: Rect2) -> Array[Vector2i]:
@@ -40,61 +43,75 @@ func _cells(r: Rect2) -> Array[Vector2i]:
 	return found
 
 
-## Un bloc vient de casser : on vérifiera ce qui tient encore à la fin de la frame.
-func block_broken() -> void:
-	_dirty = true
+## Un bloc vient de casser : on vérifiera ce qui tient encore autour de lui à la fin de la frame.
+func block_broken(block: CityBlock) -> void:
+	_just_broken.append(block)
 
 
 func _physics_process(_delta: float) -> void:
 	for i in range(chunks.size() - 1, -1, -1):
 		if not is_instance_valid(chunks[i]) or chunks[i].is_queued_for_deletion():
 			chunks.remove_at(i)
-	if _dirty:
-		_dirty = false
-		_drop_loose_blocks()
+	if not _just_broken.is_empty():
+		var broken_now := _just_broken
+		_just_broken = []
+		_drop_loose_blocks(broken_now)
 
 
 ## Ce qui ne touche plus le sol, de proche en proche, tombe (un morceau par groupe de blocs collés).
-func _drop_loose_blocks() -> void:
+## Seuls les voisins des blocs qui viennent de casser ont pu perdre leur appui : depuis chacun, on
+## cherche le sol en descendant d'abord. Trouvé : tout ce qu'on a parcouru tient. Pas trouvé : on a
+## parcouru tout le morceau détaché, qui tombe.
+func _drop_loose_blocks(broken_now: Array[CityBlock]) -> void:
 	var held := {}
-	var todo: Array[CityBlock] = []
-	for block in blocks:
-		if not block.broken and block.rect().end.y >= -1.0:  # posé sur la rue
-			held[block] = true
-			todo.append(block)
-	while not todo.is_empty():
-		var block: CityBlock = todo.pop_back()
-		for other: CityBlock in _neighbors[block]:
-			if not other.broken and not held.has(other):
-				held[other] = true
-				todo.append(other)
+	var falling := {}
+	for gone in broken_now:
+		for start: CityBlock in _neighbors[gone]:
+			if start.broken or held.has(start) or falling.has(start):
+				continue
+			var seen := {start: true}
+			var group: Array[CityBlock] = [start]
+			var todo: Array[CityBlock] = [start]
+			var grounded := false
+			while not todo.is_empty():
+				var block: CityBlock = todo.pop_back()
+				if held.has(block) or block.rect().end.y >= -1.0:  # posé sur la rue (ou relié à ce qui tient)
+					grounded = true
+					break
+				for other: CityBlock in _neighbors[block]:
+					if not other.broken and not seen.has(other):
+						seen[other] = true
+						group.append(other)
+						todo.append(other)
+			if grounded:
+				for block in group:
+					held[block] = true
+				continue
+			for block in group:
+				falling[block] = true
+				block.vanish()
+			var chunk := FallingChunk.new()
+			chunk.setup(group, self)
+			add_child(chunk)
+			chunks.append(chunk)
+
+
+## Les blocs (pas cassés) qui touchent le rectangle r.
+func blocks_in(r: Rect2) -> Array[CityBlock]:
+	var found: Array[CityBlock] = []
 	var seen := {}
-	for block in blocks:
-		if block.broken or held.has(block) or seen.has(block):
-			continue
-		var group: Array[CityBlock] = [block]
-		seen[block] = true
-		var i := 0
-		while i < group.size():
-			for other: CityBlock in _neighbors[group[i]]:
-				if not other.broken and not seen.has(other):
-					seen[other] = true
-					group.append(other)
-			i += 1
-		for member in group:
-			member.vanish()
-		var chunk := FallingChunk.new()
-		chunk.setup(group, self)
-		add_child(chunk)
-		chunks.append(chunk)
+	for cell in _cells(r):
+		for block: CityBlock in _cells_map.get(cell, []):
+			if not block.broken and not seen.has(block) and r.intersects(block.rect()):
+				seen[block] = true
+				found.append(block)
+	return found
 
 
 ## Le haut de ce qu'il y a sous x0..x1 à partir de la hauteur y (les blocs encore là, sinon la rue).
 func ground_below(x0: float, x1: float, y: float) -> float:
 	var top := 0.0 if x1 > -Ville.HALF_WIDTH and x0 < Ville.HALF_WIDTH else INF
-	for block in blocks:
-		if block.broken:
-			continue
+	for block in blocks_in(Rect2(x0, y - 1.0, x1 - x0, maxf(-y, 0.0) + 2.0)):
 		var r := block.rect()
 		if r.end.x > x0 and r.position.x < x1 and r.position.y >= y - 0.5 and r.position.y < top:
 			top = r.position.y

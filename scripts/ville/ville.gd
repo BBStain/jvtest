@@ -121,6 +121,7 @@ static func build() -> GameMap:
 	collapse.name = "Ecroulement"
 	collapse.setup(_all_blocks)
 	map.add_child(collapse)
+	CityPainter.paint(decor, _all_blocks)
 	_fair(decor)
 	_park(decor)
 	# Les départs : sur les toits autour du centre ; on réapparaît en tombant du ciel au milieu

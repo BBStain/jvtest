@@ -18,6 +18,7 @@ var hp := 6
 var _lock := 0.0
 var _flash := 0.0             ## petit éclair clair quand il prend un coup
 var collapse: CityCollapse    ## prévenu quand le bloc casse (ce qui ne tient plus va tomber)
+var painter: CityPainter      ## dessine le bloc tant qu'il est intact (voir CityPainter)
 
 
 ## À appeler avant de l'ajouter à la map : sa forme existe tout de suite (l'aperçu du menu la voit).
@@ -60,6 +61,7 @@ func hit(damage: int) -> bool:
 	if hp == 0:
 		set_broken(true)
 		return true
+	refresh_look()
 	queue_redraw()
 	return false
 
@@ -74,8 +76,9 @@ func set_broken(value: bool) -> void:
 	super.set_broken(value)
 	_shatter = DUST_TIME if value else 0.0
 	set_physics_process(true)
+	refresh_look()
 	if value and collapse != null:
-		collapse.block_broken()
+		collapse.block_broken(self)
 
 
 ## Le bloc part avec un morceau qui tombe (FallingChunk le dessine) : il disparaît d'ici, sans poussière.
@@ -85,7 +88,21 @@ func vanish() -> void:
 	broken = true
 	_shatter = 0.0
 	_shape.set_deferred("disabled", true)
+	refresh_look()
 	queue_redraw()
+
+
+## Intact (ni abîmé, ni cassé) : c'est son peintre qui le dessine, avec les autres.
+func is_plain() -> bool:
+	return not broken and hp == max_hp
+
+
+## Son état a changé : qui le dessine (lui ou son peintre) ? Cassé, il ne se dessine plus après la poussière.
+func refresh_look() -> void:
+	if painter == null:
+		return
+	visible = not is_plain() and (not broken or _shatter > 0.0)
+	painter.queue_redraw()
 
 
 func _physics_process(delta: float) -> void:
@@ -95,6 +112,8 @@ func _physics_process(delta: float) -> void:
 	queue_redraw()
 	if _lock == 0.0 and _flash == 0.0 and _shatter == 0.0:
 		set_physics_process(false)
+		if broken:
+			visible = false  # la poussière est retombée
 
 
 func _draw() -> void:
