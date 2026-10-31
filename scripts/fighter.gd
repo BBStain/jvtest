@@ -646,8 +646,10 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 ## On ramasse un objet (seulement si on n'en a pas déjà un).
 ## "ammo" : ce qu'il reste dans une arme à 2 mains jetée par un autre (-1 = neuve).
 func take_item(kind: String, ammo := -1) -> bool:
-	if item != "" or (mecha != null) != (kind == "missiles"):
-		return false  # en mecha, on ne prend que les missiles (et eux, seulement en mecha)
+	if mecha != null and kind != "missiles":
+		return false  # en mecha, on ne prend que les missiles
+	if item != "" and not (item == "missiles" and kind != "missiles" and mecha == null):
+		return false  # à pied, des missiles gardés pour plus tard sont remplacés par un autre objet
 	item = kind
 	item_ammo = PISTOL_AMMO if kind == "pistolet" else 0
 	if kind == "grappin":
@@ -908,8 +910,6 @@ func leave_mecha() -> void:
 	var top := mecha.body_rect().position.y
 	mecha.leave()
 	mecha = null
-	if item == "missiles":
-		item = ""  # les missiles ne se tirent qu'en mecha : gardés à pied, ils bloqueraient les autres objets
 	_mecha_reboard_timer = MECHA_REBOARD_TIME
 	global_position = Vector2(global_position.x, top - stats.body_size.y / 2.0 - 4.0)
 	velocity = Vector2.ZERO
