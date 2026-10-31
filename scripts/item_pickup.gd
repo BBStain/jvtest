@@ -14,7 +14,7 @@ extends Node2D
 ## Dessin très simple (une caisse de couleur avec une lettre) : à remplacer par un graphiste.
 
 const KINDS := ["pistolet", "grenade", "bouclier", "vie", "grappin"]
-const VILLE_KINDS := ["fusil", "lance_roquette", "missiles"]  ## en plus dans la Ville (missiles : tirés en mecha)
+const VILLE_KINDS := ["fusil", "lance_roquette"]  ## en plus dans la Ville (l'objet M "missiles" n'apparaît plus, Stain 2026-10-31)
 const SIZE := 26.0
 const MAX_FALL := 600.0                 ## il tombe du ciel doucement (plus vite s'il est frappé)
 

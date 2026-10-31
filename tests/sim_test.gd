@@ -1047,8 +1047,11 @@ func _ready() -> void:
 	await step(20)
 	check(flying_barrel != null and flying_barrel in game.projectiles and not v_second.broken and untouched(barrel_victim),
 		"Ville : le tonneau touché n'explose pas tout de suite")
-	# Un coup le pousse (en l'air aussi)
+	# Un coup le pousse (en l'air aussi) : en plein ciel, au-dessus de la tour (la ville change à chaque partie)
+	flying_barrel.global_position = game.map.respawn_position() - Vector2(0.0, 100.0)
+	flying_barrel.velocity = Vector2.ZERO
 	barrel_victim.global_position = flying_barrel.position + Vector2(-50.0, 0.0)
+	barrel_victim.velocity = Vector2.ZERO
 	var barrel_x := flying_barrel.position.x
 	light_now(barrel_victim, Vector2.RIGHT)
 	await step(10)
