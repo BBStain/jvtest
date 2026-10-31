@@ -908,6 +908,8 @@ func leave_mecha() -> void:
 	var top := mecha.body_rect().position.y
 	mecha.leave()
 	mecha = null
+	if item == "missiles":
+		item = ""  # les missiles ne se tirent qu'en mecha : gardés à pied, ils bloqueraient les autres objets
 	_mecha_reboard_timer = MECHA_REBOARD_TIME
 	global_position = Vector2(global_position.x, top - stats.body_size.y / 2.0 - 4.0)
 	velocity = Vector2.ZERO
@@ -1782,6 +1784,16 @@ func take_hit(hit_dir: Vector2, knockback := -1.0) -> bool:
 
 func is_stunned() -> bool:
 	return _stun_timer > 0.0
+
+
+## Soufflé par une explosion sans être touché (explosion de phase de la jauge) : juste poussé.
+func blast_push(dir: Vector2, knockback: float) -> void:
+	_leave_ladder()
+	_leave_vine()
+	_dash_timer = 0.0
+	velocity = _pushed(dir * knockback) + Vector2(0.0, -200.0)
+	_jump_rising = false
+	_knockback_timer = KNOCKBACK_TIME
 
 
 ## On a contré (ou fait un blocage parfait) : on n'est plus sonné.

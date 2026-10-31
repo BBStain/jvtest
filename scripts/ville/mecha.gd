@@ -11,7 +11,7 @@ extends CharacterBody2D
 ##   bas + A gardés 0,5 s : sortir (le mecha reste là, vide)
 ##   X : fusil d'assaut, une rafale de 3 balles (visée auto, ou stick droit)
 ##   Y : l'arme lourde, tirée au hasard à son arrivée (heavy_weapon) : lance-roquette (garder pour
-##       charger, lâcher pour tirer) ou canon laser (charge de 0,3 à 1 s, puis un trait instantané)
+##       charger : 1 à 3 roquettes, guidées à charge pleine) ou canon laser (un appui = 1 s de charge puis il tire ; gardé = plus rapide, long et gros)
 ##   B : bouclier d'énergie (il encaisse à la place du mecha ; vide, il est cassé pour de bon) ;
 ##       levé juste avant le coup (PARRY_WINDOW) = blocage parfait, un contre
 ##   RB : coup de poing devant soi
@@ -53,6 +53,9 @@ const DASH_SPEED := 1800.0
 const DASH_TIME := 0.18
 const DASH_COOLDOWN := 0.6
 const DASH_END_KEEP := 0.4
+const STOMP_MIN_SPEED := 1300.0         ## retombé plus vite que ça (de haut) sur des blocs de la ville : il les abîme...
+const STOMP_DAMAGE := [1, 4]            ## ... de 1 (pas très haut) à 4 (de très haut) : 2 grosses chutes cassent un bloc neuf
+const STOMP_KEEP := 0.7                 ## ... et s'il casse, il continue de tomber un peu freiné
 const DASH_BLOCK_DAMAGE := 3            ## un dash qui percute un bloc de la ville l'abîme (2 dashs le cassent)
 const EXIT_STICK := 0.6                 ## sortir : stick vers le bas au-delà de ça...
 const EXIT_TIME := 0.5                  ## ... et A gardés ce temps
@@ -63,10 +66,14 @@ const HIT_FLASH_TIME := 0.1             ## touché : il blanchit un instant
 const BURST_SHOTS := 3                  ## X : une rafale de 3 balles...
 const BURST_GAP := 0.07                 ## ... une toutes les 0,07 s...
 const BURST_COOLDOWN := 0.45            ## ... et une nouvelle rafale au plus toutes les 0,45 s
-const ROCKET_FULL_CHARGE := 1.0         ## Y gardé 1 s : roquette chargée au maximum (elle part toute seule)
+const ROCKET_FULL_CHARGE := 1.5         ## Y gardé 1,5 s : charge pleine, 3 roquettes guidées (elles partent toutes seules)
+const ROCKET_VOLLEY_CHARGE := [0.5, 1.0]  ## petite charge : 1 roquette ; gardé 0,5 s : 2 ; gardé 1 s : 3
+const ROCKET_POWER := 0.5               ## force de chaque roquette (voir Game.ROCKET_RADIUS)
+const ROCKET_GAP := 0.12                ## les roquettes d'une salve partent une toutes les 0,12 s...
+const ROCKET_SPREAD := 0.08             ## ... un peu écartées
 const ROCKET_COOLDOWN := 0.8
-const LASER_MIN_CHARGE := 0.3           ## canon laser : au moins 0,3 s de charge...
-const LASER_FULL_CHARGE := 1.0          ## ... et au plus 1 s (il tire tout seul)
+const LASER_MIN_CHARGE := 1.0           ## canon laser : un appui sur Y = 1 s de charge, puis il tire...
+const LASER_FULL_CHARGE := 2.5          ## ... Y gardé plus longtemps : plus de charge (au plus 2,5 s, il tire tout seul)
 const LASER_COOLDOWN := 1.0
 const HEAVY_WEAPONS := ["roquette", "laser"]
 const GUN_MOUNT := Vector2(94.0, -125.0)  ## la mitrailleuse sous le nez (x vers l'avant) : d'où partent les balles...
@@ -125,6 +132,9 @@ var _burst_dir := Vector2.RIGHT
 var _gun_cooldown := 0.0
 var _rocket_cooldown := 0.0
 var _charge := -1.0                     ## Y gardé depuis ce temps (-1 = pas de charge)
+var _volley_left := 0                   ## roquettes de la salve qui restent à partir
+var _volley_timer := 0.0
+var volley_guided := false              ## salve chargée à fond : ses roquettes suivent l'adversaire (game.gd)
 var _barrel := 0
 var shield := SHIELD_MAX                ## ce qu'il reste au bouclier d'énergie
 var shield_broken := false
@@ -262,6 +272,7 @@ func _tick_weapons(input: InputState, delta: float) -> void:
 		_burst_left = 0
 		_charge = -1.0
 		_missiles_left = 0
+		_volley_left = 0
 		visual.turret_charge = -1.0
 		return
 	if input.item_pressed and pilot.item == "missiles" and _missiles_left <= 0:
@@ -289,24 +300,50 @@ func _tick_weapons(input: InputState, delta: float) -> void:
 		_face(_burst_dir)
 		fired.emit(self, "balle", gun_muzzle(_burst_dir), _burst_dir, 0.0)
 		visual.gun_shot_time = 0.0
-	if input.heavy_pressed and _rocket_cooldown <= 0.0 and _charge < 0.0:
+	if _volley_left > 0:
+		_volley_timer -= delta
+		if _volley_timer <= 0.0:
+			_fire_volley_rocket()
+	if input.heavy_pressed and _rocket_cooldown <= 0.0 and _charge < 0.0 and _volley_left <= 0:
 		_charge = 0.0
 	if _charge >= 0.0:
 		_charge += delta
 		var laser := heavy_weapon == "laser"
 		var full := LASER_FULL_CHARGE if laser else ROCKET_FULL_CHARGE
 		if (not input.heavy_held and (not laser or _charge >= LASER_MIN_CHARGE)) or _charge >= full:
-			var dir := aim_direction(TURRET_PIVOT)
-			_face(dir)
-			var power := clampf((_charge - LASER_MIN_CHARGE) / (full - LASER_MIN_CHARGE), 0.0, 1.0) if laser else clampf(_charge / full, 0.0, 1.0)
-			fired.emit(self, heavy_weapon, turret_muzzle(dir), dir, power)
+			if laser:
+				var dir := aim_direction(TURRET_PIVOT)
+				_face(dir)
+				fired.emit(self, heavy_weapon, turret_muzzle(dir), dir, clampf((_charge - LASER_MIN_CHARGE) / (full - LASER_MIN_CHARGE), 0.0, 1.0))
+				_shot_flash()
+				_rocket_cooldown = LASER_COOLDOWN
+			else:
+				# Roquettes : 1 à 3 selon la charge, guidées si la charge est pleine
+				_volley_left = 1 + ROCKET_VOLLEY_CHARGE.filter(func(t: float) -> bool: return _charge >= t).size()
+				volley_guided = _charge >= full
+				_volley_timer = 0.0
+				_fire_volley_rocket()
 			_charge = -1.0
-			_rocket_cooldown = LASER_COOLDOWN if laser else ROCKET_COOLDOWN
-			visual.turret_barrel = _barrel
-			visual.turret_shot_time = 0.0
-			_barrel = (_barrel + 1) % MechaVisual.BARRELS
 	var full_charge := LASER_FULL_CHARGE if heavy_weapon == "laser" else ROCKET_FULL_CHARGE
 	visual.turret_charge = clampf(_charge / full_charge, 0.0, 1.0) if _charge >= 0.0 else -1.0
+
+
+## Une roquette de la salve, vers l'adversaire visé (un peu écartée des autres).
+func _fire_volley_rocket() -> void:
+	var dir := aim_direction(TURRET_PIVOT)
+	_face(dir)
+	dir = dir.rotated((_volley_left % 3 - 1) * ROCKET_SPREAD)
+	fired.emit(self, "roquette", turret_muzzle(dir), dir, ROCKET_POWER)
+	_shot_flash()
+	_volley_left -= 1
+	_volley_timer = ROCKET_GAP
+	_rocket_cooldown = ROCKET_COOLDOWN
+
+
+func _shot_flash() -> void:
+	visual.turret_barrel = _barrel
+	visual.turret_shot_time = 0.0
+	_barrel = (_barrel + 1) % MechaVisual.BARRELS
 
 
 ## X + Y, jauge d'ultime du pilote pleine : l'ultime de son perso, en plus gros.
@@ -320,6 +357,7 @@ func _start_ultimate() -> void:
 	_bolt_pass = -1
 	_burst_left = 0
 	_charge = -1.0
+	_volley_left = 0
 	_punch_time = -1.0
 	ult_dir = aim_direction(TURRET_PIVOT)
 	var target := pilot.target
@@ -455,6 +493,7 @@ func parried(push: Vector2) -> void:
 	_punch_time = -1.0
 	_burst_left = 0
 	_charge = -1.0
+	_volley_left = 0
 	_punch_cooldown = PARRY_LOCK
 	_gun_cooldown = PARRY_LOCK
 	_rocket_cooldown = PARRY_LOCK
@@ -521,6 +560,22 @@ func damage(amount: int) -> void:
 		destroyed.emit(self)
 
 
+## Retombé de haut sur des blocs de la ville : il les abîme (plus il tombait vite, plus fort).
+## Un bloc cassé : il continue de tomber (un peu freiné) et peut casser le plancher d'en dessous.
+func _stomp(before: Vector2) -> void:
+	if before.y < STOMP_MIN_SPEED:
+		return
+	var damage := roundi(lerpf(STOMP_DAMAGE[0], STOMP_DAMAGE[1], inverse_lerp(STOMP_MIN_SPEED, MAX_FALL, before.y)))
+	var broke := false
+	for i in get_slide_collision_count():
+		var collision := get_slide_collision(i)
+		var block := collision.get_collider() as CityBlock
+		if block != null and collision.get_normal().y < -0.5 and block.hit(damage):
+			broke = true
+	if broke:
+		velocity.y = before.y * STOMP_KEEP
+
+
 func is_destroyed() -> bool:
 	return hp <= 0
 
@@ -530,6 +585,7 @@ func _move() -> void:
 	var before := velocity
 	move_and_slide()
 	if not dashing:
+		_stomp(before)
 		return
 	# Un dash percute le décor : il abîme les blocs de la ville (et casse les fenêtres) et continue sur sa lancée
 	for i in get_slide_collision_count():

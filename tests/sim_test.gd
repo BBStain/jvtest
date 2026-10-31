@@ -60,6 +60,7 @@ func shot(name: String) -> void:
 
 func _ready() -> void:
 	shot_dir = OS.get_environment("SHOT_DIR")
+	Ville.variety = false  # la Ville toujours pareille pour les tests (sauf ceux de la variété, plus bas)
 	var p1: Fighter
 	var p2: Fighter
 
@@ -1001,6 +1002,96 @@ func _ready() -> void:
 		var weapons_landed := spawned.filter(func(w): return is_instance_valid(w) and w in game.projectiles and w.state == Projectile.State.STUCK).size()
 		check(weapons_landed == spawned.size(), "Contenu : sur %s, les armes apparues se posent (%d/%d)" % [path.get_file(), weapons_landed, spawned.size()])
 	check(GameSetup.VILLE_MAP in GameSetup.all_maps(), "Contenu : la Ville est dans le choix de la map")
+	# Ville : à chaque partie, des murs fins (un PV de moins), des fenêtres et des tonneaux explosifs au hasard
+	Ville.variety = true
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	GameSetup.player_devices = []
+	GameSetup.player_characters = []
+	await new_game()
+	game._item_spawn_timer = 1e9
+	game._weapon_spawn_timer = 1e9
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	var v_city_blocks: Array = game.map.windows().filter(func(w): return w is CityBlock)
+	var v_thin_walls: Array = v_city_blocks.filter(func(w): return not w is ExplosiveBarrel and w.max_hp == Ville.THIN_WALL_HP)
+	var v_glass: Array = v_city_blocks.filter(func(w): return not w is ExplosiveBarrel and w.max_hp == Ville.WINDOW_HP)
+	var v_barrels: Array = v_city_blocks.filter(func(w): return w is ExplosiveBarrel)
+	check(v_thin_walls.size() > 50 and v_thin_walls.filter(func(w): return w.size.x < Ville.BLOCK).size() > 50 and v_glass.size() > 5 and v_barrels.size() == Ville.BARRELS,
+		"Ville : murs fins à 5 PV (%d blocs), fenêtres (%d), %d tonneaux" % [v_thin_walls.size(), v_glass.size(), v_barrels.size()])
+	await step(30)
+	check(v_barrels.all(func(b): return not b.broken), "Ville : les tonneaux tiennent sur les planchers (aucun n'a sauté au départ)")
+	await shot("ville_variete")
+	# Un tonneau touché explose (l'image d'après), et fait sauter un tonneau proche (réaction en chaîne)
+	var v_first: ExplosiveBarrel = v_barrels[0]
+	var v_second := ExplosiveBarrel.new()
+	v_second.setup_barrel()
+	v_second.position = v_first.position + Vector2(120.0, 0.0)
+	v_second.exploded.connect(game._on_barrel_exploded)
+	game.map.add_child(v_second)
+	game.map._windows.append(v_second)
+	var barrel_city: CityCollapse = game.map.get_node("Ecroulement")
+	for cell in barrel_city._cells(v_second.rect().grow(1.0)):
+		if not barrel_city._cells_map.has(cell):
+			barrel_city._cells_map[cell] = []
+		barrel_city._cells_map[cell].append(v_second)
+	var barrel_victim: Fighter = game.fighters[0]
+	barrel_victim.global_position = v_first.global_position + Vector2(-110.0, -10.0)
+	barrel_victim.velocity = Vector2.ZERO
+	barrel_victim._invincible_timer = 0.0
+	await step(2)
+	barrel_victim.global_position = v_first.global_position + Vector2(-110.0, -10.0)
+	v_first.hit(1)
+	check(v_first.broken and game._barrels_to_explode.size() == 1, "Ville : un seul dégât et le tonneau saute")
+	await step(1)
+	await step(2)
+	check(v_second.broken, "Ville : l'explosion d'un tonneau fait sauter le tonneau d'à côté")
+	check(barrel_victim.is_stunned() or barrel_victim.lives < GameSetup.lives, "Ville : l'explosion d'un tonneau touche le joueur à côté")
+	await shot("ville_tonneau")
+	# Ville : une lance ou une flèche qui ne casse pas le mur s'y plante (avant, elle le traversait).
+	# Si le coup casse le bloc (1 PV restant, une vitre...), elle continue.
+	var wall_space: PhysicsDirectSpaceState2D = game.get_world_2d().direct_space_state
+	var wall_targets: Array = []
+	for wall_block in v_city_blocks:
+		if wall_block is ExplosiveBarrel or wall_block.one_way or wall_block.broken or wall_block.max_hp < 5 or wall_block.size.y < wall_block.size.x:
+			continue
+		var wall_mid: Vector2 = wall_block.rect().get_center()
+		if game.fighters.any(func(fi): return fi.global_position.distance_to(wall_mid) < 800.0):
+			continue
+		var wall_query := PhysicsRayQueryParameters2D.create(wall_mid - Vector2(220.0, 0.0), wall_mid, 1)
+		var wall_hit: Dictionary = wall_space.intersect_ray(wall_query)
+		if not wall_hit.is_empty() and wall_hit.collider == wall_block:
+			wall_targets.append(wall_block)
+		if wall_targets.size() == 3:
+			break
+	var wall_results := []
+	for wall_i in wall_targets.size():
+		var wall_block: CityBlock = wall_targets[wall_i]
+		var wall_hp_before := wall_block.hp
+		if wall_i == 2:
+			wall_block.hp = 1  # le dernier PV : la lance casse le bloc et passe
+			wall_hp_before = 1
+		var thrown := Projectile.new()
+		thrown.kind = "fleche" if wall_i == 1 else "lance"
+		thrown.length = Projectile.ARROW_LENGTH if wall_i == 1 else Projectile.SPEAR_LENGTH
+		thrown.owner_index = 0
+		thrown.position = wall_block.rect().get_center() - Vector2(180.0, 0.0)
+		thrown.velocity = Vector2(1400.0, 0.0)
+		game._add_projectile(thrown)
+		for i in 30:
+			await step(1)
+			if not is_instance_valid(thrown) or thrown.state == Projectile.State.STUCK or wall_block.broken:
+				break
+		var stuck_in := is_instance_valid(thrown) and thrown.state == Projectile.State.STUCK \
+				and wall_block.rect().grow(10.0).has_point(thrown.tip())
+		if wall_i == 2:
+			wall_results.append(wall_block.broken and not stuck_in)
+		else:
+			wall_results.append(stuck_in and not wall_block.broken and wall_block.hp == wall_hp_before - 1)
+		if is_instance_valid(thrown) and thrown in game.projectiles:
+			game._remove_projectile(thrown)
+	check(wall_targets.size() == 3 and not false in wall_results,
+		"Ville : lance et flèche se plantent dans un mur qui tient, et passent s'il casse (%s)" % [wall_results])
+	Ville.variety = false
 	# Ville : beaucoup d'objets et d'armes, dans les immeubles et partout, qui se posent tous
 	GameSetup.map_path = GameSetup.VILLE_MAP
 	GameSetup.player_devices = []
@@ -1191,6 +1282,11 @@ func _ready() -> void:
 		"Ville : A gardé, il vole (%d px au-dessus du toit, carburant %.1f s)" % [roof_y - mecha.global_position.y, mecha.fuel])
 	cmd.jump = false
 	var fuel_air := mecha.fuel
+	# (une chute de haut abîme le toit, et l'onde de choc d'arrivée l'avait déjà un peu abîmé :
+	# ici, toit réparé, on regarde juste qu'il retombe dessus et que le carburant revient)
+	for w in game.map.windows():
+		if w is CityBlock and not w.broken and absf(w.rect().get_center().x - mecha.global_position.x) < 300.0:
+			w.hp = w.max_hp
 	frames = 0
 	while not mecha.is_on_floor() and frames < 300:
 		await step(1)
@@ -1365,17 +1461,43 @@ func _ready() -> void:
 	var lives_h := hitter.lives
 	pcmd.y = true
 	pcmd.yh = true
-	await step(30)
-	check(tank.visual.turret_charge > 0.3, "Ville : Y gardé, la roquette se charge (%.2f)" % tank.visual.turret_charge)
+	await step(15)
+	check(tank.visual.turret_charge > 0.1, "Ville : Y gardé, la roquette se charge (%.2f)" % tank.visual.turret_charge)
 	pcmd.yh = false
 	await step(2)
 	var rocket_list: Array = game.projectiles.filter(func(p): return p.kind == "roquette")
-	check(rocket_list.size() == 1 and rocket_list[0].blast > 0.3, "Ville : Y lâché, une roquette part (charge %.2f)" % (rocket_list[0].blast if rocket_list.size() > 0 else -1.0))
+	check(rocket_list.size() == 1 and rocket_list[0].homing == null, "Ville : petite charge, Y lâché : une seule roquette part, non guidée")
 	await step(4)
 	await shot("ville_mecha_roquette")
 	await step(40)
 	check(game.projectiles.filter(func(p): return p.kind == "roquette").is_empty() and touched(hitter),
 		"Ville : la roquette explose sur l'adversaire (vies %d -> %d, sonné : %s)" % [lives_h, hitter.lives, hitter.is_stunned()])
+	# Plus de charge, plus de roquettes : 2 (gardé 0,5 s), 3 (gardé 1 s), 3 guidées (charge pleine, elles partent seules)
+	hitter._invincible_timer = 100.0  # elles le ratent : on compte juste les roquettes
+	var volleys := []
+	for hold in [40, 70, 100]:
+		await step(70)
+		var volley_old := {}  # roquettes de la salve d'avant, encore en vol
+		for p in game.projectiles:
+			volley_old[p.get_instance_id()] = true
+		pcmd.y = true
+		pcmd.yh = true
+		await step(hold)
+		pcmd.yh = false
+		var volley_seen := {}
+		var volley_guided := 0
+		for i in 30 + (hold - 90 if hold > 90 else 0):
+			await step(1)
+			for p in game.projectiles:
+				if p.kind == "roquette" and p.owner_index == tank.pilot.player_index and not volley_seen.has(p.get_instance_id()) \
+						and not volley_old.has(p.get_instance_id()):
+					volley_seen[p.get_instance_id()] = true
+					volley_guided += 1 if p.homing != null else 0
+		volleys.append([volley_seen.size(), volley_guided])
+	check(volleys == [[2, 0], [3, 0], [3, 3]], "Ville : roquettes du mecha, 1 à 3 selon la charge, guidées à charge pleine (%s)" % [volleys])
+	await step(120)
+	hitter._invincible_timer = 0.0
+	hitter.recover()
 	# Une roquette use un autre mecha (de 5 à 7) ; le mecha détruit explose, son pilote est éjecté sonné
 	# sans perdre de vie
 	await step(150)
@@ -1492,6 +1614,7 @@ func _ready() -> void:
 			fi.velocity = Vector2.ZERO
 		gunner.global_position = Vector2(mx, my - gunner.stats.body_size.y / 2.0 - 1.0)
 		foe.global_position = Vector2(mx + 400.0, my - foe.stats.body_size.y / 2.0 - 1.0)
+		game.gauge.points = 0.0  # pas de passage de phase (son explosion casserait le toit sous eux)
 	await step(200)
 	reset_pair.call()
 	await step(5)
@@ -1730,6 +1853,13 @@ func _ready() -> void:
 	check(missiles_seen.size() == Mecha.MISSILES and knight.item == "", "Ville : RT tire %d missiles" % missiles_seen.size())
 	await step(120)
 	check(walker.is_stunned() or walker.lives < walker_lives, "Ville : les missiles suivent l'ennemi et le touchent")
+	# Bug (Stain) : un joueur sorti du mecha avec ses missiles ne pouvait plus prendre aucun objet
+	knight.item = "missiles"
+	knight.leave_mecha()
+	check(knight.item == "" and knight.take_item("pistolet"), "Ville : sorti du mecha avec des missiles, on peut reprendre des objets")
+	knight.item = ""
+	knight._board(guard)
+	await step(2)
 	# Ultimes en mecha (X + Y, jauge pleine). Barre : grand laser qui gèle (à pied et en mecha)
 	await step(200)
 	for pr in game.projectiles.duplicate():
@@ -1842,11 +1972,44 @@ func _ready() -> void:
 	var walker_lives_l := walker.lives
 	knight.input_source = Scripted.new(func(s, f):
 		s.heavy_pressed = f == 0
-		s.heavy_held = f < 30)
-	await step(31)
+		s.heavy_held = f < 5)
+	await step(50)
+	check(game._mecha_lasers.is_empty() and not walker.is_stunned(), "Ville : un appui sur Y, le canon laser charge 1 s avant de tirer")
+	await step(25)
 	await shot("ville_mecha_canon_laser")
-	await step(5)
-	check(walker.is_stunned() or walker.lives < walker_lives_l, "Ville : Y chargé, le canon laser touche tout de suite à distance")
+	await step(20)
+	check(walker.is_stunned() or walker.lives < walker_lives_l, "Ville : après la charge, le canon laser s'allonge et touche à distance")
+	# Plus on garde Y, plus il est rapide, long et gros
+	check(Game.MECHA_LASER_SPEED[1] > Game.MECHA_LASER_SPEED[0] and Game.MECHA_LASER_RANGE[1] > Game.MECHA_LASER_RANGE[0]
+		and Game.MECHA_LASER_RADIUS[1] > Game.MECHA_LASER_RADIUS[0] and Mecha.LASER_FULL_CHARGE > Mecha.LASER_MIN_CHARGE,
+		"Ville : canon laser gardé plus longtemps = plus rapide, plus long, plus gros")
+	# Il se contre : un coup qui touche sa pointe l'arrête (contre)
+	await step(120)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	# (sur le toit d'un autre immeuble : celui de la tour a pu être cassé par les tirs d'avant)
+	walker.global_position = Vector2(Ville.building_center(1), Ville.roof_top(1) - walker.stats.body_size.y / 2.0 - 1.0)
+	walker.velocity = Vector2.ZERO
+	await step(20)
+	game.gauge.points = 0.0
+	var laser_counter_lives := walker.lives
+	var walker_center: Vector2 = walker.body_rect().get_center()
+	var laser_from := walker_center + Vector2(-150.0, 0.0)
+	walker.input_source = Scripted.new(func(s, f):
+		s.aimed_attack_pressed = f == 0  # coup visé vers le laser (stick droit)
+		s.aim = Vector2.LEFT)
+	await step(int(walker.stats.attack_startup * 60.0) + 1)
+	var gunship_home := gunship.global_position
+	gunship.global_position += laser_from - gunship.body_rect().get_center()
+	game._fire_mecha_laser(gunship, laser_from, Vector2.RIGHT, 0.0)
+	gunship.global_position = gunship_home
+	var laser_counter_frames := 0
+	while not game._mecha_lasers.is_empty() and laser_counter_frames < 60:
+		await step(1)
+		laser_counter_frames += 1
+	walker.input_source = Scripted.new(func(s, f): pass)
+	check(not walker.is_stunned() and walker.lives == laser_counter_lives and game.gauge.points >= 3.0,
+		"Ville : un coup sur la pointe du canon laser l'arrête (contre, points %.0f)" % game.gauge.points)
 	# ... il s'arrête sur une roquette (les deux disparaissent)
 	await step(120)
 	walker.recover()
@@ -1860,7 +2023,7 @@ func _ready() -> void:
 	var laser_origin := gunship.turret_muzzle(Vector2.RIGHT)
 	var to_rocket := laser_origin.direction_to(enemy_rocket.position)
 	game._fire_mecha_laser(gunship, laser_origin, to_rocket, 1.0)
-	await step(2)
+	await step(30)
 	check(game.projectiles.filter(func(p): return p.kind == "roquette").is_empty() and not walker.is_stunned() and walker.lives == walker_lives_r,
 		"Ville : le canon laser annule une roquette sur son chemin (et s'arrête là)")
 	# ... et il traverse au plus 2 blocs de la ville
@@ -1871,6 +2034,7 @@ func _ready() -> void:
 	var broken_before: int = game.map.windows().filter(func(w): return w is CityBlock and w.broken).size()
 	game._fire_mecha_laser(gunship, Vector2(laser_wall_x - 200.0, line_y), Vector2.RIGHT, 1.0)
 	gunship.global_position = gunship_spot
+	await step(60)
 	var broken_after: int = game.map.windows().filter(func(w): return w is CityBlock and w.broken).size()
 	check(broken_after - broken_before == Game.MECHA_LASER_BLOCKS, "Ville : le canon laser casse %d blocs puis s'arrête" % (broken_after - broken_before))
 	# Ville : le parc d'attractions et le parc arboré (captures)
@@ -2313,6 +2477,38 @@ func _ready() -> void:
 	for k in 10:
 		g.add_counter(true)
 	check(g.points == CounterGauge.MAX_POINTS, "Jauge : elle ne dépasse pas %.0f points" % CounterGauge.MAX_POINTS)
+	# Le contre qui fait passer une phase déclenche une explosion autour de celui qui a contré
+	# (lui n'est pas touché), de plus en plus grosse à chaque phase
+	g.points = CounterGauge.PHASE_POINTS[0] - 1
+	p1.position = Vector2(500, 540); p2.position = Vector2(580, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	game._count_counter(false, [p1])
+	check(g.phase() == 2 and not p2.is_stunned() and not p1.is_stunned() and p2.velocity.x > 500.0,
+		"Jauge : passer en phase 2 fait exploser autour de celui qui contre : l'autre est poussé fort, sans être sonné")
+	# Collé au centre (très rare), il est sonné
+	g.points = CounterGauge.PHASE_POINTS[0] - 1
+	p2._invincible_timer = 0.0
+	p2.position = p1.position
+	p2.velocity = Vector2.ZERO
+	game._count_counter(false, [p1])
+	check(p2.is_stunned() and not p1.is_stunned(), "Jauge : explosion de phase, collé à celui qui contre : sonné")
+	p2.recover()
+	await step(80)
+	g.points = CounterGauge.PHASE_POINTS[0]
+	var no_blast_lives := p2.lives
+	p2.recover()
+	p2._invincible_timer = 0.0
+	p2.position = Vector2(580, 540)
+	p2.velocity = Vector2.ZERO
+	await step(2)
+	game._count_counter(false, [p1])
+	check(not p2.is_stunned() and p2.lives == no_blast_lives, "Jauge : un contre sans changer de phase n'explose pas")
+	check(Game.PHASE_BLAST_RADIUS[0] < Game.PHASE_BLAST_RADIUS[1] and Game.PHASE_BLAST_RADIUS[1] < Game.PHASE_BLAST_RADIUS[2],
+		"Jauge : l'explosion grandit à chaque phase (%s)" % [Game.PHASE_BLAST_RADIUS])
+	g.points = 0.0
+	p2.recover()
+	await step(80)
 	# Recharge plus courte selon la phase
 	var cooldowns := []
 	for points in [0.0, CounterGauge.PHASE_POINTS[0], CounterGauge.PHASE_POINTS[1], CounterGauge.PHASE_POINTS[2]]:
@@ -4249,6 +4445,71 @@ func _ready() -> void:
 	await step(bolt_frames + 12)
 	check(untouched(p2) and not p1.is_bolting() and p1.attack_cooldown_left() > 0.5 and p2.ultimate_points == Fighter.ULTIMATE_HEAVY_POINTS,
 		"Éclair : un blocage parfait l'arrête, c'est un contre")
+
+	# Les persos ne se traversent plus : ils se bloquent en se touchant, sauf en dash
+	GameSetup.map_path = GameSetup.MAPS[0]
+	GameSetup.player_characters = []
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position = Vector2(450, 520); p2.position = Vector2(650, 520)
+	p1.input_source = Scripted.new(func(s, f): s.stick = Vector2.RIGHT)
+	p2.input_source = Scripted.new(func(s, f): s.stick = Vector2.LEFT)
+	await step(90)
+	var bump_gap := p2.body_rect().position.x - p1.body_rect().end.x
+	check(absf(bump_gap) < 4.0 and p1.position.x < p2.position.x,
+		"Collision : deux persos qui marchent l'un vers l'autre se bloquent (écart %.1f)" % bump_gap)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f):
+		s.stick = Vector2.RIGHT
+		s.dash_pressed = f == 0)
+	await step(30)
+	check(p1.position.x > p2.position.x, "Collision : en dash, on passe à travers (J1 x=%.0f, J2 x=%.0f)" % [p1.position.x, p2.position.x])
+	# Les mechas aussi se bloquent entre eux ; un mecha qui tombe de haut casse plus les blocs
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	await new_game()
+	game._beacon_timer = 1e9
+	game._item_spawn_timer = 1e9
+	game._weapon_spawn_timer = 1e9
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	var bump_cmd := {"stick": Vector2.ZERO}
+	p1.input_source = Scripted.new(func(s, f): s.stick = bump_cmd.stick)
+	p2.input_source = Scripted.new(func(s, f): s.stick = -bump_cmd.stick)
+	var bump_x := Ville.building_center(Ville.TOWER)
+	var bump_y := Ville.roof_top(Ville.TOWER)
+	p1.global_position = Vector2(bump_x - 300.0, bump_y - 40.0)
+	p2.global_position = Vector2(bump_x + 300.0, bump_y - 40.0)
+	await step(2)
+	var bump_m1: Mecha = game.call_mecha(p1)
+	var bump_m2: Mecha = game.call_mecha(p2)
+	await step(100)
+	p1._board(bump_m1)
+	p2._board(bump_m2)
+	await step(5)
+	bump_cmd.stick = Vector2.RIGHT
+	await step(90)
+	bump_cmd.stick = Vector2.ZERO
+	var mecha_gap := bump_m2.body_rect().position.x - bump_m1.body_rect().end.x
+	check(absf(mecha_gap) < 6.0, "Collision : deux mechas qui avancent l'un vers l'autre se bloquent (écart %.1f)" % mecha_gap)
+	# De haut : il casse le toit en retombant ; de pas haut, rien ne casse
+	var roof_blocks := func(m: Mecha) -> Array:
+		var feet := Rect2(m.body_rect().position.x, m.body_rect().end.y, m.body_rect().size.x, 30.0)
+		return game.map.windows().filter(func(w): return w is CityBlock and not w.broken and w.rect().intersects(feet))
+	var low_under: Array = roof_blocks.call(bump_m1)
+	var low_hp: Array = low_under.map(func(w): return w.hp)
+	bump_m1.velocity = Vector2(0.0, -600.0)  # un petit saut
+	await step(60)
+	check(low_under.all(func(w): return not w.broken) and low_under.map(func(w): return w.hp) == low_hp,
+		"Collision : un mecha qui retombe d'un petit saut n'abîme pas le toit")
+	var high_under: Array = roof_blocks.call(bump_m1)
+	bump_m1.global_position.y -= 700.0
+	bump_m1.velocity = Vector2.ZERO
+	await step(60)
+	var high_worn := high_under.filter(func(w): return w.broken or w.hp < w.max_hp).size()
+	bump_m1.global_position.y -= 700.0
+	bump_m1.velocity = Vector2.ZERO
+	await step(60)
+	check(high_under.size() > 0 and high_worn > 0 and high_under.any(func(w): return w.broken),
+		"Collision : un mecha qui retombe de haut abîme le toit, la 2e fois il le casse (%d blocs dessous)" % high_under.size())
 
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
