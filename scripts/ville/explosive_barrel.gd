@@ -1,8 +1,9 @@
 class_name ExplosiveBarrel
 extends CityBlock
 ## Un tonneau explosif posé dans un immeuble de la Ville (placés au hasard à chaque partie).
-## Un seul dégât suffit (coup, balle, explosion, dash de mecha...) : il explose (voir Game._on_barrel_exploded).
-## Une explosion qui en touche un autre le fait sauter à son tour, l'image d'après : ça fait des chaînes.
+## Un seul dégât suffit (coup, balle, explosion, dash de mecha...) : il est projeté, sa mèche
+## s'allume, et il explose un peu plus tard (voir Game._on_barrel_exploded et Projectile "tonneau").
+## Une explosion qui en touche un autre l'allume à son tour : ça fait des chaînes.
 ## Il fait partie de la ville : si le plancher sous lui s'écroule, il tombe avec (sans exploser).
 
 signal exploded(barrel: ExplosiveBarrel)

@@ -1041,12 +1041,35 @@ func _ready() -> void:
 	await step(2)
 	barrel_victim.global_position = v_first.global_position + Vector2(-110.0, -10.0)
 	v_first.hit(1)
-	check(v_first.broken and game._barrels_to_explode.size() == 1, "Ville : un seul dégât et le tonneau saute")
-	await step(1)
-	await step(2)
-	check(v_second.broken, "Ville : l'explosion d'un tonneau fait sauter le tonneau d'à côté")
-	check(barrel_victim.is_stunned() or barrel_victim.lives < GameSetup.lives, "Ville : l'explosion d'un tonneau touche le joueur à côté")
+	var flying_barrels: Array = game.projectiles.filter(func(p): return p.kind == "tonneau")
+	check(v_first.broken and flying_barrels.size() == 1, "Ville : un seul dégât et le tonneau saute (sa mèche s'allume)")
+	var flying_barrel: Projectile = flying_barrels[0] if flying_barrels.size() > 0 else null
+	await step(20)
+	check(flying_barrel != null and flying_barrel in game.projectiles and not v_second.broken and untouched(barrel_victim),
+		"Ville : le tonneau touché n'explose pas tout de suite")
+	# Un coup le pousse (en l'air aussi)
+	barrel_victim.global_position = flying_barrel.position + Vector2(-50.0, 0.0)
+	var barrel_x := flying_barrel.position.x
+	light_now(barrel_victim, Vector2.RIGHT)
+	await step(10)
+	check(flying_barrel.position.x > barrel_x + 40.0, "Ville : un coup pousse le tonneau allumé (%.0f px)" % (flying_barrel.position.x - barrel_x))
 	await shot("ville_tonneau")
+	# Au bout de sa mèche, il explose : il touche le joueur à côté et allume le tonneau d'à côté
+	flying_barrel.global_position = v_first.global_position
+	flying_barrel.velocity = Vector2.ZERO
+	var barrel_frames := 0
+	while flying_barrel.fuse > 0.05 and barrel_frames < 120:
+		await step(1)
+		barrel_frames += 1
+	barrel_victim.recover()
+	barrel_victim._invincible_timer = 0.0
+	barrel_victim.global_position = flying_barrel.position + Vector2(-90.0, -10.0)
+	barrel_victim.velocity = Vector2.ZERO
+	await step(5)
+	var lit_after: int = game.projectiles.filter(func(p): return p.kind == "tonneau").size()
+	check(not flying_barrel in game.projectiles and v_second.broken and lit_after >= 1,
+		"Ville : au bout de sa mèche le tonneau explose et allume le tonneau d'à côté (fini %s, voisin cassé %s, allumés %d)" % [not flying_barrel in game.projectiles, v_second.broken, lit_after])
+	check(barrel_victim.is_stunned() or barrel_victim.lives < GameSetup.lives, "Ville : l'explosion d'un tonneau touche le joueur à côté")
 	# Ville : une lance ou une flèche qui ne casse pas le mur s'y plante (avant, elle le traversait).
 	# Si le coup casse le bloc (1 PV restant, une vitre...), elle continue.
 	var wall_space: PhysicsDirectSpaceState2D = game.get_world_2d().direct_space_state
@@ -1836,7 +1859,11 @@ func _ready() -> void:
 	walker.global_position = Vector2(guard.global_position.x + 700.0, my - walker.stats.body_size.y / 2.0 - 1.0)
 	walker.velocity = Vector2.ZERO
 	await step(60)
-	check(not walker.take_item("missiles"), "Ville : à pied, on ne prend pas les missiles")
+	# Bug (Stain) : à pied, l'objet « M » ne se ramassait pas. Maintenant on le garde pour son mecha,
+	# et un autre objet ramassé à pied le remplace.
+	check(walker.take_item("missiles") and walker.item == "missiles" and walker.take_item("pistolet") and walker.item == "pistolet",
+		"Ville : à pied, on ramasse les missiles (pour son mecha) ; un autre objet les remplace")
+	walker.item = ""
 	game.spawn_pickup("missiles", guard.body_rect().get_center())
 	await step(3)
 	check(knight.item == "missiles", "Ville : en mecha, on ramasse les missiles en passant dessus")
@@ -1856,7 +1883,7 @@ func _ready() -> void:
 	# Bug (Stain) : un joueur sorti du mecha avec ses missiles ne pouvait plus prendre aucun objet
 	knight.item = "missiles"
 	knight.leave_mecha()
-	check(knight.item == "" and knight.take_item("pistolet"), "Ville : sorti du mecha avec des missiles, on peut reprendre des objets")
+	check(knight.item == "missiles" and knight.take_item("pistolet"), "Ville : sorti du mecha avec des missiles, on les garde et on peut reprendre des objets")
 	knight.item = ""
 	knight._board(guard)
 	await step(2)

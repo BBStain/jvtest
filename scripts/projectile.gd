@@ -12,6 +12,8 @@ extends Node2D
 ##             touchée trop vite casse et la grenade continue. Un coup la décolle et la repousse.
 ##   roquette: Ville, tirée par un mecha. Elle file droit et explose contre le décor, un joueur ou
 ##             un mecha (voir game.gd, _resolve_rocket). blast = sa charge (0 à 1).
+##   tonneau : Ville, un tonneau explosif touché. Il est projeté (il tombe, rebondit, un coup le
+##             relance, même en l'air) et explose quand sa mèche est finie (game.gd fait l'explosion).
 ##   arme    : l'arme qui a sauté des mains (blocage parfait) ou qu'on a lancée avec RB. Elle vole
 ##             en tournant, sans danger, rebondit sur les murs, se pose au sol. Un joueur à mains
 ##             nues l'attrape en vol ou la ramasse en passant dessus (voir game.gd, _resolve_spear).
@@ -35,6 +37,8 @@ const RADIUS := 6.0                     ## épaisseur de la zone qui touche
 const SPEAR_LENGTH := 70.0              ## lance neuve (plus courte à chaque fois qu'elle est contrée)
 const KNOCKED_SPIN := 14.0              ## arme qui a sauté des mains : elle tourne sur elle-même en volant
 const KNOCKED_RADIUS := 4.0             ## ... (elle tombe et rebondit comme un objet, voir LooseBody)
+const BARREL_FUSE := 1.5                ## tonneau touché : il explose 1,5 s plus tard
+const BARREL_RADIUS := 30.0             ## ... (il roule et rebondit comme un objet, à peu près de sa taille)
 const KNOCKED_SCALE := 1.3              ## ... dessinée un peu plus grande qu'en main, pour la repérer
 
 var kind := "lance"
@@ -79,6 +83,8 @@ func _physics_process(delta: float) -> void:
 			_tick_grenade(delta)
 		"arme":
 			_tick_knocked(delta)
+		"tonneau":
+			_tick_barrel(delta)
 		_:
 			_tick_spear(delta)
 	queue_redraw()
@@ -240,6 +246,15 @@ func _tick_knocked(delta: float) -> void:
 		rotation += KNOCKED_SPIN * delta * (1.0 if velocity.x >= 0.0 else -1.0)
 
 
+func _tick_barrel(delta: float) -> void:
+	fuse -= delta
+	if fuse <= 0.0:
+		finished = true  # game.gd fait l'explosion
+		return
+	velocity = body.step(self, velocity, BARREL_RADIUS, delta)
+	state = State.STUCK if body.resting else State.DROPPED
+
+
 ## Un coup (ou une explosion) l'envoie valdinguer, sans danger.
 func launch(new_velocity: Vector2) -> void:
 	velocity = new_velocity
@@ -311,6 +326,15 @@ func _draw() -> void:
 			var blink := int(fuse / lerpf(0.05, 0.25, clampf(fuse / 3.0, 0.0, 1.0))) % 2 == 0
 			draw_circle(Vector2.ZERO, 8.0, Color(1, 0.3, 0.2) if blink and fuse < 1.5 else color)
 			draw_arc(Vector2.ZERO, 8.0, 0.0, TAU, 16, Color(1, 1, 1, 0.6), 1.5)
+		"tonneau":
+			# Comme posé (voir ExplosiveBarrel), qui clignote de plus en plus vite avant d'exploser
+			var size := ExplosiveBarrel.SIZE
+			var r := Rect2(-size / 2.0, size)
+			var blink := int(fuse / lerpf(0.05, 0.2, clampf(fuse / BARREL_FUSE, 0.0, 1.0))) % 2 == 0
+			draw_rect(r, Color(1.0, 0.85, 0.3) if blink else ExplosiveBarrel.COLOR)
+			var band := Color(0.25, 0.08, 0.06)
+			draw_rect(Rect2(r.position.x, r.position.y + size.y * 0.22, size.x, 5.0), band)
+			draw_rect(Rect2(r.position.x, r.end.y - size.y * 0.22 - 5.0, size.x, 5.0), band)
 		"arme":
 			# Comme dans la main : un manche, et un bout carré (tête du marteau, pointe...).
 			var half := length / 2.0

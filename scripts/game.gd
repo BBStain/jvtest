@@ -118,6 +118,7 @@ const PHASE_BLAST_KNOCKBACK := [1300.0, 1700.0, 2200.0]  ## surtout une grosse p
 const PHASE_BLAST_STUN_RADIUS := 30.0                ## ... il ne sonne que collé à celui qui contre (très rare)
 # --- Ville : tonneaux explosifs (voir ExplosiveBarrel) ---
 const BARREL_RADIUS := 220.0               ## plus gros qu'une grenade
+const BARREL_HOP := 300.0                   ## tonneau touché : il saute un peu (le coup qui l'a touché le pousse en plus)
 const BARREL_KNOCKBACK := 1400.0
 const MECHA_WEAR_BARREL := 6
 const GRENADE_SHIELD_DAMAGE := 3
@@ -176,7 +177,6 @@ var _beacon_timer := BEACON_FIRST_TIME
 var rng := RandomNumberGenerator.new()     ## où et quel objet tombe (seul l'hôte tire au sort)
 var _item_spawn_timer := ITEM_SPAWN_TIME
 var _weapon_spawn_timer := WEAPON_SPAWN_TIME
-var _barrels_to_explode: Array[Vector2] = []  ## Ville : tonneaux touchés, qui explosent à l'image suivante
 var _bow_count := 0                     ## pour donner un numéro à chaque arc (voir _new_bow_id)
 @onready var _end_screen: Control = $UI/EndScreen
 @onready var _winner_label: Label = $UI/EndScreen/Winner
@@ -288,7 +288,6 @@ func _physics_process(delta: float) -> void:
 		return
 
 	gauge.tick(delta)
-	_explode_barrels()
 	for fighter in fighters:
 		fighter.target = _closest_opponent(fighter)
 	for fighter in fighters:
@@ -1235,6 +1234,8 @@ func _resolve_projectiles() -> void:
 				_resolve_grenade(projectile)
 			"roquette", "missile":
 				_resolve_rocket(projectile)
+			"tonneau":
+				_resolve_barrel(projectile)
 			_:
 				_resolve_spear(projectile)
 
@@ -2260,17 +2261,27 @@ func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK, radius := GRENADE_
 ## Ville : un tonneau explosif a pris un dégât. Il explose à l'image suivante (une explosion qui en
 ## touche d'autres les fait sauter à leur tour, image après image : une réaction en chaîne).
 func _on_barrel_exploded(barrel: ExplosiveBarrel) -> void:
-	_barrels_to_explode.append(barrel.global_position)
+	# Il devient un tonneau qui vole : le coup (ou l'explosion) qui l'a touché le projette tout de
+	# suite après (voir _hit_loose_objects et _explode), sa mèche brûle, puis il explose.
+	var flying := Projectile.new()
+	flying.kind = "tonneau"
+	flying.owner_index = -1
+	flying.position = barrel.global_position
+	flying.velocity = Vector2(0.0, -BARREL_HOP)
+	flying.fuse = Projectile.BARREL_FUSE
+	flying.length = ExplosiveBarrel.SIZE.x
+	flying.color = ExplosiveBarrel.COLOR
+	_add_projectile(flying)
 
 
-func _explode_barrels() -> void:
-	if _barrels_to_explode.is_empty():
+func _resolve_barrel(barrel: Projectile) -> void:
+	if not map.blast_zone.has_point(barrel.position):
+		_remove_projectile(barrel)
 		return
-	var now := _barrels_to_explode
-	_barrels_to_explode = []
-	for where in now:
-		_explode(where, BARREL_KNOCKBACK, BARREL_RADIUS, MECHA_WEAR_BARREL)
-	_shake_left = SHAKE_TIME
+	if barrel.finished:
+		_remove_projectile(barrel)
+		_explode(barrel.position, BARREL_KNOCKBACK, BARREL_RADIUS, MECHA_WEAR_BARREL)
+		_shake_left = SHAKE_TIME
 
 
 ## Le joueur qu'un objet en vol touche (pas son lanceur), ou null. Celui qui esquive (dash) le
@@ -2420,7 +2431,7 @@ func _loose_objects() -> Array[Node2D]:
 	var list: Array[Node2D] = []
 	list.append_array(pickups)
 	for projectile in projectiles:
-		if projectile.kind in ["lance", "arme"] and projectile.state != Projectile.State.FLYING:
+		if projectile.kind == "tonneau" or (projectile.kind in ["lance", "arme"] and projectile.state != Projectile.State.FLYING):
 			list.append(projectile)
 	return list
 
