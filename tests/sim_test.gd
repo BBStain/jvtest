@@ -4235,6 +4235,8 @@ func _ready() -> void:
 	carrier.period = 4.0
 	var rider_pf := MapData.add_element(anim_map, "plateforme", Vector2(640, 200))
 	rider_pf.attach = carrier.id
+	var swing_vine := MapData.add_element(anim_map, "liane", Vector2(700, 320))
+	swing_vine.attach = carrier.id
 	GameSetup.editor_map = anim_map
 	GameSetup.map_path = GameSetup.EDITOR_MAP
 	GameSetup.player_devices = []
@@ -4246,7 +4248,13 @@ func _ready() -> void:
 	await step(10)
 	var ride_from: float = game.fighters[0].position.x
 	var pf_from: float = pf_node.position.x
-	await step(40)
+	var vine_node: Vine = game.map.get_node("Decor/liane_%d" % swing_vine.id)
+	var vine_angles: Array[float] = []
+	for i in 40:
+		await step(1)
+		vine_angles.append(vine_node._angle)
+	check(vine_angles.min() < -0.03,
+		"Liane accrochée à une structure qui part à droite : elle traîne en arrière (%.2f rad)" % vine_angles.min())
 	var pf_moved: float = pf_node.position.x - pf_from
 	check(game.map.has_node("Mouvements") and game.map.get_node("Decor/sol_%d" % carrier.id) is AnimatableBody2D
 		and pf_moved > 40 and game.fighters[0].is_on_floor() and absf((game.fighters[0].position.x - ride_from) - pf_moved) < 8,

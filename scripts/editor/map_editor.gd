@@ -135,6 +135,9 @@ func _process(delta: float) -> void:
 	_grid.queue_redraw()
 	if playing:
 		_motion.set_time(_motion.time + delta)
+		for node in _nodes.values():  # (l'aperçu est figé : on fait balancer les lianes nous-mêmes)
+			if node is Vine:
+				node.sway(delta)
 	if _message_left > 0.0:
 		_message_left -= delta
 		if _message_left <= 0.0:
@@ -336,6 +339,8 @@ func set_playing(on: bool) -> void:
 		for element in data.elements:
 			if _nodes.has(element.id):
 				_nodes[element.id].position = MapData.vec(element, "pos")
+				if _nodes[element.id] is Vine:
+					_nodes[element.id].reset_sway()
 	_overlay.queue_redraw()
 
 
