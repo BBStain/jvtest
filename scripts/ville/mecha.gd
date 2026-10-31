@@ -24,6 +24,7 @@ extends CharacterBody2D
 ## La position du nœud est entre les deux pieds, au sol (comme MechaVisual).
 
 signal landed(mecha: Mecha)             ## il vient de se poser (après l'appel) : onde de choc
+signal stomped(mecha: Mecha, power: float)  ## retombé de haut : onde de choc (power de 0 à 1 : plus il tombait vite)
 ## Il tire (game.gd crée ce qui vole) : kind "balle" ou "roquette", power = charge de la roquette (0 à 1).
 signal fired(mecha: Mecha, kind: String, origin: Vector2, direction: Vector2, power: float)
 signal destroyed(mecha: Mecha)          ## plus de solidité : il explose (game.gd éjecte le pilote)
@@ -38,9 +39,9 @@ const FLY_SPEED := 760.0                ## vitesse sur le côté en l'air
 const TURBO_MULT := 1.6                 ## LT : 1,6 fois plus vite
 const GROUND_ACCEL := 5200.0            ## vif : il démarre et s'arrête vite au sol...
 const AIR_ACCEL := 2600.0
-const GRAVITY := 2600.0                 ## ... mais lourd : il retombe vite
-const MAX_FALL := 1700.0
-const JUMP_SPEED := 1050.0
+const GRAVITY := 3200.0                 ## ... mais lourd : il retombe vite
+const MAX_FALL := 2000.0
+const JUMP_SPEED := 1170.0              ## (saut aussi haut qu'avant, malgré la gravité plus forte)
 const RISE_SPEED := 760.0               ## A gardé en l'air : il monte à cette vitesse...
 const RISE_STICK := 0.7                 ## ... plus vite stick en haut, moins vite stick en bas
 const THRUST_ACCEL := 3800.0
@@ -53,7 +54,7 @@ const DASH_SPEED := 1800.0
 const DASH_TIME := 0.18
 const DASH_COOLDOWN := 0.6
 const DASH_END_KEEP := 0.4
-const STOMP_MIN_SPEED := 1300.0         ## retombé plus vite que ça (de haut) sur des blocs de la ville : il les abîme...
+const STOMP_MIN_SPEED := 1450.0         ## retombé plus vite que ça (de haut) sur des blocs de la ville : il les abîme...
 const STOMP_DAMAGE := [1, 4]            ## ... de 1 (pas très haut) à 4 (de très haut) : 2 grosses chutes cassent un bloc neuf
 const STOMP_KEEP := 0.7                 ## ... et s'il casse, il continue de tomber un peu freiné
 const DASH_BLOCK_DAMAGE := 3            ## un dash qui percute un bloc de la ville l'abîme (2 dashs le cassent)
@@ -104,7 +105,8 @@ const FREEZE_TIME := 3.0                ## gelé par le grand laser : plus rien 
 const PUNCH_STARTUP := 0.06             ## RB : le poing part...
 const PUNCH_ACTIVE := 0.12              ## ... frappe pendant ce temps...
 const PUNCH_COOLDOWN := 0.5             ## ... et revient au plus toutes les 0,5 s
-const PUNCH_REACH := 150.0              ## jusqu'où il frappe devant le corps
+const PUNCH_FULL_CHARGE := 1.0          ## RB gardé : le poing se charge (au plus 1 s, il part tout seul)...
+const PUNCH_REACH := [150.0, 330.0]     ## ... et va plus loin devant le corps (pas chargé, chargé à fond)
 const PUNCH_HEIGHT := 220.0             ## haute zone : il touche aussi un joueur à pied, tout petit devant lui
 const PUNCH_Y := -120.0                 ## hauteur du poing (bas du corps, vers ceux qui sont à pied)
 
@@ -143,6 +145,9 @@ var _shield_hold := 0.0                 ## B gardé depuis ce temps (blocage par
 var _shield_flash := 0.0                ## le bouclier vient d'encaisser (ou de casser) : il brille
 var _punch_time := -1.0                 ## RB : temps depuis le début du coup de poing (-1 = pas de poing)
 var _punch_cooldown := 0.0
+var _punch_charge := -1.0               ## RB gardé depuis ce temps (-1 = pas de charge)
+var punch_power := 0.0                  ## charge du coup de poing en cours (0 à 1)
+var punch_reach: float = PUNCH_REACH[0]  ## jusqu'où il va (game.gd l'arrête sur un mur qui tient)
 var _missiles_left := 0
 var _missile_timer := 0.0
 var punch_hit := []
@@ -491,6 +496,7 @@ func parried(push: Vector2) -> void:
 	velocity = push
 	stop_ultimate()
 	_punch_time = -1.0
+	_punch_charge = -1.0
 	_burst_left = 0
 	_charge = -1.0
 	_volley_left = 0
@@ -506,12 +512,28 @@ func _tick_punch(input: InputState, delta: float) -> void:
 		_punch_time += delta
 		if _punch_time >= PUNCH_STARTUP + PUNCH_ACTIVE:
 			_punch_time = -1.0
-	elif pilot != null and input.throw_pressed and _punch_cooldown <= 0.0 and not _shielding:
-		_punch_time = 0.0
-		_punch_cooldown = PUNCH_COOLDOWN
-		punch_hit.clear()
-		var target_dir := aim_direction(Vector2(0.0, PUNCH_Y))
-		_face(target_dir)
+		return
+	if pilot == null or _shielding:
+		_punch_charge = -1.0
+		return
+	if input.throw_pressed and _punch_cooldown <= 0.0 and _punch_charge < 0.0:
+		_punch_charge = 0.0
+	if _punch_charge >= 0.0:
+		_punch_charge += delta
+		if not input.throw_held or _punch_charge >= PUNCH_FULL_CHARGE:
+			# Lâché (ou chargé à fond) : le poing part, plus loin s'il a été chargé
+			punch_power = clampf(_punch_charge / PUNCH_FULL_CHARGE, 0.0, 1.0)
+			punch_reach = lerpf(PUNCH_REACH[0], PUNCH_REACH[1], punch_power)
+			_punch_charge = -1.0
+			_punch_time = 0.0
+			_punch_cooldown = PUNCH_COOLDOWN
+			punch_hit.clear()
+			var target_dir := aim_direction(Vector2(0.0, PUNCH_Y))
+			_face(target_dir)
+
+
+func is_punch_charging() -> bool:
+	return _punch_charge >= 0.0
 
 
 func is_punch_active() -> bool:
@@ -521,8 +543,13 @@ func is_punch_active() -> bool:
 ## La zone que le poing frappe, devant le corps.
 func punch_rect() -> Rect2:
 	var front := global_position.x + facing * BODY.x / 2.0
-	var left := front if facing > 0.0 else front - PUNCH_REACH
-	return Rect2(left, global_position.y + PUNCH_Y - PUNCH_HEIGHT / 2.0, PUNCH_REACH, PUNCH_HEIGHT)
+	var left := front if facing > 0.0 else front - punch_reach
+	return Rect2(left, global_position.y + PUNCH_Y - PUNCH_HEIGHT / 2.0, punch_reach, PUNCH_HEIGHT)
+
+
+## D'où part le poing (le devant du corps, à sa hauteur).
+func punch_origin() -> Vector2:
+	return Vector2(global_position.x + facing * BODY.x / 2.0, global_position.y + PUNCH_Y)
 
 
 ## Vers l'adversaire visé par le pilote (depuis cette arme), sinon droit devant.
@@ -565,15 +592,22 @@ func damage(amount: int) -> void:
 func _stomp(before: Vector2) -> void:
 	if before.y < STOMP_MIN_SPEED:
 		return
-	var damage := roundi(lerpf(STOMP_DAMAGE[0], STOMP_DAMAGE[1], inverse_lerp(STOMP_MIN_SPEED, MAX_FALL, before.y)))
+	var power := clampf(inverse_lerp(STOMP_MIN_SPEED, MAX_FALL, before.y), 0.0, 1.0)
+	var damage := roundi(lerpf(STOMP_DAMAGE[0], STOMP_DAMAGE[1], power))
 	var broke := false
+	var landed_on := false
 	for i in get_slide_collision_count():
 		var collision := get_slide_collision(i)
+		if collision.get_normal().y >= -0.5:
+			continue
+		landed_on = true
 		var block := collision.get_collider() as CityBlock
-		if block != null and collision.get_normal().y < -0.5 and block.hit(damage):
+		if block != null and block.hit(damage):
 			broke = true
 	if broke:
 		velocity.y = before.y * STOMP_KEEP
+	if landed_on:
+		stomped.emit(self, power)
 
 
 func is_destroyed() -> bool:
@@ -732,11 +766,18 @@ func _draw_ultimate() -> void:
 
 ## Le poing : un gros bloc de sa couleur qui jaillit devant le corps.
 func _draw_punch() -> void:
+	var front := BODY.x / 2.0 - 30.0
+	if _punch_charge >= 0.0:
+		# En charge : le poing reculé contre le corps, qui grossit et blanchit
+		var k := clampf(_punch_charge / PUNCH_FULL_CHARGE, 0.0, 1.0)
+		var held := Rect2(Vector2(front - 30.0 if facing > 0.0 else -front - 20.0, PUNCH_Y - 40.0 - 10.0 * k), Vector2(50.0, 80.0 + 20.0 * k))
+		draw_rect(held, visual.color.lerp(Color.WHITE, 0.6 * k))
+		draw_rect(held, Color(1, 1, 1, 0.5 + 0.5 * k), false, 3.0)
+		return
 	if _punch_time < 0.0:
 		return
 	var out := clampf(_punch_time / PUNCH_STARTUP, 0.0, 1.0)
-	var front := BODY.x / 2.0 - 30.0
-	var length := lerpf(30.0, PUNCH_REACH + 30.0, out)
+	var length := lerpf(30.0, punch_reach + 30.0, out)
 	var arm := Rect2(Vector2(front if facing > 0.0 else -front - length, PUNCH_Y - 18.0), Vector2(length, 36.0))
 	var fist := Rect2(Vector2(arm.end.x - 50.0 if facing > 0.0 else arm.position.x, PUNCH_Y - 40.0), Vector2(50.0, 80.0))
 	draw_rect(arm, visual.color.darkened(0.2))
