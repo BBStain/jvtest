@@ -53,8 +53,17 @@ const MECHA_WEAR_PUNCH := 3                  ## coup de poing d'un autre mecha
 const MECHA_WEAR_BLAST := 4                  ## un mecha qui explose use ceux d'à côté
 const MECHA_BLAST_RADIUS := 230.0            ## l'explosion d'un mecha : rayon (blocs, mechas, joueurs repoussés)
 const MECHA_BLAST_PUSH := 1000.0
-const PUNCH_KNOCKBACK := 1300.0               ## coup de poing de mecha sur un joueur à pied (comme une grosse lourde)
-const PUNCH_BLOCK_DAMAGE := 2                 ## ... et sur les blocs de la ville
+const PUNCH_KNOCKBACK := [1300.0, 1800.0]     ## coup de poing de mecha sur un joueur à pied (pas chargé, chargé à fond)
+const PUNCH_BLOCK_DAMAGE := [3, 8]            ## ... et sur les blocs de la ville (il ne traverse un mur que s'il le casse)
+const MECHA_WEAR_PUNCH_CHARGED := 6           ## coup de poing chargé à fond sur un autre mecha
+const PUNCH_COUNTER_RADIUS := 170.0           ## coup de poing contré par une attaque légère : explosion au poing...
+const PUNCH_COUNTER_KNOCKBACK := 1200.0
+const MECHA_WEAR_PUNCH_COUNTERED := 8         ## ... qui use le mecha...
+const PUNCH_COUNTER_TIME_SCALE := 0.2         ## ... puis un gros ralenti
+const PUNCH_COUNTER_SLOWMO := 1.2             ## ... (en vraies secondes)
+const STOMP_RADIUS := [180.0, 340.0]          ## mecha retombé de haut : onde de choc (petite chute, de très haut)
+const STOMP_PUSH := [700.0, 1300.0]
+const STOMP_BLOCK_DAMAGE := 2
 const MECHA_WEAR_ULT_LASER := 10             ## ultimes en mecha : le grand laser de Barre (et il gèle 3 s)...
 const MECHA_WEAR_ULT_WAVE := 8                ## ... l'onde de Jumb (et elle repousse)...
 const MECHA_WEAR_ULT_BOLT := 5                ## ... chaque traversée de Jib
@@ -311,8 +320,8 @@ func _physics_process(delta: float) -> void:
 
 	_resolve_clashes()
 	_resolve_hits()
+	_resolve_punches()  # avant les coups sur les mechas : un coup léger sur le poing le contre
 	_resolve_mecha_hits()
-	_resolve_punches()
 	_resolve_mecha_ultimates()
 	_resolve_chunks()
 	_resolve_lasers()
@@ -1473,6 +1482,7 @@ func call_mecha(fighter: Fighter, weapon := "") -> Mecha:
 	mecha.position = _mecha_landing(fighter.global_position.x, fighter.global_position.y + fighter.stats.body_size.y / 2.0)
 	mecha.facing = fighter.facing
 	mecha.landed.connect(_on_mecha_landed)
+	mecha.stomped.connect(_on_mecha_stomped)
 	mecha.fired.connect(_on_mecha_fired)
 	mecha.destroyed.connect(_on_mecha_destroyed)
 	mechas.append(mecha)
@@ -1700,8 +1710,25 @@ func _resolve_punches() -> void:
 	for mecha in mechas.duplicate():
 		if not is_instance_valid(mecha) or not mecha.is_ready() or not mecha.is_punch_active():
 			continue
-		var zone: Rect2 = mecha.punch_rect()
+		var power: float = mecha.punch_power
 		var push := Vector2(mecha.facing, -0.25).normalized()
+		# Les murs d'abord (une fois par coup) : le poing s'arrête sur un mur qui tient
+		if not mecha.punch_hit.has(map):
+			mecha.punch_hit.append(map)
+			_punch_walls(mecha, roundi(lerpf(PUNCH_BLOCK_DAMAGE[0], PUNCH_BLOCK_DAMAGE[1], power)))
+		var zone: Rect2 = mecha.punch_rect()
+		# Contré par une attaque légère qui touche le poing : explosion, gros ralenti, le mecha s'use
+		var counterer: Fighter = null
+		for fighter in fighters:
+			if fighter.eliminated or fighter.is_piloting() or not fighter.is_attack_active() or fighter.is_heavy_attack() \
+					or fighter in mecha.punch_hit:
+				continue
+			if _segment_hits_rect(fighter.attack_start(), fighter.attack_center(), fighter.attack_radius(), zone):
+				counterer = fighter
+				break
+		if counterer != null:
+			_counter_punch(mecha, counterer, zone)
+			continue
 		for victim in fighters:
 			if victim.eliminated or victim.is_piloting() or victim == mecha.pilot or victim in mecha.punch_hit \
 					or victim.is_dodging() or not zone.intersects(victim.body_rect()):
@@ -1721,7 +1748,7 @@ func _resolve_punches() -> void:
 				if victim.absorb_hit(side, CHUNK_SHIELD_DAMAGE):
 					victim.shield_burst(side, true)
 			elif victim.can_be_hit():
-				victim.take_hit(push, PUNCH_KNOCKBACK)
+				victim.take_hit(push, lerpf(PUNCH_KNOCKBACK[0], PUNCH_KNOCKBACK[1], power))
 				_spawn_clash_mark(victim.global_position, false)
 				if victim.is_stunned() and _alive_count() == 2 and mecha.pilot != null:
 					_stun_focus = [mecha.pilot, victim]
@@ -1732,22 +1759,71 @@ func _resolve_punches() -> void:
 					or not zone.intersects(other.body_rect()):
 				continue
 			mecha.punch_hit.append(other)
-			if _wear_mecha(other, MECHA_WEAR_PUNCH, true) == "parry":
+			if _wear_mecha(other, roundi(lerpf(MECHA_WEAR_PUNCH, MECHA_WEAR_PUNCH_CHARGED, power)), true) == "parry":
 				mecha.parried(-push * MECHA_PARRY_PUSH)
 				break
 			_spawn_clash_mark(zone.get_center(), false)
-		if mecha.is_punch_active() and not mecha.punch_hit.has(map):
-			mecha.punch_hit.append(map)  # les blocs : une seule fois par coup de poing
-			for block in map.windows_near(zone):
-				if block.broken or not zone.intersects(block.rect()):
-					continue
-				if block is CityBlock:
-					(block as CityBlock).hit(PUNCH_BLOCK_DAMAGE)
-				else:
-					block.smash()
+		if mecha.is_punch_active() and not mecha.punch_hit.has("objets"):
+			mecha.punch_hit.append("objets")
 			for loose: Node2D in _loose_objects():
 				if zone.has_point(loose.position):
 					loose.launch(push * LOOSE_BLAST_SPEED)
+
+
+## Le poing avance devant le corps : chaque bloc de la ville sur son chemin s'abîme. S'il casse, le
+## poing continue ; s'il tient (ou un vrai mur), le poing s'arrête là (il ne traverse pas les murs).
+func _punch_walls(mecha: Mecha, damage: int) -> void:
+	var space := get_world_2d().direct_space_state
+	var from := mecha.punch_origin()
+	var dir := Vector2(mecha.facing, 0.0)
+	var reach := mecha.punch_reach
+	var exclude: Array[RID] = []
+	var stop := reach
+	while true:
+		var query := PhysicsRayQueryParameters2D.create(from, from + dir * reach, 1)
+		query.exclude = exclude
+		var hit := space.intersect_ray(query)
+		if hit.is_empty():
+			break
+		var block := hit.collider as BreakableWindow
+		if block != null and (not block is CityBlock or (block as CityBlock).hit(damage)):
+			if not block is CityBlock:
+				block.smash()
+			exclude.append(hit.rid)
+			continue
+		stop = absf((hit.position as Vector2).x - from.x)
+		break
+	mecha.punch_reach = maxf(stop, 0.0)
+	# Les autres blocs dans la zone du poing (au-dessus et en dessous du bras) s'abîment aussi
+	var zone := mecha.punch_rect()
+	for block in map.windows_near(zone):
+		if block.broken or not zone.intersects(block.rect()) or exclude.has(block.get_rid()):
+			continue
+		if block is CityBlock:
+			(block as CityBlock).hit(damage)
+		else:
+			block.smash()
+
+
+## Coup de poing contré par une attaque légère : explosion au poing (celui qui contre est épargné,
+## le mecha s'use), gros ralenti, le mecha est repoussé et ne frappe plus un moment.
+func _counter_punch(mecha: Mecha, counterer: Fighter, zone: Rect2) -> void:
+	counterer.mark_attack_hit()
+	var fist := Vector2(zone.end.x if mecha.facing > 0.0 else zone.position.x, zone.get_center().y)
+	_spawn_clash_mark(fist, true, PARRY_COLOR)
+	_count_counter(true, [counterer])
+	counterer.recover()
+	counterer.reset_cooldown()
+	mecha.parried(Vector2(-mecha.facing, -0.25).normalized() * MECHA_PARRY_PUSH)
+	var by := mecha.pilot.player_index if mecha.pilot != null else -1
+	_explode(fist, PUNCH_COUNTER_KNOCKBACK, PUNCH_COUNTER_RADIUS, 0, counterer.player_index, [counterer])
+	_wear_mecha(mecha, MECHA_WEAR_PUNCH_COUNTERED, false)
+	if not _is_online_guest():
+		_break_focus.clear()
+		_break_focus.append(counterer)
+		if by >= 0:
+			_break_focus.append(fighters[by])
+		_break_slowmo = _time_engine.play(PUNCH_COUNTER_TIME_SCALE, PUNCH_COUNTER_SLOWMO, false)
 
 
 ## Les tirs s'annulent, comme les coups qui se croisent : deux balles de joueurs différents qui se
@@ -2164,6 +2240,35 @@ func _rect_distance(rect: Rect2, point: Vector2) -> float:
 ## Le mecha appelé se pose : onde de choc. Celui qui est dessous est écrasé (comme sous un gros
 ## morceau), les autres autour sont repoussés, les blocs dans le rayon s'abîment, les objets volent.
 ## Celui qui l'a appelé n'est pas touché.
+## Retombé de haut (pas l'arrivée) : onde de choc, plus grosse s'il tombait vite. Elle repousse
+## ceux qui sont à pied (sans les sonner), abîme les blocs autour et fait voler les objets.
+func _on_mecha_stomped(mecha: Mecha, power: float) -> void:
+	var center := mecha.global_position
+	var radius := lerpf(STOMP_RADIUS[0], STOMP_RADIUS[1], power)
+	_shake_left = SHAKE_TIME
+	_spawn_explosion(center, Color(0.85, 0.8, 0.7))
+	var body := mecha.body_rect()
+	var feet := Rect2(body.position.x, body.end.y - 10.0, body.size.x, 40.0)  # ce qu'il a sous les pieds : abîmé par sa chute (voir Mecha._stomp)
+	for window in map.windows_near(Rect2(center, Vector2.ZERO).grow(radius)):
+		var r := window.rect()
+		if window.broken or r.intersects(feet) or center.clamp(r.position, r.end).distance_to(center) > radius:
+			continue
+		if window is CityBlock:
+			(window as CityBlock).hit(STOMP_BLOCK_DAMAGE)
+		else:
+			window.smash()
+	for loose: Node2D in _loose_objects():
+		var away := loose.position - center
+		if away.length() <= radius:
+			loose.launch(((away.normalized() if away.length() > 1.0 else Vector2.UP) + Vector2(0.0, -0.6)).normalized() * LOOSE_BLAST_SPEED)
+	for fighter in fighters:
+		if fighter == mecha.pilot or fighter.eliminated or fighter.is_piloting() or fighter.is_invincible():
+			continue
+		if _rect_distance(fighter.body_rect(), center) <= radius:
+			var side := signf(fighter.global_position.x - center.x)
+			fighter.blast_push(Vector2(side if side != 0.0 else 1.0, -0.5).normalized(), lerpf(STOMP_PUSH[0], STOMP_PUSH[1], power))
+
+
 func _on_mecha_landed(mecha: Mecha) -> void:
 	var center := mecha.global_position
 	_shake_left = SHAKE_TIME

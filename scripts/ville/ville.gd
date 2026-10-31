@@ -57,7 +57,7 @@ const THIN_WALL_HP := 5             ## ... et un PV de moins
 const WINDOW_CHANCE := 0.15         ## un pan de mur plein sur 7 a une fenêtre (le bloc du milieu, en verre)
 const WINDOW_HP := 1                ## une fenêtre casse au premier coup
 const WINDOW_COLOR := "#9fd3ea"
-const BARRELS := 30                 ## tonneaux explosifs posés au hasard dans les immeubles
+const BARRELS := 18                 ## tonneaux explosifs posés au hasard dans les immeubles
 const BLOCK_HP := 6                 ## PV d'un bloc (une attaque légère : 1, une lourde : 3)
 
 static var _next_id := 0

@@ -19,6 +19,7 @@ var sprint_held := false    ## course maintenue (LT / Shift)
 var item_pressed := false   ## objet (RT) appuyé cette frame : tirer au pistolet, lever le bouclier...
 var item_held := false      ## objet maintenu : la grenade est dégoupillée tant qu'on garde
 var throw_pressed := false  ## lancer son arme (RB) appuyé cette frame
+var throw_held := false     ## RB maintenu (en mecha : on charge le coup de poing)
 var ultimate_pressed := false  ## X + Y appuyés ensemble cette frame : l'attaque ultime (si sa jauge est pleine)
 
 
@@ -27,7 +28,7 @@ func to_dict() -> Dictionary:
 		"sx": stick.x, "sy": stick.y, "dp": down_pressed,
 		"j": jump_pressed, "jh": jump_held, "a": attack_pressed, "aa": aimed_attack_pressed,
 		"ax": aim.x, "ay": aim.y, "h": heavy_pressed, "hh": heavy_held, "d": dash_pressed,
-		"b": block_held, "r": sprint_held, "o": item_pressed, "oh": item_held, "t": throw_pressed, "u": ultimate_pressed,
+		"b": block_held, "r": sprint_held, "o": item_pressed, "oh": item_held, "t": throw_pressed, "th": throw_held, "u": ultimate_pressed,
 	}
 
 
@@ -48,5 +49,6 @@ static func from_dict(data: Dictionary) -> InputState:
 	s.item_pressed = data.get("o", false)
 	s.item_held = data.get("oh", false)
 	s.throw_pressed = data.get("t", false)
+	s.throw_held = data.get("th", false)
 	s.ultimate_pressed = data.get("u", false)
 	return s

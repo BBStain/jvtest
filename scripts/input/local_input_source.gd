@@ -36,6 +36,7 @@ func poll() -> InputState:
 	s.item_pressed = Input.is_action_just_pressed(_prefix + "item")
 	s.item_held = Input.is_action_pressed(_prefix + "item")
 	s.throw_pressed = Input.is_action_just_pressed(_prefix + "throw")
+	s.throw_held = Input.is_action_pressed(_prefix + "throw")
 	# X + Y ensemble (l'un vient d'être appuyé pendant que l'autre est tenu) : l'attaque ultime.
 	s.ultimate_pressed = (s.attack_pressed and s.heavy_held) or (s.heavy_pressed and Input.is_action_pressed(_prefix + "attack"))
 	return s

@@ -1734,10 +1734,11 @@ func _ready() -> void:
 	game._weapon_spawn_timer = 1e9
 	var knight: Fighter = game.fighters[0]
 	var walker: Fighter = game.fighters[1]
-	var kcmd := {"b": false, "rb": false, "u": false, "rt": false}
+	var kcmd := {"b": false, "rb": false, "rbh": false, "u": false, "rt": false}
 	knight.input_source = Scripted.new(func(s, f):
 		s.block_held = kcmd.b
 		s.throw_pressed = kcmd.rb
+		s.throw_held = kcmd.rbh
 		s.ultimate_pressed = kcmd.u
 		s.attack_pressed = kcmd.u
 		s.heavy_pressed = kcmd.u
@@ -1850,9 +1851,72 @@ func _ready() -> void:
 	kcmd.rb = true
 	await step(15)
 	check(rival.hp == rival_hp - Game.MECHA_WEAR_PUNCH, "Ville : le coup de poing use l'autre mecha de 3 (%d -> %d)" % [rival_hp, rival.hp])
-	# Missiles (objet, RT en mecha) : on ne les prend qu'en mecha ; 4 missiles suivent l'ennemi
+	# RB gardé : le poing se charge et va plus loin
 	walker.leave_mecha()
 	rival.queue_free()
+	await step(60)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.velocity = Vector2.ZERO
+	walker.global_position = Vector2(guard.body_rect().end.x + 260.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	await step(3)
+	kcmd.rb = true
+	kcmd.rbh = true
+	await step(50)
+	var charging_seen := guard.is_punch_charging()
+	kcmd.rbh = false
+	await step(8)
+	check(charging_seen and guard.punch_reach > 250.0 and walker.is_stunned(),
+		"Ville : RB gardé, le coup de poing chargé va plus loin (%.0f px) et touche" % guard.punch_reach)
+	# Le poing ne traverse pas un mur qui tient ; chargé à fond, il le casse et continue
+	await step(150)
+	var punch_wall_x: float = Ville.building_lefts()[5]  # (pas celui du test du canon laser, plus bas)
+	var punch_y: float = -Ville.FLOOR_HEIGHT * 0.5
+	var punch_home := guard.global_position
+	var punch_results := []
+	for power in [0.0, 1.0]:
+		var punch_block: CityBlock = null
+		for w in game.map.windows():
+			if w is CityBlock and not w.broken and w.rect().has_point(Vector2(punch_wall_x + 10.0, punch_y)):
+				punch_block = w
+		if punch_block == null:
+			punch_results.append("pas de mur")
+			continue
+		punch_block.hp = punch_block.max_hp
+		punch_block._lock = 0.0
+		guard.facing = 1.0
+		guard.global_position = Vector2(punch_wall_x - Mecha.BODY.x / 2.0 - 40.0, punch_y - Mecha.PUNCH_Y)
+		guard.punch_power = power
+		guard.punch_reach = lerpf(Mecha.PUNCH_REACH[0], Mecha.PUNCH_REACH[1], power)
+		guard.punch_hit.clear()
+		guard._punch_time = Mecha.PUNCH_STARTUP
+		game._resolve_punches()
+		punch_results.append([roundi(guard.punch_reach), punch_block.broken, punch_block.hp])
+		guard._punch_time = -1.0
+	guard.global_position = punch_home
+	guard.velocity = Vector2.ZERO
+	check(punch_results.size() == 2 and punch_results[0] is Array and punch_results[0][0] < 60 and not punch_results[0][1]
+		and punch_results[1] is Array and punch_results[1][1] and punch_results[1][0] > 100,
+		"Ville : le poing s'arrête sur un mur qui tient, chargé il le casse et continue (%s)" % [punch_results])
+	# Contré par une attaque légère : explosion au poing, gros ralenti, le mecha s'use
+	await step(60)
+	walker_at_mecha.call()
+	await step(3)
+	game.gauge.points = 0.0
+	var hp_countered := guard.hp
+	kcmd.rb = true
+	for i in int((Mecha.PUNCH_STARTUP + Mecha.PUNCH_ACTIVE) * 60.0):
+		if guard.is_punch_active() or Engine.time_scale < 0.5:
+			break
+		light_now(walker, Vector2.LEFT)  # le coup léger est là quand le poing part
+		await step(1)
+	await step(1)
+	check(guard.hp <= hp_countered - Game.MECHA_WEAR_PUNCH_COUNTERED and untouched(walker) and game.gauge.points >= 3.0
+		and Engine.time_scale < 0.5,
+		"Ville : coup de poing contré par une attaque légère : explosion, gros ralenti, le mecha s'use (%d -> %d, ralenti x%.2f)" % [hp_countered, guard.hp, Engine.time_scale])
+	await shot("ville_mecha_poing_contre")
+	await step(120)
+	# Missiles (objet, RT en mecha) : on ne les prend qu'en mecha ; 4 missiles suivent l'ennemi
 	await step(2)
 	walker.recover()
 	walker._invincible_timer = 0.0
@@ -4540,9 +4604,20 @@ func _ready() -> void:
 	bump_m1.velocity = Vector2.ZERO
 	await step(60)
 	var high_worn := high_under.filter(func(w): return w.broken or w.hp < w.max_hp).size()
+	# ... et son onde de choc repousse celui qui est à pied à côté
+	p2.leave_mecha()
+	await step(30)
+	p2.recover()
+	p2._invincible_timer = 0.0
+	p2.global_position = Vector2(bump_m1.global_position.x + Mecha.BODY.x / 2.0 + 60.0, bump_m1.global_position.y - p2.stats.body_size.y / 2.0 - 1.0)
+	p2.velocity = Vector2.ZERO
 	bump_m1.global_position.y -= 700.0
 	bump_m1.velocity = Vector2.ZERO
-	await step(60)
+	var stomp_x := p2.global_position.x
+	await step(55)  # il retombe de 700 px
+	check(p2.global_position.x > stomp_x + 60.0 and untouched(p2),
+		"Collision : un mecha qui retombe de haut fait une onde de choc qui repousse (%.0f px)" % (p2.global_position.x - stomp_x))
+	await step(40)
 	check(high_under.size() > 0 and high_worn > 0 and high_under.any(func(w): return w.broken),
 		"Collision : un mecha qui retombe de haut abîme le toit, la 2e fois il le casse (%d blocs dessous)" % high_under.size())
 
