@@ -1786,6 +1786,16 @@ func is_stunned() -> bool:
 	return _stun_timer > 0.0
 
 
+## Soufflé par une explosion sans être touché (explosion de phase de la jauge) : juste poussé.
+func blast_push(dir: Vector2, knockback: float) -> void:
+	_leave_ladder()
+	_leave_vine()
+	_dash_timer = 0.0
+	velocity = _pushed(dir * knockback) + Vector2(0.0, -200.0)
+	_jump_rising = false
+	_knockback_timer = KNOCKBACK_TIME
+
+
 ## On a contré (ou fait un blocage parfait) : on n'est plus sonné.
 func recover() -> void:
 	_stun_timer = 0.0

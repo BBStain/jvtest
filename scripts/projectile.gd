@@ -49,7 +49,8 @@ var fuse := -1.0                        ## grenade : temps avant l'explosion
 var blast := 1.0                        ## grenade : force de l'explosion (plus elle a été chargée, plus fort)
 var age := 0.0
 var finished := false                   ## à retirer (balle arrivée dans un mur, grenade qui explose)
-var homing: Node2D                      ## missile : ce qu'il suit (un joueur à pied ou un mecha)
+var homing: Node2D                      ## missile ou roquette guidée : ce qu'il suit (un joueur à pied ou un mecha)
+var turn := MISSILE_TURN                ## ... en tournant au plus de tant de radians par seconde
 var shot_hits := 0                      ## roquette : balles adverses reçues en vol (3 = annulée)
 var weapon: WeaponStats                 ## lance ou arme : l'arme qu'on récupère en la ramassant...
 var counters := 0                       ## ... et son usure (voir Fighter.weapon_counters)
@@ -145,12 +146,12 @@ func _tick_rocket(delta: float) -> void:
 	if age > (MISSILE_LIFETIME if kind == "missile" else ROCKET_LIFETIME):
 		finished = true
 		return
-	if kind == "missile" and is_instance_valid(homing):
+	if is_instance_valid(homing):
 		# Il tourne petit à petit vers sa cible (on peut l'esquiver en changeant vite de direction)
 		var center: Vector2 = homing.body_rect().get_center() if homing.has_method("body_rect") else homing.global_position
 		var wanted := (center - position).angle()
-		var turn := clampf(wrapf(wanted - velocity.angle(), -PI, PI), -MISSILE_TURN * delta, MISSILE_TURN * delta)
-		velocity = velocity.rotated(turn)
+		var angle := clampf(wrapf(wanted - velocity.angle(), -PI, PI), -turn * delta, turn * delta)
+		velocity = velocity.rotated(angle)
 		step = velocity * delta
 	position += step
 	rotation = velocity.angle()

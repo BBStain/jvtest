@@ -1,6 +1,6 @@
 class_name LaserTrace
 extends Node2D
-## Le trait du canon laser d'un mecha : il apparaît d'un coup (le tir est instantané) et s'efface vite.
+## Le trait du canon laser d'un mecha : il s'allonge (game.gd le fait avancer), puis s'efface vite.
 
 const LIFETIME := 0.25
 
@@ -8,6 +8,12 @@ var from := Vector2.ZERO                ## dans la map
 var to := Vector2.ZERO
 var width := 14.0
 var _age := 0.0
+
+
+## Le rayon avance encore : il reste bien visible.
+func restart() -> void:
+	_age = 0.0
+	queue_redraw()
 
 
 func _process(delta: float) -> void:
