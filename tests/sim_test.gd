@@ -1047,6 +1047,50 @@ func _ready() -> void:
 	check(v_second.broken, "Ville : l'explosion d'un tonneau fait sauter le tonneau d'à côté")
 	check(barrel_victim.is_stunned() or barrel_victim.lives < GameSetup.lives, "Ville : l'explosion d'un tonneau touche le joueur à côté")
 	await shot("ville_tonneau")
+	# Ville : une lance ou une flèche qui ne casse pas le mur s'y plante (avant, elle le traversait).
+	# Si le coup casse le bloc (1 PV restant, une vitre...), elle continue.
+	var wall_space: PhysicsDirectSpaceState2D = game.get_world_2d().direct_space_state
+	var wall_targets: Array = []
+	for wall_block in v_city_blocks:
+		if wall_block is ExplosiveBarrel or wall_block.one_way or wall_block.broken or wall_block.max_hp < 5 or wall_block.size.y < wall_block.size.x:
+			continue
+		var wall_mid: Vector2 = wall_block.rect().get_center()
+		if game.fighters.any(func(fi): return fi.global_position.distance_to(wall_mid) < 800.0):
+			continue
+		var wall_query := PhysicsRayQueryParameters2D.create(wall_mid - Vector2(220.0, 0.0), wall_mid, 1)
+		var wall_hit: Dictionary = wall_space.intersect_ray(wall_query)
+		if not wall_hit.is_empty() and wall_hit.collider == wall_block:
+			wall_targets.append(wall_block)
+		if wall_targets.size() == 3:
+			break
+	var wall_results := []
+	for wall_i in wall_targets.size():
+		var wall_block: CityBlock = wall_targets[wall_i]
+		var wall_hp_before := wall_block.hp
+		if wall_i == 2:
+			wall_block.hp = 1  # le dernier PV : la lance casse le bloc et passe
+			wall_hp_before = 1
+		var thrown := Projectile.new()
+		thrown.kind = "fleche" if wall_i == 1 else "lance"
+		thrown.length = Projectile.ARROW_LENGTH if wall_i == 1 else Projectile.SPEAR_LENGTH
+		thrown.owner_index = 0
+		thrown.position = wall_block.rect().get_center() - Vector2(180.0, 0.0)
+		thrown.velocity = Vector2(1400.0, 0.0)
+		game._add_projectile(thrown)
+		for i in 30:
+			await step(1)
+			if not is_instance_valid(thrown) or thrown.state == Projectile.State.STUCK or wall_block.broken:
+				break
+		var stuck_in := is_instance_valid(thrown) and thrown.state == Projectile.State.STUCK \
+				and wall_block.rect().grow(10.0).has_point(thrown.tip())
+		if wall_i == 2:
+			wall_results.append(wall_block.broken and not stuck_in)
+		else:
+			wall_results.append(stuck_in and not wall_block.broken and wall_block.hp == wall_hp_before - 1)
+		if is_instance_valid(thrown) and thrown in game.projectiles:
+			game._remove_projectile(thrown)
+	check(wall_targets.size() == 3 and not false in wall_results,
+		"Ville : lance et flèche se plantent dans un mur qui tient, et passent s'il casse (%s)" % [wall_results])
 	Ville.variety = false
 	# Ville : beaucoup d'objets et d'armes, dans les immeubles et partout, qui se posent tous
 	GameSetup.map_path = GameSetup.VILLE_MAP

@@ -92,8 +92,11 @@ func _tick_spear(delta: float) -> void:
 	var step := velocity * delta
 	var hit := _ray(position, tip() + step, velocity.y > 0.0)
 	if state == State.FLYING and not hit.is_empty() and hit.collider is BreakableWindow:
-		(hit.collider as BreakableWindow).smash()  # la lance casse la fenêtre et passe au travers
-		hit = {}
+		# La lance casse la fenêtre et passe au travers. Un bloc de la Ville perd 1 PV : s'il
+		# tient encore, elle s'y plante (avant, elle traversait les murs sans les casser).
+		var window := hit.collider as BreakableWindow
+		if window.smash() or not window is CityBlock:
+			hit = {}
 	if not hit.is_empty():
 		position += (hit.position as Vector2) - tip()
 		velocity = Vector2.ZERO
@@ -166,8 +169,10 @@ func _tick_grenade(delta: float) -> void:
 	var vine := _vine_crossed(position, position + step)
 	var hit := _ray(position, position + step + step.normalized() * RADIUS, velocity.y > 0.0)
 	if not hit.is_empty() and hit.collider is BreakableWindow and velocity.length() > GRENADE_WINDOW_BREAK:
-		(hit.collider as BreakableWindow).smash()  # trop vite : la fenêtre casse, la grenade continue
-		hit = {}
+		# Trop vite : la fenêtre casse, la grenade continue. Un bloc de la Ville qui tient encore la colle.
+		var window := hit.collider as BreakableWindow
+		if window.smash() or not window is CityBlock:
+			hit = {}
 	if not vine.is_empty() and (hit.is_empty() or position.distance_to(vine.point) < position.distance_to(hit.position)):
 		position = vine.point
 		stuck_vine = vine.vine
