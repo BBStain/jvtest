@@ -31,6 +31,12 @@ func _ready() -> void:
 	add_to_group("lianes")
 
 
+## Le point de la liane (dans la map) à "distance" pixels de son point d'accroche, là où elle est
+## en ce moment (elle se balance).
+func point_at(distance: float) -> Vector2:
+	return global_position + Vector2(sin(_angle), cos(_angle)) * distance
+
+
 ## Le bas de la liane quand elle pend droit (dans la map).
 func bottom() -> Vector2:
 	return global_position + Vector2(0.0, length)

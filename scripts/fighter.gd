@@ -12,9 +12,14 @@ extends CharacterBody2D
 
 signal life_lost(fighter: Fighter)
 signal weapon_thrown(fighter: Fighter, direction: Vector2, speed: float)  ## lance : game.gd crée la lance qui vole
+signal arrow_shot(fighter: Fighter, direction: Vector2, speed: float, knockback: float)  ## arc : game.gd crée la flèche
+signal weapon_tossed(fighter: Fighter)  ## RB : on lance son arme (sans dégâts), game.gd la fait voler
 ## Un objet utilisé (balle tirée, grenade lancée ou lâchée) : game.gd crée ce qui vole.
 ## power : 0 à 1 (distance de la grenade) ; fuse : temps restant avant que la grenade explose.
 signal item_used(fighter: Fighter, kind: String, direction: Vector2, power: float, fuse: float)
+signal item_tossed(fighter: Fighter, kind: String, ammo: int)  ## RB avec une arme à 2 mains : game.gd la fait voler (objet par terre)
+signal grapple_parried(fighter: Fighter, by: Fighter)  ## notre grappin arrive sur un blocage parfait
+signal ultimate_used(fighter: Fighter)  ## X + Y avec la jauge d'ultime pleine : game.gd lance l'attaque ultime du perso
 
 const PLATFORM_LAYER := 3  ## numéro de la couche "plateformes_traversables"
 
@@ -79,21 +84,52 @@ const KATANA_DASH_REACH := 0.8          ## la lame dépasse du perso de 0,8 fois
 const SLAM_WAVE_TIME := 0.12            ## marteau : durée de l'onde de choc après l'arc
 const SLAM_WAVE_REACH := 150.0          ## ... jusqu'où elle va de chaque côté (x1,6 à pleine charge)
 const SLAM_WAVE_RADIUS := 14.0          ## ... sa hauteur (de chaque côté du sol)
-const WEAPON_MAX_COUNTERS := 3         ## lourde d'une arme contrée 3 fois : arme cassée jusqu'à la prochaine vie perdue
+const WEAPON_MAX_COUNTERS := 3         ## lourde d'une arme contrée 3 fois : arme cassée pour de bon
 const WEAPON_SHRINK := 0.2              ## chaque contre rapetisse l'arme de 20 % (100 %, 80 %, 60 %)
 const WEAPON_REPAIR_COUNTERS := 2       ## contrer 2 fois avec le coup léger de son arme la répare d'un cran
 const WEAPON_REPAIR_FLASH := 0.5        ## arme réparée : un anneau de sa couleur apparaît ce temps
 const THROW_CHARGE_SPEED := 1.5         ## lance / dash du katana : à pleine charge, 1,5 fois plus vite
+const SWING_TILT := 25.0                ## nunchaku : le coup part 25° plus bas (ou plus haut) que l'adversaire...
+const SWING_PUSH_SIDE := 0.5            ## ... et projette surtout vers le bas (ou le haut), un peu vers l'avant
+const BURST_HITS := 3                   ## nunchaku : la lourde est une rafale de 3 coups...
+const BURST_HIT_TIME := 0.12            ## ... un toutes les 0,12 s (chacun peut toucher)
+const BURST_CHARGE_REACH := 1.8         ## ... à pleine charge, ils vont 1,8 fois plus loin
+const ARROW_CHARGE_SPEED := 1.8         ## arc : à pleine charge, la flèche part 1,8 fois plus vite (donc plus loin)
+const ARROWS_MAX := 5                   ## arc : 5 flèches ; il faut aller les ramasser (seul celui qui tient cet arc le peut)
 
 # --- Objets ramassés sur la map (un seul à la fois, utilisé avec RT ; voir item_pickup.gd) ---
 const PISTOL_AMMO := 5                  ## balles du pistolet (une par appui)
 const PISTOL_COOLDOWN := 0.18           ## temps minimum entre deux balles
+## Ville : fusil d'assaut et lance-roquette sont des objets à 2 MAINS : tant qu'on les tient, plus
+## d'attaque X / Y (ni d'ultime) ; RB les jette par terre pour reprendre son arme. Vides, ils disparaissent.
+const TWO_HANDED_ITEMS := ["fusil", "lance_roquette"]
+const RIFLE_AMMO := 30                  ## fusil d'assaut : 30 balles, par rafales de 3 (RT)
+const RIFLE_BURST := 3
+const RIFLE_GAP := 0.07                 ## entre deux balles d'une rafale
+const RIFLE_COOLDOWN := 0.4             ## entre deux rafales
+const RIFLE_BULLET_SPEED := 1.25        ## ses balles vont 1,25 fois plus vite que celles du pistolet
+const LAUNCHER_BLAST := 1.8             ## lance-roquette : UNE roquette, plus violente qu'une roquette de mecha chargée à fond (1)
 const GRENADE_FUSE := 3.0               ## la grenade explose 3 s après avoir été dégoupillée (RT appuyé)
 const GRENADE_FULL_HOLD := 1.0          ## RT gardé ce temps : la grenade part le plus loin possible
 const ITEM_SHIELD_TIME := 5.0           ## le bouclier ramassé reste levé 5 s
 const ITEM_SHIELD_PUSH := 1300.0        ## qui frappe le bouclier ramassé est projeté très loin...
 const ITEM_SHIELD_COOLDOWN := 0.5       ## ... et ne peut plus frapper un instant
 const ITEM_FLASH_TIME := 0.4            ## objet ramassé : un anneau de sa couleur apparaît ce temps
+const GRAPPLE_USES := 3                 ## le grappin sert 3 fois
+const GRAPPLE_SPEED := 2400.0           ## vitesse du crochet, qui part toujours vers l'adversaire le plus proche
+const GRAPPLE_RANGE := 900.0            ## au-delà, il revient sans rien accrocher (un mur l'arrête aussi)
+const GRAPPLE_PULL := 1300.0            ## vitesse à laquelle la corde tire
+const GRAPPLE_MAX_TIME := 1.2           ## on ne reste pas accroché plus longtemps
+const GRAPPLE_ARRIVE := 70.0            ## les deux sont arrivés l'un contre l'autre : la corde se décroche...
+const GRAPPLE_ARRIVE_KEEP := 0.4        ## ... et celui qui était tiré garde 40 % de son élan
+const GRAPPLE_FLING_TIME := 0.35        ## corde lâchée en route : celui qui était tiré garde tout son élan ce temps
+enum Grapple { NONE, FLYING, PULL_SELF, PULL_THEM }
+
+# --- Ville : piloter un mecha (voir scripts/ville/mecha.gd) ---
+const MECHA_BOARD_STICK := 0.5          ## collé à un mecha vide, stick vers le haut au-delà de ça : on monte dedans
+const MECHA_REBOARD_TIME := 0.6         ## juste après être sorti, on ne remonte pas tout de suite
+const MECHA_EXIT_LIFT := 750.0          ## en sortant, on saute par le haut du mecha
+const MECHA_EJECT_SPEED := 1100.0       ## mecha détruit : le pilote est éjecté vers le haut, sonné
 
 # --- Blocage (B) : un bouclier qui craque peu à peu (ses points sont dans les stats du perso) ---
 const SHIELD_REGEN_TIME := 2.0          ## 1 point regagné toutes les 2 s quand on ne bloque pas
@@ -107,6 +143,35 @@ const SHIELD_HIT_PUSH := 380.0          ## l'attaquant qui frappe le bouclier es
 const SHIELD_BLOCKER_PUSH := 120.0      ## celui qui bloque recule un tout petit peu
 const PARRY_WINDOW := 0.15              ## blocage parfait : B appuyé au plus tant de secondes avant le coup...
 const PARRY_COOLDOWN := 1.0             ## ... c'est un contre : celui qui frappait ne frappe plus pendant 1 s
+
+# --- Attaque ultime : chaque perso a sa jauge, remplie par SES contres ---
+const ULTIMATE_POINTS := 20             ## 20 contres pour remplir la jauge d'ultime...
+const ULTIMATE_HEAVY_POINTS := 2        ## ... contrer une attaque lourde compte double
+const ULTIMATE_FLASH_TIME := 0.5        ## ultime lancée : une onde blanche part du perso
+const ULTIMATE_PARTICLES := 18          ## l'aura autour du perso : jusqu'à 18 particules (jauge pleine)
+const LASER_STARTUP := 0.3              ## Barre : le laser se prépare (fin trait bleu vers l'adversaire)...
+const LASER_ACTIVE := 0.25              ## ... puis tire : il gèle tous ceux qu'il traverse pendant ce temps
+const LASER_RANGE := 1400.0             ## il va jusque-là, ou jusqu'au premier mur
+const LASER_RADIUS := 10.0              ## demi-épaisseur du rayon
+const LASER_COLOR := Color(0.35, 0.7, 1.0)
+const WAVE_STARTUP := 0.25              ## Jumb : il se ramasse, un cercle se forme autour de lui...
+const WAVE_ACTIVE := 0.3                ## ... puis le cercle s'ouvre : il frappe tous ceux qu'il atteint...
+const WAVE_START_RADIUS := 40.0
+const WAVE_RADIUS := 280.0              ## ... jusqu'à cette distance du centre de Jumb
+const WAVE_KNOCKBACK := 1700.0          ## ... et les projette très loin (vers l'extérieur, un peu vers le haut)
+const WAVE_LIFT := 0.35
+const WAVE_COLOR := Color(1.0, 0.62, 0.25)
+const BOLT_STARTUP := 0.15              ## Jib : un éclair jaune l'entoure...
+const BOLT_PASSES := 3                  ## ... puis il fonce 3 fois à travers l'adversaire...
+const BOLT_PASS_TIME := 0.12            ## ... chaque traversée dure ce temps...
+const BOLT_GAP := 0.08                  ## ... avec un petit arrêt entre deux (il vise à nouveau)
+const BOLT_OVERSHOOT := 140.0           ## il ressort de l'autre côté de l'adversaire de cette distance
+const BOLT_SPEED_MIN := 1500.0
+const BOLT_SPEED_MAX := 4200.0          ## (un adversaire très loin n'est pas forcément rattrapé)
+const BOLT_REACH := 14.0                ## chaque traversée frappe ceux qu'elle touche (corps de Jib élargi de ça)
+const BOLT_KNOCKBACK := 650.0
+const BOLT_COLOR := Color(1.0, 0.92, 0.3)
+const FREEZE_TIME := 3.0                ## gelé par le laser : ni bouger ni attaquer pendant 3 s ; le coup suivant fait perdre une vie
 
 # --- Effets de la jauge de contre (une seule pour toute la partie, voir counter_gauge.gd) ---
 const PHASE_COOLDOWN := [1.0, 0.7, 0.45, 0.35]  ## recharge des attaques selon la phase (0,5 = 2 fois plus courte)
@@ -133,6 +198,7 @@ const KNOCKBACK_TIME := 0.2             ## durée pendant laquelle on contrôle 
 const KNOCKBACK_ACCEL := 2000.0
 
 const START_LIVES := 3
+const MAX_LIVES := 10                  ## l'objet « vie » ne fait pas monter au-delà
 
 ## Jeu en ligne : ce que l'hôte envoie aux copains à chaque frame pour qu'ils dessinent ce joueur
 ## (voir net_state). Tout ce que _draw() utilise doit être dans cette liste.
@@ -142,14 +208,26 @@ const NET_VARS := [
 	"stamina", "_exhausted", "_sprinting", "_stamina_show_timer",
 	"shield", "shield_broken", "_blocking", "_shield_broken_timer", "_shield_flash_timer",
 	"_invincible_timer", "_lives_show_timer", "_blink_clock", "_dash_timer", "_dash_dir", "_wall_normal_x",
-	"_stun_timer", "_block_hold_time", "weapon_away", "weapon_counters",
+	"_stun_timer", "_block_hold_time", "weapon_id", "weapon_away", "weapon_counters",
 	"item", "item_ammo", "_grenade_fuse", "_grenade_hold", "item_shield_timer",
-	"_swinging", "_swing_anchor", "_item_flash_timer", "_repair_flash_timer",
+	"_swinging", "_swing_anchor", "_swing_up", "arrows", "grapple_mode", "grapple_point", "_item_flash_timer", "_item_flash_kind", "_repair_flash_timer",
+	"ultimate_points", "_ultimate_flash_timer", "_laser_time", "_laser_dir", "_laser_length", "_frozen_timer", "_wave_time", "_bolt_time", "_bolt_dir",
 ]
 const LIVES_SHOW_TIME := 2.0            ## durée d'affichage des vies au-dessus de la tête
 
 var stats: CharacterStats = CharacterStats.new()  ## le personnage joué, avec son arme en main (choisi par game.gd)
 var weapon: WeaponStats = WeaponStats.new()       ## l'arme choisie (choisie par game.gd ; mains nues par défaut)
+## L'arme en jeu en ligne : son fichier (l'hôte l'envoie, un copain la change s'il en a ramassé une autre).
+var weapon_id: String:
+	get:
+		return weapon.resource_path
+	set(value):
+		if value == "" or value == weapon.resource_path:
+			return
+		weapon = load(value) as WeaponStats
+		if _armed_stats != null:
+			_update_armed_stats()
+			stats = _bare_stats if weapon_away else _armed_stats
 ## Lance lancée et pas encore ramassée : on se bat à mains nues en attendant.
 var weapon_away := false:
 	set(value):
@@ -207,6 +285,10 @@ var _dash_dir := Vector2.RIGHT
 var _attack_time := -1.0                ## temps écoulé depuis le début de l'attaque (-1 = pas d'attaque)
 var _attack_dir := Vector2.RIGHT
 var _attack_has_hit := false
+var _swing_up := true                   ## nunchaku : le dernier coup allait vers le haut (le prochain ira vers le bas)
+var arrows := ARROWS_MAX                ## arc : flèches qui restent dans l'arc (elles suivent l'arc s'il change de main)
+var bow_id := 0                         ## arc : de quel arc il s'agit (ses flèches ne se ramassent qu'avec lui)
+var _burst_index := 0                   ## nunchaku : quel coup de la rafale est en cours
 var _attack_heavy := false              ## true = attaque lourde en cours
 var _attack_cooldown_timer := 0.0
 var _attack_buffer_timer := 0.0
@@ -231,17 +313,45 @@ var _shield_regen_timer := 0.0
 var _shield_broken_timer := 0.0         ## pour l'effet visuel du bouclier cassé
 var _shield_flash_timer := 0.0          ## petit éclat quand le bouclier encaisse un coup
 
-var item := ""                          ## l'objet ramassé : "", "pistolet", "grenade" ou "bouclier"
-var item_ammo := 0                      ## balles qui restent dans le pistolet
+var item := ""                          ## l'objet ramassé : "", "pistolet", "grenade", "bouclier", "vie", "grappin" ou "balise" (Ville)
+var item_ammo := 0                      ## balles qui restent dans le pistolet (ou lancers du grappin)
 var item_shield_timer := 0.0            ## bouclier ramassé levé encore ce temps
 var _item_cooldown := 0.0
+var _rifle_burst_left := 0               ## balles de la rafale en cours qui restent à partir
+var _rifle_gap_timer := 0.0              ## avant la balle suivante de la rafale
 var _grenade_fuse := -1.0               ## grenade dégoupillée en main : temps avant l'explosion (-1 = non)
 var _grenade_hold := 0.0                ## depuis combien de temps RT est gardé (distance du lancer)
-var _item_flash_timer := 0.0            ## > 0 juste après avoir ramassé un objet
+var _item_flash_timer := 0.0            ## > 0 juste après avoir ramassé un objet (ou pris une vie)
+var _item_flash_kind := ""              ## l'objet de cet anneau (pour sa couleur)
 var _repair_flash_timer := 0.0          ## > 0 juste après que son arme a été réparée
+var grapple_mode := Grapple.NONE       ## grappin : crochet qui vole, ou corde qui tire (nous ou l'autre)
+var grapple_point := Vector2.ZERO       ## où est le crochet (dans la map)
+var _grapple_target: Fighter            ## celui que le crochet vise / a accroché
+var _grapple_target_lives := 0          ## s'il perd une vie, la corde se décroche
+var _grapple_tap := false               ## RT lâché avant que le crochet accroche : c'est nous qui sommes tirés
+var _grapple_time := 0.0
+var _grapple_dist := 0.0
+var _grappled_by: Fighter               ## celui dont la corde nous tire vers lui
 var _repair_counters := 0               ## contres au coup léger depuis la dernière réparation (voir weapon_light_counter)
 
+var mecha: Mecha = null                 ## Ville : le mecha qu'on pilote (null = à pied)
+var _mecha_reboard_timer := 0.0
+
 var gauge := CounterGauge.new()         ## la jauge de contre de la partie (partagée, donnée par game.gd)
+var ultimate_points := 0                ## la jauge d'ultime de ce joueur (pleine à ULTIMATE_POINTS)
+var _ultimate_flash_timer := 0.0        ## > 0 juste après avoir lancé son ultime
+var _laser_time := -1.0                 ## Barre : temps depuis le début du laser (-1 = pas de laser)
+var _laser_dir := Vector2.RIGHT
+var _laser_length := LASER_RANGE        ## jusqu'au premier mur
+var laser_frozen: Array[Fighter] = []   ## ceux que ce laser a déjà touchés (une fois chacun)
+var _frozen_timer := 0.0                ## > 0 : gelé par un laser
+var _wave_time := -1.0                  ## Jumb : temps depuis le début de l'onde de choc (-1 = pas d'onde)
+var wave_hit: Array[Fighter] = []       ## ceux que cette onde a déjà frappés (une fois chacun)
+var _bolt_time := -1.0                  ## Jib : temps depuis le début de l'éclair (-1 = pas d'éclair)
+var _bolt_pass := -1                    ## quelle traversée est en cours (pour viser au début de chacune)
+var _bolt_dir := Vector2.RIGHT
+var _bolt_speed := BOLT_SPEED_MIN
+var bolt_hit: Array[Fighter] = []       ## ceux que la traversée en cours a déjà frappés
 
 var _stun_timer := 0.0
 var _invincible_timer := 0.0
@@ -279,6 +389,21 @@ func physics_tick(input: InputState, delta: float) -> void:
 	_tick_timers(delta)
 	if eliminated:
 		return
+	if mecha != null:
+		_tick_mecha(input, delta)
+		return
+	if is_frozen():
+		# Gelé : on ne fait plus rien, on tombe seulement si on était en l'air.
+		velocity.x = move_toward(velocity.x, 0.0, stats.ground_accel * delta)
+		velocity.y = minf(velocity.y + stats.gravity * delta, stats.max_fall_speed)
+		_blocking = false
+		_sprinting = false
+		_move()
+		queue_redraw()
+		return
+
+	if input.throw_pressed:
+		_toss_weapon()
 
 	var on_floor := is_on_floor()
 	if on_floor:
@@ -299,6 +424,14 @@ func physics_tick(input: InputState, delta: float) -> void:
 			_air_dashes_left = stats.air_dashes
 			_dash_cooldown_timer = 0.0
 			facing = _wall_normal_x
+
+	# Ville : "haut" en touchant un mecha vide pour monter dedans (pas sonné : il faut d'abord s'en sortir).
+	if input.stick.y < -MECHA_BOARD_STICK and _mecha_reboard_timer <= 0.0 and not is_stunned() \
+			and not is_attacking() and not is_dashing():
+		var empty := _touched_mecha()
+		if empty != null:
+			_board(empty)
+			return
 
 	# Échelle : "haut" en la touchant pour s'accrocher ; on monte tout seul (rien d'autre à faire).
 	if _ladder == null and _ladder_regrab_timer <= 0.0 and input.stick.y < -LADDER_GRAB_STICK \
@@ -347,8 +480,10 @@ func physics_tick(input: InputState, delta: float) -> void:
 		_tick_dash(delta)
 	elif is_katana_dashing():
 		velocity = _attack_dir * weapon.heavy_speed * lerpf(1.0, THROW_CHARGE_SPEED, _heavy_charge) * _move_mult()
-	elif is_heavy_swinging():
-		velocity = Vector2.ZERO  # immobilisé pendant la frappe lourde
+	elif is_bolt_passing():
+		velocity = _bolt_dir * _bolt_speed  # Jib : il fonce à travers l'adversaire
+	elif is_heavy_swinging() or is_ultimate_under_way():
+		velocity = Vector2.ZERO  # immobilisé pendant la frappe lourde (et pendant les ultimes)
 	else:
 		_tick_movement(input, on_floor, delta)
 
@@ -362,6 +497,8 @@ func physics_tick(input: InputState, delta: float) -> void:
 		_aimed_dir = input.aim.normalized()
 	if input.heavy_pressed:
 		_heavy_buffer_timer = ATTACK_BUFFER
+	if input.ultimate_pressed and can_use_ultimate():
+		_use_ultimate()
 	if not _blocking and can_attack():  # pas d'attaque en bloquant
 		if _attack_buffer_timer > 0.0:
 			_attack_buffer_timer = 0.0
@@ -371,7 +508,14 @@ func physics_tick(input: InputState, delta: float) -> void:
 			_heavy_buffer_timer = 0.0
 			_try_start_attack(true)
 	_tick_attack(input, delta)
+	_tick_laser(delta)
+	if _wave_time >= 0.0:
+		_wave_time += delta
+		if _wave_time >= WAVE_STARTUP + WAVE_ACTIVE:
+			_wave_time = -1.0
+	_tick_bolt(delta)
 	_tick_item(input, delta)
+	_apply_grapple_pull()
 
 	_move()
 	queue_redraw()
@@ -395,9 +539,12 @@ func _tick_timers(delta: float) -> void:
 	_ladder_regrab_timer -= delta
 	_ladder_fling_timer -= delta
 	_vine_regrab_timer -= delta
+	_mecha_reboard_timer -= delta
 	_item_cooldown -= delta
 	_item_flash_timer -= delta
 	_repair_flash_timer -= delta
+	_ultimate_flash_timer -= delta
+	_frozen_timer -= delta
 	item_shield_timer -= delta
 	_blink_clock += delta
 
@@ -456,8 +603,8 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 		speed *= stats.sprint_speed_mult
 	if _blocking:
 		speed *= BLOCK_SPEED_MULT
-	elif _heavy_charging:
-		speed *= stats.heavy_charge_move_mult
+	elif _heavy_charging and heavy_kind() != WeaponStats.Heavy.BURST:
+		speed *= stats.heavy_charge_move_mult  # (le nunchaku avance normalement en chargeant)
 	velocity.x = move_toward(velocity.x, input.stick.x * speed, accel * delta)
 
 	# Gravité (plus forte si on a lâché le saut pendant la montée d'un saut = petit saut).
@@ -497,18 +644,31 @@ func _tick_movement(input: InputState, on_floor: bool, delta: float) -> void:
 
 
 ## On ramasse un objet (seulement si on n'en a pas déjà un).
-func take_item(kind: String) -> bool:
-	if item != "":
-		return false
+## "ammo" : ce qu'il reste dans une arme à 2 mains jetée par un autre (-1 = neuve).
+func take_item(kind: String, ammo := -1) -> bool:
+	if item != "" or (mecha != null) != (kind == "missiles"):
+		return false  # en mecha, on ne prend que les missiles (et eux, seulement en mecha)
 	item = kind
 	item_ammo = PISTOL_AMMO if kind == "pistolet" else 0
+	if kind == "grappin":
+		item_ammo = GRAPPLE_USES
+	elif kind == "fusil":
+		item_ammo = RIFLE_AMMO
+	elif kind == "lance_roquette":
+		item_ammo = 1
+	if ammo >= 0 and kind in TWO_HANDED_ITEMS:
+		item_ammo = ammo
 	_item_flash_timer = ITEM_FLASH_TIME
+	_item_flash_kind = kind
 	return true
 
 
 ## RT : pistolet = une balle par appui ; grenade = dégoupillée à l'appui, lancée en lâchant
-## (plus on garde, plus elle va loin) ; bouclier = levé pour quelques secondes.
+## (plus on garde, plus elle va loin) ; bouclier = levé pour quelques secondes ; vie = une vie en plus.
 func _tick_item(input: InputState, delta: float) -> void:
+	if grapple_mode != Grapple.NONE:
+		_tick_grapple(input, delta)
+		return
 	if _grenade_fuse >= 0.0:
 		_grenade_fuse -= delta
 		_grenade_hold += delta
@@ -516,6 +676,12 @@ func _tick_item(input: InputState, delta: float) -> void:
 			_release_grenade(Vector2.ZERO, 0.0)  # gardée trop longtemps : elle explose en main
 		elif not input.item_held:
 			_release_grenade(_item_direction(), clampf(_grenade_hold / GRENADE_FULL_HOLD, 0.0, 1.0))
+		return
+	if _rifle_burst_left > 0:
+		# Rafale en cours : les balles partent seules, l'une après l'autre.
+		_rifle_gap_timer -= delta
+		if _rifle_gap_timer <= 0.0:
+			_fire_rifle_bullet()
 		return
 	if not input.item_pressed or _blocking or is_dashing():
 		return
@@ -533,6 +699,144 @@ func _tick_item(input: InputState, delta: float) -> void:
 		"bouclier":
 			item = ""
 			item_shield_timer = ITEM_SHIELD_TIME
+		"grappin":
+			if target != null and not target.eliminated:
+				item_ammo -= 1
+				grapple_mode = Grapple.FLYING
+				grapple_point = global_position
+				_grapple_target = target
+				_grapple_target_lives = target.lives
+				_grapple_tap = false
+				_grapple_time = 0.0
+				_grapple_dist = 0.0
+		"fusil":
+			if _item_cooldown <= 0.0:
+				_item_cooldown = RIFLE_COOLDOWN
+				_rifle_burst_left = mini(RIFLE_BURST, item_ammo)
+				_fire_rifle_bullet()
+		"lance_roquette":
+			if _item_cooldown <= 0.0:
+				item = ""
+				item_ammo = 0
+				item_used.emit(self, "roquette", _item_direction(), LAUNCHER_BLAST, 0.0)
+		"balise":
+			item = ""
+			item_used.emit(self, "balise", Vector2.ZERO, 0.0, 0.0)  # game.gd appelle le mecha
+		"vie":
+			if lives < MAX_LIVES:
+				item = ""
+				lives += 1
+				_item_flash_timer = ITEM_FLASH_TIME
+				_item_flash_kind = "vie"
+				show_lives()
+
+
+func _fire_rifle_bullet() -> void:
+	_rifle_burst_left -= 1
+	_rifle_gap_timer = RIFLE_GAP
+	item_ammo -= 1
+	if item_ammo <= 0:
+		item = ""  # chargeur vide : le fusil disparaît, on retrouve son arme
+		_rifle_burst_left = 0
+	item_used.emit(self, "balle", _item_direction(), RIFLE_BULLET_SPEED, 0.0)
+
+
+## Une arme à 2 mains (fusil d'assaut, lance-roquette) : plus d'attaque X / Y tant qu'on la tient.
+func has_two_handed_item() -> bool:
+	return item in TWO_HANDED_ITEMS
+
+
+## Grappin (RT) : le crochet file vers l'adversaire le plus proche. S'il l'accroche :
+##   RT déjà lâché (une petite pression) : la corde NOUS tire vers lui ; un 2e appui la lâche.
+##   RT encore gardé : la corde LE tire vers nous ; lâcher RT la décroche.
+## Corde lâchée en route, celui qui était tiré garde son élan (il est « jeté »). Les deux peuvent
+## frapper et bloquer pendant ce temps ; seul un blocage parfait à l'arrivée du crochet le contre.
+func _tick_grapple(input: InputState, delta: float) -> void:
+	var other := _grapple_target
+	if other == null or other.eliminated or other.lives != _grapple_target_lives:
+		_end_grapple(false)
+		return
+	_grapple_time += delta
+	match grapple_mode:
+		Grapple.FLYING:
+			if not input.item_held:
+				_grapple_tap = true
+			var next := grapple_point + (other.global_position - grapple_point).limit_length(GRAPPLE_SPEED * delta)
+			var wall := get_world_2d().direct_space_state.intersect_ray(
+				PhysicsRayQueryParameters2D.create(grapple_point, next, 1))
+			if not wall.is_empty():
+				_end_grapple(false)  # un mur entre les deux : le crochet ne passe pas
+				return
+			_grapple_dist += grapple_point.distance_to(next)
+			grapple_point = next
+			if other.body_rect().grow(8.0).has_point(grapple_point):
+				if other.is_parrying():
+					_end_grapple(false)
+					grapple_parried.emit(self, other)
+					return
+				_grapple_time = 0.0
+				if _grapple_tap:
+					grapple_mode = Grapple.PULL_SELF
+					_leave_ladder()
+					_leave_vine()
+				else:
+					grapple_mode = Grapple.PULL_THEM
+					other.grappled_by(self)
+			elif _grapple_dist > GRAPPLE_RANGE:
+				_end_grapple(false)
+		Grapple.PULL_SELF:
+			grapple_point = other.global_position
+			if input.item_pressed:
+				_end_grapple(true)  # 2e appui : on lâche la corde, on garde son élan
+				return
+			var to := other.global_position - global_position
+			if to.length() < GRAPPLE_ARRIVE or _grapple_time > GRAPPLE_MAX_TIME:
+				velocity *= GRAPPLE_ARRIVE_KEEP
+				_end_grapple(false)
+				return
+			velocity = to.normalized() * GRAPPLE_PULL
+			_jump_rising = false
+		Grapple.PULL_THEM:
+			grapple_point = other.global_position
+			if not input.item_held:
+				_end_grapple(true)  # RT lâché : la corde se décroche, il part sur son élan
+				return
+			if global_position.distance_to(other.global_position) < GRAPPLE_ARRIVE or _grapple_time > GRAPPLE_MAX_TIME:
+				other.velocity *= GRAPPLE_ARRIVE_KEEP
+				_end_grapple(false)
+
+
+## La corde se décroche. "fling" : lâchée en route, celui qui était tiré garde tout son élan.
+func _end_grapple(fling: bool) -> void:
+	if fling:
+		var pulled := self if grapple_mode == Grapple.PULL_SELF else _grapple_target
+		if pulled != null:
+			pulled._ladder_fling_timer = GRAPPLE_FLING_TIME
+	grapple_mode = Grapple.NONE
+	_grapple_target = null
+	if item == "grappin" and item_ammo <= 0:
+		item = ""
+
+
+## La corde d'un autre nous a accroché : il nous tire vers lui (voir _apply_grapple_pull).
+func grappled_by(puller: Fighter) -> void:
+	_grappled_by = puller
+	_leave_ladder()
+	_leave_vine()
+
+
+func is_grappled() -> bool:
+	return _grappled_by != null and _grappled_by.grapple_mode == Grapple.PULL_THEM and _grappled_by._grapple_target == self
+
+
+func _apply_grapple_pull() -> void:
+	if not is_grappled():
+		_grappled_by = null
+		return
+	var to := _grappled_by.global_position - global_position
+	if to.length() > 1.0:
+		velocity = to.normalized() * GRAPPLE_PULL
+		_jump_rising = false
 
 
 func _release_grenade(direction: Vector2, power: float) -> void:
@@ -553,6 +857,83 @@ func _item_direction() -> Vector2:
 
 func is_item_shielded() -> bool:
 	return item_shield_timer > 0.0
+
+
+## Le mecha vide (posé) que le corps touche, ou null.
+func _touched_mecha() -> Mecha:
+	for node in get_tree().get_nodes_in_group("mechas"):
+		var candidate := node as Mecha
+		if candidate != null and candidate.pilot == null and candidate.is_ready() and candidate.body_rect().intersects(body_rect()):
+			return candidate
+	return null
+
+
+## On monte dans le mecha : on lâche tout (attaque, bouclier, échelle, liane, grappin, grenade dégoupillée).
+func _board(new_mecha: Mecha) -> void:
+	_cancel_attack()
+	_leave_ladder()
+	_leave_vine()
+	if grapple_mode != Grapple.NONE:
+		_end_grapple(false)
+	if _grenade_fuse >= 0.0:
+		_release_grenade(Vector2.ZERO, 0.0)
+	_dash_timer = 0.0
+	_blocking = false
+	_sprinting = false
+	_knockback_timer = 0.0
+	mecha = new_mecha
+	mecha.board(self)
+	set_collision_mask_value(1, false)  # dans le cockpit, on ne touche plus le décor
+	set_collision_mask_value(PLATFORM_LAYER, false)
+	global_position = mecha.cockpit()
+	velocity = Vector2.ZERO
+
+
+## Aux commandes : le mecha suit nos touches, on reste dans le cockpit. Bas + A gardés : on sort.
+func _tick_mecha(input: InputState, delta: float) -> void:
+	mecha.tick(input, delta)
+	facing = mecha.facing
+	global_position = mecha.cockpit()
+	velocity = mecha.velocity
+	if mecha.wants_exit():
+		leave_mecha()
+		velocity = Vector2(0.0, -MECHA_EXIT_LIFT)
+	queue_redraw()
+
+
+## On sort du mecha (il reste là, vide) : on réapparaît juste au-dessus de lui.
+func leave_mecha() -> void:
+	if mecha == null:
+		return
+	var top := mecha.body_rect().position.y
+	mecha.leave()
+	mecha = null
+	if item == "missiles":
+		item = ""  # les missiles ne se tirent qu'en mecha : gardés à pied, ils bloqueraient les autres objets
+	_mecha_reboard_timer = MECHA_REBOARD_TIME
+	global_position = Vector2(global_position.x, top - stats.body_size.y / 2.0 - 4.0)
+	velocity = Vector2.ZERO
+	_air_jumps_left = stats.air_jumps
+	_air_dashes_left = stats.air_dashes
+	if not eliminated:
+		set_collision_mask_value(1, true)
+		set_collision_mask_value(PLATFORM_LAYER, true)
+	queue_redraw()
+
+
+func is_piloting() -> bool:
+	return mecha != null
+
+
+## Notre mecha a explosé (game.gd nous a déjà sortis) : éjectés vers le haut et sonnés, comme un
+## premier coup, mais sans perdre de vie (même si on l'était déjà). Invincibles juste après.
+func eject_from_mecha() -> void:
+	_cancel_attack()
+	velocity = Vector2(0.0, -MECHA_EJECT_SPEED)
+	_jump_rising = false
+	_knockback_timer = KNOCKBACK_TIME
+	_stun_timer = STUN_TIME
+	_invincible_timer = INVINCIBLE_TIME
 
 
 ## L'échelle que le corps touche, ou null.
@@ -727,10 +1108,14 @@ func _tick_dash(delta: float) -> void:
 func _try_start_attack(heavy: bool) -> void:
 	if not can_attack():
 		return
+	if heavy and heavy_kind() == WeaponStats.Heavy.SHOOT and arrows <= 0:
+		return  # arc vide : il faut ramasser ses flèches
 	_aim_at_target()
 	if not heavy and _aimed_dir != Vector2.ZERO:
 		_aim_towards(_aimed_dir)  # coup visé au stick droit
 	_aimed_dir = Vector2.ZERO
+	if not heavy:
+		_swing_up = not _swing_up  # nunchaku : vers le bas, puis vers le haut, et ainsi de suite
 	_attack_heavy = heavy
 	_attack_time = 0.0
 	_attack_has_hit = false
@@ -738,6 +1123,158 @@ func _try_start_attack(heavy: bool) -> void:
 	_charge_time = 0.0
 	_heavy_charge = 0.0
 	_attack_cooldown_timer = _cooldown(heavy)
+
+
+## X + Y : la jauge d'ultime est pleine et on n'est pas occupé. On peut la lancer pendant qu'un coup
+## léger se prépare ou qu'une lourde se charge (X puis Y, ou Y puis X, un peu décalés) : ce coup est annulé.
+func can_use_ultimate() -> bool:
+	return is_ultimate_ready() and not eliminated and not has_two_handed_item() and not is_dashing() and not is_invincible() \
+		and not _blocking and not is_stunned() and not is_ultimate_under_way() \
+		and (_heavy_charging or (not _attack_heavy and is_attacking() and _attack_time < stats.light_startup()) \
+			or (not is_attacking() and _attack_cooldown_timer <= 0.0))  # privé d'attaque (contré...) : pas d'ultime non plus
+
+
+func is_ultimate_ready() -> bool:
+	return ultimate_points >= ULTIMATE_POINTS
+
+
+## On vient de contrer : la jauge d'ultime monte (contrer une lourde compte double).
+func add_ultimate_points(countered_heavy: bool) -> void:
+	ultimate_points = mini(ultimate_points + (ULTIMATE_HEAVY_POINTS if countered_heavy else 1), ULTIMATE_POINTS)
+
+
+func _use_ultimate() -> void:
+	_cancel_attack()
+	_attack_buffer_timer = 0.0
+	_heavy_buffer_timer = 0.0
+	ultimate_points = 0
+	_ultimate_flash_timer = ULTIMATE_FLASH_TIME
+	if stats.ultimate == "laser":
+		_laser_time = 0.0
+		laser_frozen.clear()
+		_aim_laser()
+	elif stats.ultimate == "onde":
+		_wave_time = 0.0
+		wave_hit.clear()
+	elif stats.ultimate == "eclair":
+		_bolt_time = 0.0
+		_bolt_pass = -1
+	ultimate_used.emit(self)
+
+
+## Barre : le laser vise l'adversaire pendant qu'il se prépare, puis part tout droit.
+func _tick_laser(delta: float) -> void:
+	if _laser_time < 0.0:
+		return
+	var was_startup := _laser_time < LASER_STARTUP
+	_laser_time += delta
+	if was_startup:
+		_aim_laser()
+	if _laser_time >= LASER_STARTUP + LASER_ACTIVE:
+		_laser_time = -1.0
+
+
+func _aim_laser() -> void:
+	if target != null and not target.eliminated and target.global_position.distance_to(global_position) > 1.0:
+		_laser_dir = (target.global_position - global_position).normalized()
+	else:
+		_laser_dir = Vector2(facing, 0.0)
+	if absf(_laser_dir.x) > 0.1:
+		facing = signf(_laser_dir.x)
+	# Le rayon s'arrête au premier mur (ou sol) qu'il rencontre.
+	_laser_length = LASER_RANGE
+	if is_inside_tree():
+		var query := PhysicsRayQueryParameters2D.create(global_position, global_position + _laser_dir * LASER_RANGE, 1)
+		var hit := get_world_2d().direct_space_state.intersect_ray(query)
+		if not hit.is_empty():
+			_laser_length = global_position.distance_to(hit.position)
+
+
+func is_lasering() -> bool:
+	return _laser_time >= 0.0
+
+
+## Le laser peut-il geler en ce moment ? Il touche tout ce qu'il y a entre ces deux points.
+func is_laser_active() -> bool:
+	return _laser_time >= LASER_STARTUP
+
+
+## Jib : au début de chaque traversée, il vise l'adversaire et prend la vitesse qu'il faut pour
+## ressortir de l'autre côté (BOLT_OVERSHOOT).
+func _tick_bolt(delta: float) -> void:
+	if _bolt_time < 0.0:
+		return
+	_bolt_time += delta
+	var t := _bolt_time - BOLT_STARTUP
+	if t >= BOLT_PASSES * (BOLT_PASS_TIME + BOLT_GAP):
+		_bolt_time = -1.0
+		velocity *= 0.2
+		return
+	if t < 0.0:
+		return
+	var index := int(t / (BOLT_PASS_TIME + BOLT_GAP))
+	if index != _bolt_pass:
+		_bolt_pass = index
+		bolt_hit.clear()
+		var distance := 0.0
+		if target != null and not target.eliminated and target.global_position.distance_to(global_position) > 1.0:
+			_bolt_dir = (target.global_position - global_position).normalized()
+			distance = target.global_position.distance_to(global_position)
+		else:
+			_bolt_dir = Vector2(facing, 0.0)
+		_bolt_speed = clampf((distance + BOLT_OVERSHOOT) / BOLT_PASS_TIME, BOLT_SPEED_MIN, BOLT_SPEED_MAX)
+		if absf(_bolt_dir.x) > 0.1:
+			facing = signf(_bolt_dir.x)
+
+
+func is_bolting() -> bool:
+	return _bolt_time >= 0.0
+
+
+## Jib est en train de foncer (pas pendant la préparation ni les petits arrêts).
+func is_bolt_passing() -> bool:
+	var t := _bolt_time - BOLT_STARTUP
+	return _bolt_time >= 0.0 and t >= 0.0 and fmod(t, BOLT_PASS_TIME + BOLT_GAP) < BOLT_PASS_TIME
+
+
+func is_ultimate_under_way() -> bool:
+	return is_lasering() or is_waving() or is_bolting()
+
+
+func is_waving() -> bool:
+	return _wave_time >= 0.0
+
+
+## Jumb : rayon actuel du cercle de l'onde de choc (0 = elle ne frappe pas encore).
+func wave_radius() -> float:
+	if _wave_time < WAVE_STARTUP:
+		return 0.0
+	return lerpf(WAVE_START_RADIUS, WAVE_RADIUS, clampf((_wave_time - WAVE_STARTUP) / WAVE_ACTIVE, 0.0, 1.0))
+
+
+func laser_end() -> Vector2:
+	return global_position + _laser_dir * _laser_length
+
+
+## Touché par le laser de la Barre : gelé (ni bouger, ni attaquer, ni bloquer) pendant FREEZE_TIME.
+## Comme quand on est sonné, le coup suivant fait perdre une vie.
+func freeze() -> void:
+	_cancel_attack()
+	if _grenade_fuse >= 0.0:
+		_release_grenade(Vector2.ZERO, 0.0)
+	_leave_ladder()
+	_leave_vine()
+	if grapple_mode != Grapple.NONE:
+		_end_grapple(false)
+	_dash_timer = 0.0
+	velocity = Vector2(0.0, maxf(velocity.y, 0.0))
+	_frozen_timer = FREEZE_TIME
+	_stun_timer = maxf(_stun_timer, FREEZE_TIME)
+	_invincible_timer = STUN_GRACE
+
+
+func is_frozen() -> bool:
+	return _frozen_timer > 0.0
 
 
 ## Recharge d'une attaque (comptée depuis son départ) : plus courte quand la jauge de contre est haute.
@@ -774,10 +1311,22 @@ func _tick_attack(input: InputState, delta: float) -> void:
 			_attack_time = stats.heavy_startup
 			_attack_cooldown_timer = _cooldown(true)
 			velocity = Vector2.ZERO  # la frappe commence : on s'arrête net
+			_burst_index = 0
+			_swing_up = not _swing_up  # nunchaku : 1er coup de la rafale (vers le bas, puis haut, puis bas)
 			if heavy_kind() == WeaponStats.Heavy.THROW:
 				_throw_weapon()
+			elif heavy_kind() == WeaponStats.Heavy.SHOOT:
+				_shoot_arrow()
 		return
 	_attack_time += delta * _attack_speed()
+	if _attack_heavy and heavy_kind() == WeaponStats.Heavy.BURST and _attack_time >= stats.heavy_startup:
+		# Rafale du nunchaku : chaque coup peut toucher, vise à nouveau et change de sens.
+		var index := mini(int((_attack_time - stats.heavy_startup) / BURST_HIT_TIME), BURST_HITS - 1)
+		if index != _burst_index:
+			_burst_index = index
+			_attack_has_hit = false
+			_swing_up = not _swing_up
+			_aim_at_target()
 	if _attack_time >= _attack_startup() + _attack_active():
 		if is_katana_dashing():
 			velocity *= KATANA_DASH_END_KEEP
@@ -792,9 +1341,54 @@ func _throw_weapon() -> void:
 	weapon_thrown.emit(self, _attack_dir, speed)
 
 
-## On ramasse sa lance (ou elle revient quand on réapparaît). Arme cassée : elle revient à la vie suivante.
+## Arc : la flèche part vers l'adversaire ; on garde l'arc.
+func _shoot_arrow() -> void:
+	var speed := weapon.heavy_speed * lerpf(1.0, ARROW_CHARGE_SPEED, _heavy_charge)
+	var knockback := attack_knockback()
+	_cancel_attack()
+	arrows -= 1
+	arrow_shot.emit(self, _attack_dir, speed, knockback)
+
+
+## On ramasse sa lance. Arme cassée : on reste à mains nues.
 func get_weapon_back() -> void:
 	weapon_away = is_weapon_broken()
+
+
+## RB : on lance l'arme qu'on a en main (pas pendant une attaque). Elle ne fait mal à personne ;
+## game.gd la fait voler vers l'adversaire le plus proche.
+func _toss_weapon() -> void:
+	if has_two_handed_item():
+		# RB jette d'abord l'arme à 2 mains (avec ce qu'il reste dedans) : on retrouve son arme.
+		var kind := item
+		var ammo := item_ammo
+		item = ""
+		item_ammo = 0
+		_rifle_burst_left = 0
+		item_tossed.emit(self, kind, ammo)
+		return
+	if is_attacking() or not knock_weapon_away():
+		return
+	weapon_tossed.emit(self)
+
+
+## Une arme en main ? (pas à mains nues, pas lancée, pas cassée)
+func has_weapon_in_hand() -> bool:
+	return not weapon.is_bare_hands() and not weapon_away
+
+
+## On ramasse une arme (la sienne ou celle d'un autre), usée de "counters" contres.
+## Arc : il garde ses flèches ("ammo") et son numéro ("id") en changeant de main.
+func equip(new_weapon: WeaponStats, counters: int, ammo := ARROWS_MAX, id := 0) -> void:
+	weapon = new_weapon
+	weapon_counters = counters
+	arrows = ammo
+	bow_id = id
+	_repair_counters = 0
+	_update_armed_stats()
+	weapon_away = false
+	stats = _armed_stats
+	_repair_flash_timer = WEAPON_REPAIR_FLASH  # un anneau de sa couleur : on voit qu'on l'a prise
 
 
 ## Le perso avec son arme en main ; une arme contrée est plus petite (coup léger et lourde).
@@ -811,10 +1405,10 @@ func weapon_length() -> float:
 
 
 ## La lourde de notre arme a été contrée : l'arme rapetisse, ou casse au WEAPON_MAX_COUNTERS-ième
-## contre (mains nues jusqu'à la prochaine vie perdue). Renvoie true si elle vient de casser.
+## contre (mains nues : il faut trouver une autre arme). Renvoie true si elle vient de casser.
 ## À mains nues (ou lance lancée et pas en main) : rien ne s'use.
 func weapon_countered() -> bool:
-	if weapon.is_bare_hands() or is_weapon_broken():
+	if not has_weapon_in_hand():
 		return false
 	weapon_counters += 1
 	if not is_weapon_broken():
@@ -880,6 +1474,8 @@ func _attack_startup() -> float:
 func _attack_active() -> float:
 	if _attack_heavy and heavy_kind() == WeaponStats.Heavy.SLAM:
 		return stats.heavy_active + SLAM_WAVE_TIME
+	if _attack_heavy and heavy_kind() == WeaponStats.Heavy.BURST:
+		return BURST_HITS * BURST_HIT_TIME
 	return stats.heavy_active if _attack_heavy else stats.attack_active
 
 
@@ -902,6 +1498,9 @@ func heavy_scale() -> float:
 func _cancel_attack() -> void:
 	_attack_time = -1.0
 	_heavy_charging = false
+	_laser_time = -1.0
+	_wave_time = -1.0
+	_bolt_time = -1.0
 
 
 # --- Questions que game.gd pose au combattant ---
@@ -961,8 +1560,8 @@ func attack_cooldown_left() -> float:
 
 
 func can_attack() -> bool:
-	return not eliminated and not is_dashing() and not is_invincible() and not _blocking \
-		and not is_attacking() and _attack_cooldown_timer <= 0.0
+	return not eliminated and not has_two_handed_item() and not is_dashing() and not is_invincible() and not _blocking \
+		and not is_attacking() and not is_ultimate_under_way() and _attack_cooldown_timer <= 0.0
 
 
 ## Le coup peut-il toucher en ce moment ?
@@ -994,9 +1593,11 @@ func attack_start() -> Vector2:
 		return _feet() - Vector2(_slam_wave_reach(), 0.0)
 	if is_katana_dashing():
 		return global_position
+	if _is_burst():
+		return global_position + _hit_dir() * stats.attack_radius
 	if _attack_heavy:
 		return attack_center()
-	return global_position + _attack_dir * clampf(_light_reach() - stats.attack_radius, 0.0, stats.attack_radius)
+	return global_position + _hit_dir() * clampf(_light_reach() - stats.attack_radius, 0.0, stats.attack_radius)
 
 
 ## Le bout de la zone qui touche.
@@ -1005,9 +1606,43 @@ func attack_center() -> Vector2:
 		return _feet() + Vector2(_slam_wave_reach(), 0.0)
 	if is_katana_dashing():
 		return global_position + _attack_dir * stats.heavy_arc_radius * KATANA_DASH_REACH * _range_mult()
+	if _is_burst():
+		return global_position + _hit_dir() * maxf(_burst_reach() - stats.attack_radius, 0.0)
 	if _attack_heavy:
 		return global_position + _heavy_tip(_heavy_angle())
-	return global_position + _attack_dir * maxf(_light_reach() - stats.attack_radius, 0.0)
+	return global_position + _hit_dir() * maxf(_light_reach() - stats.attack_radius, 0.0)
+
+
+## Nunchaku : en pleine rafale (après la charge).
+func _is_burst() -> bool:
+	return heavy_kind() == WeaponStats.Heavy.BURST and is_heavy_swinging()
+
+
+## Longueur des coups de la rafale : plus on a chargé, plus ils vont loin.
+func _burst_reach() -> float:
+	return stats.attack_reach * _range_mult() * lerpf(1.0, BURST_CHARGE_REACH, _heavy_charge)
+
+
+## Le nunchaku en main : ses coups alternent vers le bas et vers le haut.
+func _swings() -> bool:
+	return not weapon_away and weapon.light_swing
+
+
+## Direction du coup : vers l'adversaire, penchée vers le bas ou le haut pour le nunchaku.
+func _hit_dir() -> Vector2:
+	if not _swings():
+		return _attack_dir
+	var side := signf(_attack_dir.x) if absf(_attack_dir.x) > 0.01 else facing
+	return _attack_dir.rotated(deg_to_rad(SWING_TILT) * side * (-1.0 if _swing_up else 1.0))
+
+
+## Le sens dans lequel notre coup projette celui qu'il touche ("toward" : de nous vers lui).
+## Nunchaku : vers le bas ou vers le haut, selon le sens du coup.
+func hit_push_direction(toward: Vector2) -> Vector2:
+	if _swings():
+		var side := signf(toward.x) if absf(toward.x) > 0.01 else facing
+		return Vector2(side * SWING_PUSH_SIDE, -1.0 if _swing_up else 1.0).normalized()
+	return toward if _attack_heavy else _attack_dir
 
 
 ## Longueur actuelle du coup léger : la barre sort du perso et s'allonge pendant LIGHT_DEPLOY_TIME.
@@ -1029,6 +1664,8 @@ func _slam_wave_reach() -> float:
 func attack_radius() -> float:
 	if _is_slam_wave():
 		return SLAM_WAVE_RADIUS
+	if _is_burst():
+		return stats.attack_radius
 	return stats.heavy_tip_radius * lerpf(1.0, HEAVY_CHARGE_TIP_GROWTH, _heavy_charge) if _attack_heavy else stats.attack_radius
 
 
@@ -1043,12 +1680,12 @@ func attack_direction() -> Vector2:
 ## Peut-on se faire toucher ? Non pendant un dash (aussi celui du katana) ou une invincibilité.
 ## Le dash du katana peut quand même être contré (voir game.gd).
 func can_be_hit() -> bool:
-	return not eliminated and not is_dashing() and not is_katana_dashing() and not is_invincible()
+	return not eliminated and mecha == null and not is_dashing() and not is_katana_dashing() and not is_invincible()
 
 
 ## En train d'esquiver (dash, dash du katana) : ce qui vole (balle, lance) passe au travers.
 func is_dodging() -> bool:
-	return is_dashing() or is_katana_dashing()
+	return is_dashing() or is_katana_dashing() or mecha != null
 
 
 func body_rect() -> Rect2:
@@ -1128,6 +1765,7 @@ func take_hit(hit_dir: Vector2, knockback := -1.0) -> bool:
 	if knockback < 0.0:
 		knockback = stats.hit_knockback
 	_cancel_attack()
+	_frozen_timer = 0.0  # gelé puis frappé : on perd une vie (voir plus bas) et on n'est plus gelé
 	if _grenade_fuse >= 0.0:
 		_release_grenade(Vector2.ZERO, 0.0)  # touché : la grenade dégoupillée tombe des mains
 	_leave_ladder()
@@ -1148,9 +1786,20 @@ func is_stunned() -> bool:
 	return _stun_timer > 0.0
 
 
+## Soufflé par une explosion sans être touché (explosion de phase de la jauge) : juste poussé.
+func blast_push(dir: Vector2, knockback: float) -> void:
+	_leave_ladder()
+	_leave_vine()
+	_dash_timer = 0.0
+	velocity = _pushed(dir * knockback) + Vector2(0.0, -200.0)
+	_jump_rising = false
+	_knockback_timer = KNOCKBACK_TIME
+
+
 ## On a contré (ou fait un blocage parfait) : on n'est plus sonné.
 func recover() -> void:
 	_stun_timer = 0.0
+	_frozen_timer = 0.0
 
 
 ## Phase de la jauge de contre de la partie : de 1 (normale) à 4 (berserk).
@@ -1182,6 +1831,10 @@ func _pushed(force: Vector2) -> Vector2:
 
 ## Sorti de la map : on perd une vie et on réapparaît au milieu.
 func fall_out(respawn_position: Vector2) -> void:
+	if mecha != null:
+		var lost := mecha
+		leave_mecha()
+		lost.queue_free()  # tombé avec son mecha : le mecha est perdu
 	_cancel_attack()
 	_leave_ladder()
 	_leave_vine()
@@ -1194,6 +1847,8 @@ func fall_out(respawn_position: Vector2) -> void:
 	_knockback_timer = 0.0
 	_wall_jump_timer = 0.0
 	_ladder_fling_timer = 0.0
+	if grapple_mode != Grapple.NONE:
+		_end_grapple(false)
 	if _grenade_fuse >= 0.0:
 		item = ""  # tombé avec une grenade dégoupillée : elle est perdue
 		_grenade_fuse = -1.0
@@ -1206,12 +1861,9 @@ func fall_out(respawn_position: Vector2) -> void:
 func _lose_life() -> void:
 	lives -= 1
 	_stun_timer = 0.0
+	_frozen_timer = 0.0
 	_invincible_timer = INVINCIBLE_TIME
 	show_lives()
-	if is_weapon_broken():
-		weapon_counters = 0  # arme cassée : une neuve revient à la vie suivante
-		weapon_away = false
-		_repair_counters = 0
 	if lives <= 0:
 		_leave_vine()
 		eliminated = true
@@ -1253,7 +1905,7 @@ func apply_net_state(state: Array) -> void:
 # --- Dessin (pas d'images : tout est dessiné avec des rectangles) ---
 
 func _draw() -> void:
-	if eliminated:
+	if eliminated or mecha != null:  # aux commandes d'un mecha : on se voit dans son cockpit
 		return
 	var body := Rect2(-stats.body_size / 2.0, stats.body_size)
 
@@ -1353,6 +2005,21 @@ func _draw() -> void:
 				Color(weapon_color, 0.25 + 0.5 * fade))
 			draw_rect(Rect2(feet + Vector2(-reach, SLAM_WAVE_RADIUS - 3.0), Vector2(reach * 2.0, 3.0)), Color(1, 1, 1, 0.8 * fade))
 
+	# Nunchaku et arc : pendant la charge, un trait vers l'adversaire qui s'allonge avec la charge ;
+	# puis la rafale du nunchaku (une barre de sa couleur, vers le bas puis vers le haut).
+	elif is_attacking() and _attack_heavy and heavy_kind() in [WeaponStats.Heavy.BURST, WeaponStats.Heavy.SHOOT]:
+		if _heavy_charging:
+			var aim := _attack_dir if target == null else (target.global_position - global_position).normalized()
+			var reach := (_burst_reach() if heavy_kind() == WeaponStats.Heavy.BURST else 60.0 + 80.0 * _heavy_charge)
+			draw_line(aim * 12.0, aim * reach, Color(weapon_color, lerpf(0.3, 0.8, _heavy_charge)), 3.0)
+			if _heavy_charge >= 1.0 and int(_blink_clock / 0.05) % 2 == 0:
+				draw_circle(aim * reach, 6.0, Color(1, 1, 1, 0.9))
+		else:
+			var dir := _hit_dir()
+			var reach := _burst_reach()
+			draw_line(dir * 10.0, dir * reach, Color(weapon_color, 0.95), stats.attack_radius * 0.6)
+			draw_circle(dir * reach, stats.attack_radius * 0.6, color.lightened(0.6))
+
 	# L'attaque lourde : l'arme levée au-dessus de la tête, puis un arc jusqu'aux pieds
 	elif is_attacking() and _attack_heavy:
 		var angle := _heavy_angle()
@@ -1380,7 +2047,7 @@ func _draw() -> void:
 	# L'attaque légère : une barre blanche orientée vers l'adversaire
 	# (sa longueur et son épaisseur suivent la zone qui touche, pour chaque perso)
 	elif is_attacking():
-		draw_set_transform(Vector2.ZERO, _attack_dir.angle())
+		draw_set_transform(Vector2.ZERO, _hit_dir().angle())
 		var length := stats.attack_reach * _range_mult()
 		var bar := stats.attack_radius * 0.5625   # 9 px pour la Barre
 		var tip := stats.attack_radius * 0.875    # 14 px pour la Barre
@@ -1407,8 +2074,14 @@ func _draw() -> void:
 		if weapon.held_head > 0.0:
 			var head := weapon.held_head * weapon_length()
 			draw_rect(Rect2(end - Vector2.ONE * head / 2.0, Vector2.ONE * head), weapon_color)
+		if weapon.heavy == WeaponStats.Heavy.SHOOT:
+			# Les flèches qui restent : des petits traits à côté de l'arc
+			for i in arrows:
+				var x := hand.x - facing * (6.0 + i * 4.0)
+				draw_line(Vector2(x, -6.0), Vector2(x, -18.0), Color(weapon_color, 0.9), 2.0)
 
 	_draw_item(body)
+	_draw_ultimate(body)
 
 	# La jauge d'endurance, sur le côté opposé à l'adversaire
 	if _stamina_show_timer > 0.0:
@@ -1419,9 +2092,10 @@ func _draw() -> void:
 		var alpha := clampf(_lives_show_timer / 0.4, 0.0, 1.0)
 		var size := 10.0
 		var gap := 5.0
-		var total := max_lives * size + (max_lives - 1) * gap
+		var pips := maxi(max_lives, lives)  # les vies en plus (objet « vie ») s'ajoutent à droite
+		var total := pips * size + (pips - 1) * gap
 		var y := head_y - 18.0
-		for i in max_lives:
+		for i in pips:
 			var pip := Rect2(-total / 2.0 + i * (size + gap), y, size, size)
 			if i < lives:
 				draw_rect(pip, Color(color, alpha))
@@ -1430,7 +2104,8 @@ func _draw() -> void:
 
 
 ## L'objet ramassé (dessin très simple, à remplacer par un graphiste) : pistolet et ses balles,
-## grenade (qui clignote de plus en plus vite une fois dégoupillée), bouclier levé devant soi.
+## grenade (qui clignote de plus en plus vite une fois dégoupillée), bouclier levé devant soi,
+## vie en plus (un petit carré rose dans la main), grappin (et sa corde quand il est lancé).
 func _draw_item(body: Rect2) -> void:
 	if is_item_shielded():
 		var fade := clampf(item_shield_timer / 0.5, 0.0, 1.0)
@@ -1441,14 +2116,29 @@ func _draw_item(body: Rect2) -> void:
 		# Un objet vient d'être ramassé : un anneau de sa couleur, pour qu'on le remarque.
 		var t := 1.0 - _item_flash_timer / ITEM_FLASH_TIME
 		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.4, body.size.y * 1.1, t), 0.0, TAU, 32,
-			Color(ItemPickup.color_of(item), 1.0 - t), 3.0)
+			Color(ItemPickup.color_of(_item_flash_kind), 1.0 - t), 3.0)
 	if _repair_flash_timer > 0.0:
 		# L'arme vient d'être réparée : un anneau de sa couleur.
 		var t := 1.0 - _repair_flash_timer / WEAPON_REPAIR_FLASH
 		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.4, body.size.y * 1.1, t), 0.0, TAU, 32,
 			Color(weapon.color, 1.0 - t), 3.0)
 	var hand := Vector2(facing * (body.size.x / 2.0 + 6.0), 6.0)
+	if grapple_mode != Grapple.NONE:
+		# La corde, de la main jusqu'au crochet.
+		var hook := to_local(grapple_point)
+		draw_line(hand, hook, Color(ItemPickup.color_of("grappin"), 0.9), 2.0)
+		draw_rect(Rect2(hook - Vector2.ONE * 4.0, Vector2.ONE * 8.0), ItemPickup.color_of("grappin"))
 	match item:
+		"grappin":
+			if grapple_mode == Grapple.NONE:
+				draw_rect(Rect2(hand - Vector2.ONE * 4.0, Vector2.ONE * 8.0), ItemPickup.color_of("grappin"))
+			for i in item_ammo:
+				draw_circle(hand + Vector2(-6.0 + i * 6.0, -10.0), 1.8, ItemPickup.color_of("grappin"))
+		"vie":
+			draw_rect(Rect2(hand - Vector2.ONE * 6.0, Vector2.ONE * 12.0), ItemPickup.color_of("vie"))
+		"balise":
+			var beacon := ItemPickup.color_of("balise") if int(_blink_clock / 0.25) % 2 == 0 else Color(1, 1, 1)
+			draw_colored_polygon(PackedVector2Array([hand + Vector2(0, -8), hand + Vector2(6, 0), hand + Vector2(0, 8), hand + Vector2(-6, 0)]), beacon)
 		"pistolet":
 			# Le pistolet pointe là où la balle partira ; les balles qui restent sont des points sur le canon.
 			var aim := _item_direction()
@@ -1459,6 +2149,25 @@ func _draw_item(body: Rect2) -> void:
 			draw_rect(Rect2(2.0, 3.0, 6.0, 7.0), gun_color)     # la poignée
 			for i in item_ammo:
 				draw_circle(Vector2(5.0 + i * 3.5, -5.5), 1.5, Color(1.0, 0.9, 0.5))
+			draw_set_transform(Vector2.ZERO, 0.0)
+		"fusil", "lance_roquette":
+			# Tenu à 2 mains, pointé là où le tir partira. Fusil : les balles qui restent = une barre
+			# sous le canon. Lance-roquette : un gros tube, la roquette dépasse devant.
+			var aim2 := _item_direction()
+			var side2 := signf(aim2.x) if absf(aim2.x) > 0.01 else facing
+			draw_set_transform(Vector2(side2 * body.size.x * 0.2, 0.0), aim2.angle(), Vector2(1.0, side2))
+			var two_color := ItemPickup.color_of(item)
+			if item == "fusil":
+				draw_rect(Rect2(-14.0, -4.0, 46.0, 8.0), two_color)    # le corps et le canon
+				draw_rect(Rect2(-22.0, -3.0, 9.0, 9.0), two_color)     # la crosse
+				draw_rect(Rect2(6.0, 4.0, 6.0, 9.0), two_color)        # le chargeur
+				var left := float(item_ammo) / RIFLE_AMMO
+				draw_rect(Rect2(-14.0, -8.0, 46.0 * left, 2.5), Color(1.0, 0.9, 0.5))
+			else:
+				draw_rect(Rect2(-24.0, -7.0, 52.0, 14.0), two_color)   # le tube sur l'épaule
+				draw_rect(Rect2(2.0, 7.0, 6.0, 8.0), two_color)        # la poignée
+				if item_ammo > 0:
+					draw_colored_polygon(PackedVector2Array([Vector2(28, -5), Vector2(38, 0), Vector2(28, 5)]), color)
 			draw_set_transform(Vector2.ZERO, 0.0)
 		"grenade":
 			var grenade_color := ItemPickup.color_of("grenade")
@@ -1498,6 +2207,67 @@ func _make_cracks() -> void:
 			point += dir * rng.randf_range(5.0, 10.0)
 			crack.append(point)
 		_cracks.append(crack)
+
+
+## La jauge d'ultime : une aura de particules autour du perso, de sa couleur. Plus la jauge est
+## remplie, plus il y en a. Pleine, elles sont plus grosses, blanches et tournent plus vite :
+## X + Y pour lancer l'ultime. Lancée, une onde blanche part du perso.
+## (Tout est calculé à partir de _blink_clock : les copains en ligne voient la même aura.)
+func _draw_ultimate(body: Rect2) -> void:
+	if ultimate_points > 0:
+		var ratio := float(ultimate_points) / ULTIMATE_POINTS
+		var ready := is_ultimate_ready()
+		var count := ULTIMATE_PARTICLES if ready else maxi(2, int(ceil(ULTIMATE_PARTICLES * ratio * 0.7)))
+		var speed := 1.8 if ready else 0.7
+		for i in count:
+			# Chaque particule monte le long du corps en tournant autour, puis recommence en bas.
+			var phase := fposmod(_blink_clock * speed * 0.45 + i * 0.618034, 1.0)
+			var angle := i * TAU / count + _blink_clock * speed
+			var spread := body.size.x / 2.0 + (14.0 if ready else 10.0) + 6.0 * sin(i * 1.7)
+			var pos := Vector2(cos(angle) * spread, body.end.y + 4.0 - phase * (body.size.y + 24.0))
+			var size := (6.0 if ready else 4.0) * (1.0 - 0.45 * phase)
+			var alpha := (1.0 if ready else 0.45 + 0.45 * ratio) * sin(phase * PI)
+			var tint := Color(1, 1, 1).lerp(color.lightened(0.4), phase) if ready else color.lightened(0.45)
+			draw_rect(Rect2(pos - Vector2.ONE * size / 2.0, Vector2.ONE * size), Color(tint, alpha))
+	if _ultimate_flash_timer > 0.0:
+		var t := 1.0 - _ultimate_flash_timer / ULTIMATE_FLASH_TIME
+		draw_arc(Vector2.ZERO, lerpf(body.size.y * 0.5, body.size.y * 2.2, t), 0.0, TAU, 40, Color(1, 1, 1, 1.0 - t), 4.0)
+	if is_lasering():
+		# Barre : un fin trait bleu vers l'adversaire, puis le rayon bleu (épais, qui s'amincit).
+		var end := _laser_dir * _laser_length
+		if _laser_time < LASER_STARTUP:
+			var t := _laser_time / LASER_STARTUP
+			draw_line(Vector2.ZERO, end, Color(LASER_COLOR, 0.25 + 0.4 * t), 2.0)
+			draw_circle(Vector2.ZERO, 6.0 + 8.0 * t, Color(LASER_COLOR, 0.8))
+		else:
+			var fade := 1.0 - (_laser_time - LASER_STARTUP) / LASER_ACTIVE
+			draw_line(Vector2.ZERO, end, Color(LASER_COLOR, 0.5 * fade), LASER_RADIUS * 2.0 * (0.5 + 0.5 * fade) + 8.0)
+			draw_line(Vector2.ZERO, end, Color(0.85, 0.95, 1.0, fade), LASER_RADIUS)
+	if is_waving():
+		# Jumb : un cercle qui se resserre autour de lui, puis s'ouvre d'un coup (l'onde de choc).
+		if _wave_time < WAVE_STARTUP:
+			var t := _wave_time / WAVE_STARTUP
+			draw_arc(Vector2.ZERO, lerpf(WAVE_START_RADIUS * 2.0, WAVE_START_RADIUS, t), 0.0, TAU, 40, Color(WAVE_COLOR, 0.3 + 0.6 * t), 3.0)
+		else:
+			var fade := 1.0 - (_wave_time - WAVE_STARTUP) / WAVE_ACTIVE
+			var radius := wave_radius()
+			draw_circle(Vector2.ZERO, radius, Color(WAVE_COLOR, 0.18 * fade))
+			draw_arc(Vector2.ZERO, radius, 0.0, TAU, 64, Color(WAVE_COLOR, 0.9 * fade), 10.0 * fade + 2.0)
+	if is_bolting():
+		# Jib : un éclair jaune autour de lui, puis des traînées jaunes à chaque traversée.
+		if _bolt_time < BOLT_STARTUP:
+			draw_rect(body.grow(4.0 + 6.0 * _bolt_time / BOLT_STARTUP), Color(BOLT_COLOR, 0.9), false, 3.0)
+		elif is_bolt_passing():
+			for i in 4:
+				var ghost := body
+				ghost.position -= _bolt_dir * 22.0 * (i + 1)
+				draw_rect(ghost, Color(BOLT_COLOR, 0.5 - i * 0.11))
+			draw_rect(body.grow(3.0), Color(BOLT_COLOR, 0.95), false, 2.0)
+	if is_frozen():
+		# Gelé : un bloc de glace bleu par-dessus le perso.
+		var ice := body.grow(5.0)
+		draw_rect(ice, Color(LASER_COLOR, 0.45))
+		draw_rect(ice, Color(0.85, 0.95, 1.0, 0.9), false, 2.0)
 
 
 ## Barre verticale à côté du perso, du côté où n'est pas l'adversaire (pour ne pas gêner le combat).

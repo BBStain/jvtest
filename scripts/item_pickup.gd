@@ -5,17 +5,30 @@ extends Node2D
 ##   pistolet : 5 balles, une par appui
 ##   grenade  : RT gardé = dégoupillée, plus on garde plus elle part loin, explose au bout de 3 s
 ##   bouclier : levé pendant 5 s, qui frappe dedans est projeté très loin
+##   vie      : RT donne une vie en plus (jusqu'à Fighter.MAX_LIVES)
+##   grappin  : 3 lancers vers l'adversaire le plus proche (voir Fighter._tick_grapple)
+##   fusil, lance_roquette : Ville seulement (VILLE_KINDS), à 2 mains (voir Fighter.TWO_HANDED_ITEMS)
+##   missiles : Ville seulement, on le prend en MECHA (pas à pied) : RT tire 4 missiles qui suivent l'ennemi
+##   balise   : Ville seulement (pas dans KINDS) : RT appelle un mecha, qui tombe du ciel (voir Game.call_mecha)
 ## Dessin très simple (une caisse de couleur avec une lettre) : à remplacer par un graphiste.
 
-const KINDS := ["pistolet", "grenade", "bouclier"]
+const KINDS := ["pistolet", "grenade", "bouclier", "vie", "grappin"]
+const VILLE_KINDS := ["fusil", "lance_roquette", "missiles"]  ## en plus dans la Ville (missiles : seulement en mecha)
 const SIZE := 26.0
-const GRAVITY := 1400.0
-const MAX_FALL := 600.0
+const MAX_FALL := 600.0                 ## il tombe du ciel doucement (plus vite s'il est frappé)
 
 var kind := "pistolet"
+var ammo := -1                          ## arme à 2 mains jetée : ce qu'il reste dedans (-1 = neuve)
+var thrown_by := -1                     ## jetée par ce joueur : il ne la reprend pas tout de suite...
+var thrown_lock := 0.0                  ## ... pendant ce temps
 var velocity := Vector2.ZERO
-var landed := false
+var body := LooseBody.new()             ## tombe, se pose, suit les plateformes, valdingue quand on le frappe
+var hit_lock := 0.0                     ## vient d'être frappé : le même coup ne le refrappe pas
+var _launched := false                  ## frappé, pas encore reposé
 var simulate := true                    ## false chez un copain en ligne : il ne fait qu'afficher
+var landed: bool:                       ## posé quelque part
+	get:
+		return body.resting
 
 
 static func color_of(item_kind: String) -> Color:
@@ -26,23 +39,41 @@ static func color_of(item_kind: String) -> Color:
 			return Color(0.45, 0.75, 0.35)
 		"bouclier":
 			return Color(0.45, 0.7, 1.0)
+		"vie":
+			return Color(1.0, 0.45, 0.6)
+		"grappin":
+			return Color(0.85, 0.6, 0.3)
+		"balise":
+			return Color(1.0, 0.2, 0.2)
+		"fusil":
+			return Color(0.35, 0.4, 0.3)
+		"lance_roquette":
+			return Color(0.55, 0.45, 0.3)
+		"missiles":
+			return Color(0.9, 0.35, 0.55)
 	return Color.WHITE
 
 
 func _physics_process(delta: float) -> void:
-	if not simulate or landed:
+	if not simulate:
 		return
-	velocity.y = minf(velocity.y + GRAVITY * delta, MAX_FALL)
-	var bottom := position + Vector2(0.0, SIZE / 2.0)
-	var mask := 1 | (1 << (Fighter.PLATFORM_LAYER - 1))
-	var query := PhysicsRayQueryParameters2D.create(bottom, bottom + velocity * delta, mask)
-	var hit := get_world_2d().direct_space_state.intersect_ray(query)
-	if hit.is_empty():
-		position += velocity * delta
-	else:
-		position = (hit.position as Vector2) - Vector2(0.0, SIZE / 2.0)
-		velocity = Vector2.ZERO
-		landed = true
+	hit_lock -= delta
+	thrown_lock -= delta
+	if not _launched:
+		velocity.y = minf(velocity.y, MAX_FALL)  # chute tranquille quand personne ne l'a frappé
+	velocity = body.step(self, velocity, SIZE / 2.0, delta)
+	if body.resting:
+		_launched = false
+	if kind == "balise":
+		queue_redraw()  # elle clignote
+
+
+## Un coup (ou une explosion) l'envoie valdinguer.
+func launch(new_velocity: Vector2) -> void:
+	velocity = new_velocity
+	body.launch()
+	_launched = true
+	hit_lock = Game.LOOSE_HIT_LOCK
 
 
 func rect() -> Rect2:
@@ -65,9 +96,20 @@ func _ready() -> void:
 
 
 func _draw() -> void:
+	if kind == "balise":
+		# Un petit losange rouge qui clignote
+		var on := int(Time.get_ticks_msec() / 250) % 2 == 0
+		var h := SIZE * 0.75
+		draw_colored_polygon(PackedVector2Array([Vector2(0, -h), Vector2(h * 0.7, 0), Vector2(0, h), Vector2(-h * 0.7, 0)]),
+			color_of(kind) if on else Color(1.0, 0.75, 0.75))
+		draw_polyline(PackedVector2Array([Vector2(0, -h), Vector2(h * 0.7, 0), Vector2(0, h), Vector2(-h * 0.7, 0), Vector2(0, -h)]),
+			Color(1, 1, 1, 0.9), 2.0)
+		return
 	var box := Rect2(-Vector2.ONE * SIZE / 2.0, Vector2.ONE * SIZE)
 	draw_rect(box, Color(color_of(kind), 0.9))
 	draw_rect(box, Color(1, 1, 1, 0.8), false, 2.0)
 	var font := ThemeDB.fallback_font
-	var letter := kind.left(1).to_upper()
+	var letter := "Gr" if kind == "grappin" else kind.left(1).to_upper()  # grenade = G
+	if kind == "lance_roquette":
+		letter = "R"
 	draw_string(font, Vector2(-SIZE / 2.0, 6.0), letter, HORIZONTAL_ALIGNMENT_CENTER, SIZE, 16, Color(0.08, 0.09, 0.13))

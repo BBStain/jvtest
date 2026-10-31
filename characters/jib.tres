@@ -6,6 +6,7 @@
 script = ExtResource("1_stats")
 display_name = "Jib"
 description = "Petit et vif : frappe vite, mais ses coups sont courts et il recule plus."
+ultimate = "eclair"
 body_size = Vector2(16, 46)
 run_speed = 640.0
 ground_accel = 9500.0

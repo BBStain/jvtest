@@ -10,15 +10,27 @@ extends Node2D
 ## Une map doit garder ces deux nœuds :
 ##   SpawnPoints   -> 4 Marker2D : où apparaissent les joueurs 1 à 4 au début (le marqueur = les pieds)
 ##   RespawnPoint  -> un Marker2D : où l'on réapparaît après une chute (le marqueur = les pieds)
-## Et si on veut, ItemSpawns -> des Marker2D : où apparaissent (puis tombent) les objets à ramasser.
+## Et si on veut, ItemSpawns -> des Marker2D : où apparaissent (puis tombent) les objets à ramasser,
+## et WeaponSpawns -> des Marker2D : où apparaissent (puis tombent) les armes à ramasser.
 ## Les tests automatiques vérifient chaque map de MAPS (points présents, dans la zone de jeu,
 ## joueurs qui atterrissent bien) : s'il manque quelque chose, la mise en ligne s'arrête.
 
 @export var map_name := "Map"
 ## Au-delà de ce rectangle, le joueur est sorti de la map et perd une vie.
 @export var blast_zone := Rect2(-2150, -1500, 5400, 2450)
+## Ville : des balises d'appel de mecha tombent sur cette map (voir Game._tick_beacons).
+var has_mechas := false
+## Les objets et les armes qui apparaissent : toutes les combien de secondes, et au plus combien
+## par terre (0 = comme sur les autres maps, voir Game.ITEM_SPAWN_TIME...). La Ville en met beaucoup plus.
+var item_spawn_time := 0.0
+var max_pickups := 0
+var weapon_spawn_time := 0.0
+var max_loose_weapons := 0
 
 var _windows: Array[BreakableWindow] = []
+var _collapse: CityCollapse = null
+var _near_ready := false
+var _few_windows: Array[BreakableWindow] = []
 
 
 func spawn_position(player_index: int) -> Vector2:
@@ -39,6 +51,18 @@ func item_spawn_points() -> Array[Vector2]:
 			points.append((marker as Node2D).position)
 	if points.is_empty():
 		points.append(respawn_position() - Vector2(0.0, 200.0))
+	return points
+
+
+## Où les armes apparaissent (les Marker2D du nœud WeaponSpawns). Sans ce nœud, aux mêmes
+## endroits que les objets.
+func weapon_spawn_points() -> Array[Vector2]:
+	var points: Array[Vector2] = []
+	if has_node("WeaponSpawns"):
+		for marker in $WeaponSpawns.get_children():
+			points.append((marker as Node2D).position)
+	if points.is_empty():
+		points = item_spawn_points()
 	return points
 
 
@@ -83,6 +107,20 @@ func windows() -> Array[BreakableWindow]:
 	return _windows
 
 
+## Les fenêtres et blocs qui peuvent toucher le rectangle r. Dans la Ville (des milliers de blocs),
+## on ne regarde que ceux d'à côté ; sinon toutes les fenêtres (il y en a peu).
+func windows_near(r: Rect2) -> Array[BreakableWindow]:
+	if not _near_ready:
+		_near_ready = true
+		_collapse = get_node_or_null("Ecroulement") as CityCollapse
+		_few_windows.assign(windows().filter(func(w: BreakableWindow) -> bool: return not w is CityBlock))
+	if _collapse == null:
+		return windows()
+	var found: Array[BreakableWindow] = _few_windows.duplicate()
+	found.append_array(_collapse.blocks_in(r))
+	return found
+
+
 func _find_windows(node: Node, found: Array[BreakableWindow]) -> void:
 	for child in node.get_children():
 		if child is BreakableWindow:
@@ -92,10 +130,13 @@ func _find_windows(node: Node, found: Array[BreakableWindow]) -> void:
 
 ## Casse les fenêtres touchées par une zone ronde (explosion).
 func smash_windows_in(center: Vector2, radius: float) -> void:
-	for window in windows():
+	for window in windows_near(Rect2(center, Vector2.ZERO).grow(radius)):
 		var r := window.rect()
 		if center.clamp(r.position, r.end).distance_to(center) <= radius:
-			window.smash()
+			if window is CityBlock:
+				(window as CityBlock).hit(CityBlock.EXPLOSION_DAMAGE)
+			else:
+				window.smash()
 
 
 ## Jeu en ligne (hôte) : quelles fenêtres sont cassées.

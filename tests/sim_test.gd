@@ -60,6 +60,7 @@ func shot(name: String) -> void:
 
 func _ready() -> void:
 	shot_dir = OS.get_environment("SHOT_DIR")
+	Ville.variety = false  # la Ville toujours pareille pour les tests (sauf ceux de la variété, plus bas)
 	var p1: Fighter
 	var p2: Fighter
 
@@ -708,7 +709,7 @@ func _ready() -> void:
 	menu.handle(pad, "confirm")
 	check(menu.screen == menu.Screen.CONTROLS, "Menu : COMMANDES s'ouvre")
 	menu.handle(pad, "confirm")
-	check(menu.screen == menu.Screen.CONTROLS and menu._pad_test_cells.size() == 10,
+	check(menu.screen == menu.Screen.CONTROLS and menu._pad_test_cells.size() == 11,
 		"COMMANDES : A ne fait pas revenir (on y teste ses boutons, une case manette par commande)")
 	menu.handle(pad, "back")
 	menu.handle(pad, "up")
@@ -951,7 +952,7 @@ func _ready() -> void:
 		await step(1)
 		check(description.get_line_count() <= 3, "Contenu : la description de %s tient en 3 lignes (%d)" % [c.display_name, description.get_line_count()])
 		description.queue_free()
-	for path in GameSetup.MAPS:
+	for path in GameSetup.MAPS + [GameSetup.VILLE_MAP]:
 		var m := GameSetup.make_map(path)
 		var problems: Array[String] = []
 		if m == null:
@@ -970,6 +971,9 @@ func _ready() -> void:
 				for point in points:
 					if not m.blast_zone.has_point(point.position):
 						problems.append("%s est hors de la zone de jeu" % point.name)
+				for where in m.weapon_spawn_points():
+					if not m.blast_zone.has_point(where):
+						problems.append("une apparition d'arme est hors de la zone de jeu")
 			_check_visuals(m, problems)
 			m.free()
 		check(problems.is_empty(), "Contenu : la map %s est complète %s" % [path, problems])
@@ -988,6 +992,1077 @@ func _ready() -> void:
 				if fi.is_on_floor() and fi.lives == GameSetup.lives:
 					landed += 1
 			check(landed == 4, "Contenu : sur %s, les 4 %s atterrissent (%d/4)" % [path.get_file(), c_path.get_file(), landed])
+		# ... et une arme qui apparaît à chaque point d'apparition d'arme se pose sur le décor
+		for fi in game.fighters:
+			fi.equip(load(GameSetup.WEAPONS[1]), 0)  # armés : personne ne ramasse les armes
+		var spawned: Array[Projectile] = []
+		for where in game.map.weapon_spawn_points():
+			spawned.append(game.spawn_weapon(load(GameSetup.WEAPONS[1]), where))
+		await step(180)
+		var weapons_landed := spawned.filter(func(w): return is_instance_valid(w) and w in game.projectiles and w.state == Projectile.State.STUCK).size()
+		check(weapons_landed == spawned.size(), "Contenu : sur %s, les armes apparues se posent (%d/%d)" % [path.get_file(), weapons_landed, spawned.size()])
+	check(GameSetup.VILLE_MAP in GameSetup.all_maps(), "Contenu : la Ville est dans le choix de la map")
+	# Ville : à chaque partie, des murs fins (un PV de moins), des fenêtres et des tonneaux explosifs au hasard
+	Ville.variety = true
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	GameSetup.player_devices = []
+	GameSetup.player_characters = []
+	await new_game()
+	game._item_spawn_timer = 1e9
+	game._weapon_spawn_timer = 1e9
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	var v_city_blocks: Array = game.map.windows().filter(func(w): return w is CityBlock)
+	var v_thin_walls: Array = v_city_blocks.filter(func(w): return not w is ExplosiveBarrel and w.max_hp == Ville.THIN_WALL_HP)
+	var v_glass: Array = v_city_blocks.filter(func(w): return not w is ExplosiveBarrel and w.max_hp == Ville.WINDOW_HP)
+	var v_barrels: Array = v_city_blocks.filter(func(w): return w is ExplosiveBarrel)
+	check(v_thin_walls.size() > 50 and v_thin_walls.filter(func(w): return w.size.x < Ville.BLOCK).size() > 50 and v_glass.size() > 5 and v_barrels.size() == Ville.BARRELS,
+		"Ville : murs fins à 5 PV (%d blocs), fenêtres (%d), %d tonneaux" % [v_thin_walls.size(), v_glass.size(), v_barrels.size()])
+	await step(30)
+	check(v_barrels.all(func(b): return not b.broken), "Ville : les tonneaux tiennent sur les planchers (aucun n'a sauté au départ)")
+	await shot("ville_variete")
+	# Un tonneau touché explose (l'image d'après), et fait sauter un tonneau proche (réaction en chaîne)
+	var v_first: ExplosiveBarrel = v_barrels[0]
+	var v_second := ExplosiveBarrel.new()
+	v_second.setup_barrel()
+	v_second.position = v_first.position + Vector2(120.0, 0.0)
+	v_second.exploded.connect(game._on_barrel_exploded)
+	game.map.add_child(v_second)
+	game.map._windows.append(v_second)
+	var barrel_city: CityCollapse = game.map.get_node("Ecroulement")
+	for cell in barrel_city._cells(v_second.rect().grow(1.0)):
+		if not barrel_city._cells_map.has(cell):
+			barrel_city._cells_map[cell] = []
+		barrel_city._cells_map[cell].append(v_second)
+	var barrel_victim: Fighter = game.fighters[0]
+	barrel_victim.global_position = v_first.global_position + Vector2(-110.0, -10.0)
+	barrel_victim.velocity = Vector2.ZERO
+	barrel_victim._invincible_timer = 0.0
+	await step(2)
+	barrel_victim.global_position = v_first.global_position + Vector2(-110.0, -10.0)
+	v_first.hit(1)
+	check(v_first.broken and game._barrels_to_explode.size() == 1, "Ville : un seul dégât et le tonneau saute")
+	await step(1)
+	await step(2)
+	check(v_second.broken, "Ville : l'explosion d'un tonneau fait sauter le tonneau d'à côté")
+	check(barrel_victim.is_stunned() or barrel_victim.lives < GameSetup.lives, "Ville : l'explosion d'un tonneau touche le joueur à côté")
+	await shot("ville_tonneau")
+	# Ville : une lance ou une flèche qui ne casse pas le mur s'y plante (avant, elle le traversait).
+	# Si le coup casse le bloc (1 PV restant, une vitre...), elle continue.
+	var wall_space: PhysicsDirectSpaceState2D = game.get_world_2d().direct_space_state
+	var wall_targets: Array = []
+	for wall_block in v_city_blocks:
+		if wall_block is ExplosiveBarrel or wall_block.one_way or wall_block.broken or wall_block.max_hp < 5 or wall_block.size.y < wall_block.size.x:
+			continue
+		var wall_mid: Vector2 = wall_block.rect().get_center()
+		if game.fighters.any(func(fi): return fi.global_position.distance_to(wall_mid) < 800.0):
+			continue
+		var wall_query := PhysicsRayQueryParameters2D.create(wall_mid - Vector2(220.0, 0.0), wall_mid, 1)
+		var wall_hit: Dictionary = wall_space.intersect_ray(wall_query)
+		if not wall_hit.is_empty() and wall_hit.collider == wall_block:
+			wall_targets.append(wall_block)
+		if wall_targets.size() == 3:
+			break
+	var wall_results := []
+	for wall_i in wall_targets.size():
+		var wall_block: CityBlock = wall_targets[wall_i]
+		var wall_hp_before := wall_block.hp
+		if wall_i == 2:
+			wall_block.hp = 1  # le dernier PV : la lance casse le bloc et passe
+			wall_hp_before = 1
+		var thrown := Projectile.new()
+		thrown.kind = "fleche" if wall_i == 1 else "lance"
+		thrown.length = Projectile.ARROW_LENGTH if wall_i == 1 else Projectile.SPEAR_LENGTH
+		thrown.owner_index = 0
+		thrown.position = wall_block.rect().get_center() - Vector2(180.0, 0.0)
+		thrown.velocity = Vector2(1400.0, 0.0)
+		game._add_projectile(thrown)
+		for i in 30:
+			await step(1)
+			if not is_instance_valid(thrown) or thrown.state == Projectile.State.STUCK or wall_block.broken:
+				break
+		var stuck_in := is_instance_valid(thrown) and thrown.state == Projectile.State.STUCK \
+				and wall_block.rect().grow(10.0).has_point(thrown.tip())
+		if wall_i == 2:
+			wall_results.append(wall_block.broken and not stuck_in)
+		else:
+			wall_results.append(stuck_in and not wall_block.broken and wall_block.hp == wall_hp_before - 1)
+		if is_instance_valid(thrown) and thrown in game.projectiles:
+			game._remove_projectile(thrown)
+	check(wall_targets.size() == 3 and not false in wall_results,
+		"Ville : lance et flèche se plantent dans un mur qui tient, et passent s'il casse (%s)" % [wall_results])
+	Ville.variety = false
+	# Ville : beaucoup d'objets et d'armes, dans les immeubles et partout, qui se posent tous
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	GameSetup.player_devices = []
+	GameSetup.player_characters = []
+	await new_game()
+	game._item_spawn_timer = 1e9
+	game._weapon_spawn_timer = 1e9
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+		fi.equip(load(GameSetup.WEAPONS[1]), 0)
+		fi.item = "bouclier"  # main pleine : personne ne ramasse rien
+	check(game.map.item_spawn_points().size() >= 30 and game.map.weapon_spawn_points().size() >= 30 and game.map.max_pickups > game.MAX_PICKUPS \
+		and game.map.item_spawn_time < game.ITEM_SPAWN_TIME and game.map.weapon_spawn_time < game.WEAPON_SPAWN_TIME,
+		"Ville : beaucoup plus d'objets et d'armes (%d + %d points, plus souvent)" % [game.map.item_spawn_points().size(), game.map.weapon_spawn_points().size()])
+	var ville_items: Array[ItemPickup] = []
+	for where in game.map.item_spawn_points():
+		ville_items.append(game.spawn_pickup("pistolet", where))
+	var ville_weapons: Array[Projectile] = []
+	for where in game.map.weapon_spawn_points():
+		ville_weapons.append(game.spawn_weapon(load(GameSetup.WEAPONS[1]), where))
+	await step(180)
+	var items_down := ville_items.filter(func(p): return is_instance_valid(p) and p in game.pickups and p.velocity.length() < 1.0).size()
+	var weapons_down := ville_weapons.filter(func(w): return is_instance_valid(w) and w in game.projectiles and w.state == Projectile.State.STUCK).size()
+	check(items_down == ville_items.size() and weapons_down == ville_weapons.size(),
+		"Ville : les objets (%d/%d) et les armes (%d/%d) apparus dans les immeubles se posent" % [items_down, ville_items.size(), weapons_down, ville_weapons.size()])
+	await shot("ville_objets_partout")
+	# Ville : dans un immeuble, chaque perso monte d'un étage avec saut + double saut
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	for c_path in GameSetup.CHARACTERS:
+		GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}]]
+		GameSetup.player_characters = [c_path, c_path]
+		await new_game()
+		var climber: Fighter = game.fighters[0]
+		climber.input_source = Scripted.new(func(s, f):
+			s.jump_held = f >= 30 and f < 90
+			s.jump_pressed = f == 30 or f == 48)
+		game.fighters[1].input_source = Scripted.new(func(s, f): pass)
+		climber.global_position = Vector2(Ville.building_center(10), -climber.stats.body_size.y / 2.0)
+		climber.velocity = Vector2.ZERO
+		await step(140)
+		if c_path == GameSetup.CHARACTERS[0]:
+			await shot("ville_etage")
+		var feet := climber.global_position.y + climber.stats.body_size.y / 2.0
+		check(climber.is_on_floor() and absf(feet + Ville.FLOOR_HEIGHT) < 4.0,
+			"Ville : %s monte d'un étage avec saut + double saut (pieds à %d)" % [c_path.get_file(), feet])
+	# Ville : les murs se cassent à coups d'attaque lourde (3 PV sur 6 par coup), et ne reviennent pas
+	var wall_x := Ville.building_lefts()[9] + Ville.BUILDINGS[9][0] * Ville.BLOCK - Ville.BLOCK / 2.0
+	var wall_block: CityBlock = null
+	for window in game.map.windows():
+		if window is CityBlock and window.rect().has_point(Vector2(wall_x, -2.0 * Ville.FLOOR_HEIGHT - Ville.BLOCK / 2.0)):
+			wall_block = window
+	var breaker: Fighter = game.fighters[0]
+	breaker.global_position = Vector2(wall_x - Ville.BLOCK / 2.0 - 40.0, -2.0 * Ville.FLOOR_HEIGHT - breaker.stats.body_size.y / 2.0)
+	breaker.velocity = Vector2.ZERO
+	breaker.input_source = Scripted.new(func(s, f):
+		s.stick = Vector2(1, 0) if f < 3 else Vector2.ZERO
+		s.heavy_pressed = f == 20 or f == 90 or f == 160
+		s.heavy_held = s.heavy_pressed)
+	await step(60)
+	var after_one := wall_block.hp if wall_block != null else -1
+	await step(160)
+	check(wall_block != null and after_one == Ville.BLOCK_HP - CityBlock.HEAVY_DAMAGE and wall_block.broken,
+		"Ville : un mur s'abîme puis se casse à coups d'attaque lourde (PV après 1 coup : %d, cassé : %s)" % [after_one, wall_block.broken if wall_block else false])
+	await shot("ville_mur_casse")
+	await step(60 * 20)
+	check(wall_block != null and wall_block.broken, "Ville : un bloc cassé ne revient pas (la ville ne se répare pas)")
+	# ... et une grenade qui explose contre un immeuble abîme les blocs autour
+	var near: Array = game.map.windows().filter(func(w): return w is CityBlock and not w.broken \
+		and w.rect().get_center().distance_to(Vector2(Ville.building_center(9), -Ville.FLOOR_HEIGHT * 3.0)) < 150.0)
+	game.map.smash_windows_in(Vector2(Ville.building_center(9), -Ville.FLOOR_HEIGHT * 3.0), 150.0)
+	check(not near.is_empty() and near.all(func(w): return w.hp == Ville.BLOCK_HP - CityBlock.EXPLOSION_DAMAGE),
+		"Ville : une explosion abîme les blocs dans son rayon (%d blocs)" % near.size())
+	# Ville : écroulement. Casser un seul mur du rez-de-chaussée ne fait rien tomber...
+	await new_game()
+	var collapse := game.map.get_node("Ecroulement") as CityCollapse
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	var ground_walls := func(index: int, side: int) -> Array:
+		var left: float = Ville.building_lefts()[index]
+		var right: float = left + Ville.BUILDINGS[index][0] * Ville.BLOCK
+		var x: float = left + Ville.BLOCK / 2.0 if side < 0 else right - Ville.BLOCK / 2.0
+		return collapse.blocks.filter(func(b: CityBlock) -> bool:
+			return not b.one_way and b.rect().has_point(Vector2(x, b.rect().get_center().y)) and b.rect().position.y >= -Ville.FLOOR_HEIGHT - 1.0)
+	var in_building := func(index: int) -> Array:
+		var left: float = Ville.building_lefts()[index]
+		var right: float = left + Ville.BUILDINGS[index][0] * Ville.BLOCK
+		return collapse.blocks.filter(func(b: CityBlock) -> bool:
+			return not b.broken and b.rect().get_center().x > left and b.rect().get_center().x < right)
+	var before_count: int = in_building.call(1).size()
+	for b in ground_walls.call(1, -1):
+		b.hit(Ville.BLOCK_HP)
+	await step(30)
+	check(collapse.chunks.is_empty() and in_building.call(1).size() == before_count - 3,
+		"Ville : un seul mur coupé, l'immeuble tient (morceaux qui tombent : %d)" % collapse.chunks.size())
+	# ... couper les deux murs fait tomber tout le haut d'un bloc : il tremble, tombe, fait mal et éclate
+	var victim: Fighter = game.fighters[1]
+	victim.global_position = Vector2(Ville.building_center(0), -victim.stats.body_size.y / 2.0)
+	victim.velocity = Vector2.ZERO
+	for b in ground_walls.call(0, -1) + ground_walls.call(0, 1):
+		b.hit(Ville.BLOCK_HP)
+	await step(3)
+	var falling := collapse.chunks.size()
+	var chunk_size: int = collapse.chunks[0].rects.size() if falling > 0 else 0
+	var warned: bool = falling > 0 and collapse.chunks[0].state == FallingChunk.State.WARN
+	await step(20)
+	await shot("ville_ecroulement")
+	await step(130)
+	check(falling == 1 and chunk_size >= 20 and warned,
+		"Ville : les deux murs coupés, le haut tombe d'un seul morceau qui tremble d'abord (%d morceau(x), %d blocs)" % [falling, chunk_size])
+	check(in_building.call(0).is_empty() and collapse.chunks.is_empty(), "Ville : le morceau s'écrase et éclate (blocs restants : %d)" % in_building.call(0).size())
+	check(victim.is_stunned() or victim.lives < GameSetup.lives, "Ville : celui qui est dessous est touché (sonné : %s)" % victim.is_stunned())
+	# ... et un blocage l'arrête : il éclate sur le bouclier, qui craque fort
+	await step(200)
+	var blocker: Fighter = game.fighters[1]
+	blocker.global_position = Vector2(Ville.building_center(2), -blocker.stats.body_size.y / 2.0)
+	blocker.velocity = Vector2.ZERO
+	blocker.input_source = Scripted.new(func(s, f): s.block_held = true)
+	await step(30)
+	var shield_before := blocker.shield
+	var stunned_before := blocker.is_stunned()
+	for b in ground_walls.call(2, -1) + ground_walls.call(2, 1):
+		b.hit(Ville.BLOCK_HP)
+	await step(120)
+	check(not stunned_before and not blocker.is_stunned() and blocker.shield == shield_before - Game.CHUNK_SHIELD_DAMAGE,
+		"Ville : un gros morceau sur un bouclier éclate et le bouclier craque (%d -> %d)" % [shield_before, blocker.shield])
+	# Ville : la balise d'appel. RT : un viseur rouge, puis le mecha tombe du ciel 1,5 s plus tard et se
+	# pose sur le toit (pas dedans). Celui qui est dessous est écrasé (sonné), celui qui l'a appelé non.
+	await new_game()
+	game._beacon_timer = 1e9
+	game._item_spawn_timer = 1e9
+	var caller: Fighter = game.fighters[0]
+	var other: Fighter = game.fighters[1]
+	var cmd := {"stick": Vector2.ZERO, "jump": false, "jp": false, "dash": false, "item": false}
+	caller.input_source = Scripted.new(func(s, f):
+		s.stick = cmd.stick
+		s.jump_held = cmd.jump
+		s.jump_pressed = cmd.jp
+		s.dash_pressed = cmd.dash
+		s.item_pressed = cmd.item
+		cmd.jp = false
+		cmd.dash = false
+		cmd.item = false)
+	other.input_source = Scripted.new(func(s, f): pass)
+	var roof_x := Ville.building_center(13) - 120.0
+	var roof_y := Ville.roof_top(13)
+	caller.global_position = Vector2(roof_x, roof_y - caller.stats.body_size.y / 2.0 - 2.0)
+	other.global_position = Vector2(roof_x + 30.0, roof_y - other.stats.body_size.y / 2.0 - 2.0)
+	await step(10)
+	check(caller.take_item("balise") and caller.item == "balise", "Ville : on ramasse une balise d'appel")
+	cmd.item = true
+	await step(2)
+	var mecha: Mecha = game.mechas[0] if game.mechas.size() == 1 else null
+	check(mecha != null and caller.item == "" and mecha.state == Mecha.State.CALLED and absf(mecha.global_position.y - roof_y) < 2.0,
+		"Ville : RT avec la balise marque le toit d'un viseur rouge (mecha en route : %s)" % (mecha != null))
+	var frames := 0
+	while mecha != null and not mecha.is_ready() and frames < 200:
+		await step(1)
+		frames += 1
+		if frames == 82:
+			await shot("ville_mecha_appel")
+	check(mecha != null and mecha.is_ready() and absf(frames / 60.0 - Mecha.CALL_TIME) < 0.1,
+		"Ville : le mecha se pose %.2f s après l'appel" % (frames / 60.0))
+	await step(2)
+	check(touched(other) and untouched(caller), "Ville : il écrase celui qui est dessous (sonné : %s), pas celui qui l'a appelé" % other.is_stunned())
+	await step(40)
+	check(mecha.is_on_floor() and absf(mecha.global_position.y - roof_y) < 2.0, "Ville : le mecha tient sur le toit (y = %d)" % mecha.global_position.y)
+	# Monter : collé au mecha, stick vers le haut
+	caller.global_position = Vector2(mecha.global_position.x, roof_y - caller.stats.body_size.y / 2.0 - 2.0)
+	await step(2)
+	cmd.stick = Vector2(0.0, -1.0)
+	await step(3)
+	cmd.stick = Vector2.ZERO
+	check(caller.is_piloting() and mecha.pilot == caller and not caller.can_be_hit() and mecha.visual.color == caller.color,
+		"Ville : stick vers le haut contre le mecha, on monte dedans")
+	# Marcher, voler, carburant, dash
+	var x0 := mecha.global_position.x
+	cmd.stick = Vector2(1.0, 0.0)
+	await step(20)
+	cmd.stick = Vector2.ZERO
+	await step(10)
+	check(mecha.global_position.x - x0 > 120.0 and caller.global_position.distance_to(mecha.cockpit()) < 1.0,
+		"Ville : le mecha marche (%d px), le pilote reste dans le cockpit" % (mecha.global_position.x - x0))
+	cmd.jp = true
+	cmd.jump = true
+	await step(90)
+	await shot("ville_mecha_vol")
+	check(mecha.global_position.y < roof_y - 600.0 and mecha.fuel < Mecha.FUEL_MAX - 1.0,
+		"Ville : A gardé, il vole (%d px au-dessus du toit, carburant %.1f s)" % [roof_y - mecha.global_position.y, mecha.fuel])
+	cmd.jump = false
+	var fuel_air := mecha.fuel
+	# (une chute de haut abîme le toit, et l'onde de choc d'arrivée l'avait déjà un peu abîmé :
+	# ici, toit réparé, on regarde juste qu'il retombe dessus et que le carburant revient)
+	for w in game.map.windows():
+		if w is CityBlock and not w.broken and absf(w.rect().get_center().x - mecha.global_position.x) < 300.0:
+			w.hp = w.max_hp
+	frames = 0
+	while not mecha.is_on_floor() and frames < 300:
+		await step(1)
+		frames += 1
+	await step(30)
+	check(mecha.is_on_floor() and absf(mecha.global_position.y - roof_y) < 2.0 and mecha.fuel > fuel_air + 1.0,
+		"Ville : A lâché, il retombe sur le toit et le carburant revient (%.1f -> %.1f)" % [fuel_air, mecha.fuel])
+	mecha.fuel = 0.3
+	cmd.jp = true
+	cmd.jump = true
+	await step(60)
+	cmd.jump = false
+	check(mecha._empty_tank and mecha.global_position.y > roof_y - 400.0, "Ville : réservoir vide, il ne vole plus (%d px)" % (roof_y - mecha.global_position.y))
+	await step(120)
+	x0 = mecha.global_position.x
+	cmd.stick = Vector2(-1.0, 0.0)
+	cmd.dash = true
+	await step(12)
+	cmd.stick = Vector2.ZERO
+	check(x0 - mecha.global_position.x > 200.0, "Ville : LB, le mecha fait un dash (%d px)" % (x0 - mecha.global_position.x))
+	await step(30)
+	# Sortir : bas + A gardés 0,5 s (pas moins)
+	cmd.stick = Vector2(0.0, 1.0)
+	cmd.jump = true
+	await step(15)
+	var still_in := caller.is_piloting()
+	await step(25)
+	cmd.stick = Vector2.ZERO
+	cmd.jump = false
+	check(still_in and not caller.is_piloting() and mecha.pilot == null and caller.global_position.y < mecha.body_rect().position.y,
+		"Ville : bas + A gardés 0,5 s, on sort par le haut (pas avant)")
+	await step(60)
+	check(caller.can_be_hit() and mecha.pilot == null and mecha.visual.color == Mecha.EMPTY_COLOR, "Ville : le mecha reste là, vide (gris)")
+	# N'importe qui peut le prendre ; tombé hors de la ville avec, on perd une vie et le mecha
+	other.global_position = Vector2(mecha.global_position.x, roof_y - other.stats.body_size.y / 2.0 - 2.0)
+	other.input_source = Scripted.new(func(s, f): s.stick = Vector2(0.0, -1.0) if f < 3 else Vector2.ZERO)
+	await step(6)
+	check(other.is_piloting() and mecha.pilot == other and mecha.visual.color == other.color, "Ville : un autre joueur monte dans le mecha vide")
+	var lives_before_fall := other.lives
+	mecha.global_position = Vector2(Ville.HALF_WIDTH + 2000.0, -500.0)
+	await step(3)
+	check(other.lives == lives_before_fall - 1 and not other.is_piloting() and not is_instance_valid(mecha) and game.mechas.is_empty(),
+		"Ville : tombé hors de la ville dans le mecha, on perd une vie et le mecha")
+	# L'onde de choc repousse ceux qui sont autour (sans les sonner)
+	await step(90)
+	caller.global_position = Vector2(roof_x, roof_y - caller.stats.body_size.y / 2.0 - 2.0)
+	other.global_position = Vector2(roof_x + 200.0, roof_y - other.stats.body_size.y / 2.0 - 2.0)
+	await step(5)
+	var stunned_other := other.is_stunned()
+	var x_other := other.global_position.x
+	var second_mecha: Mecha = game.call_mecha(caller)
+	frames = 0
+	while not second_mecha.is_ready() and frames < 200:
+		await step(1)
+		frames += 1
+	await step(4)
+	check(other.global_position.x - x_other > 40.0 and other.is_stunned() == stunned_other,
+		"Ville : l'onde de choc repousse ceux qui sont autour (%d px), sans les sonner" % (other.global_position.x - x_other))
+	# Les balises tombent tant qu'il y a moins de mechas que de joueurs
+	game._beacon_timer = 0.0
+	await step(1)
+	var beacons: int = game.pickups.filter(func(p): return p.kind == "balise").size()
+	game._beacon_timer = 0.0
+	await step(1)
+	var beacons_after: int = game.pickups.filter(func(p): return p.kind == "balise").size()
+	check(beacons == 1 and beacons_after == 1, "Ville : une balise tombe tant qu'il y a moins de mechas que de joueurs (%d puis %d)" % [beacons, beacons_after])
+	# Ville, tests préventifs : chaque perso monte et sort ; un mecha appelé contre un immeuble ne reste
+	# pas coincé dans le mur ; appelé au-dessus du vide, il tombe et disparaît sans bug.
+	for c_path in GameSetup.CHARACTERS:
+		GameSetup.player_characters = [c_path, c_path]
+		await new_game()
+		game._beacon_timer = 1e9
+		game._item_spawn_timer = 1e9
+		var mech_rider: Fighter = game.fighters[0]
+		mech_rider.input_source = Scripted.new(func(s, f):
+			s.stick = Vector2(0.0, -1.0) if f >= 100 and f < 104 else Vector2(0.0, 1.0) if f >= 140 and f < 180 else Vector2.ZERO
+			s.jump_held = f >= 140 and f < 180)
+		game.fighters[1].input_source = Scripted.new(func(s, f): pass)
+		mech_rider.global_position = Vector2(Ville.building_center(13), Ville.roof_top(13) - mech_rider.stats.body_size.y / 2.0 - 2.0)
+		game.fighters[1].global_position = Vector2(Ville.building_center(7), Ville.roof_top(7) - 60.0)
+		await step(2)
+		var mech_ride: Mecha = game.call_mecha(mech_rider)
+		await step(120)
+		var boarded := mech_rider.is_piloting()
+		await step(150)
+		check(boarded and not mech_rider.is_piloting() and mech_rider.is_on_floor() and not mech_ride.pilot,
+			"Ville : %s monte dans le mecha puis en sort" % c_path.get_file())
+	var wall_left := Ville.building_lefts()[13]
+	caller = game.fighters[0]
+	caller.input_source = Scripted.new(func(s, f): pass)
+	caller.global_position = Vector2(wall_left - 30.0, -caller.stats.body_size.y / 2.0 - 2.0)
+	await step(5)
+	var walled: Mecha = game.call_mecha(caller)
+	await step(100)
+	var landed_y := walled.global_position.y
+	caller._board(walled)
+	caller.input_source = Scripted.new(func(s, f): s.stick = Vector2(1.0, 0.0) if f < 15 else Vector2.ZERO)
+	var x_start := walled.global_position.x
+	await step(20)
+	check(absf(landed_y - Ville.roof_top(13)) < 2.0 and walled.global_position.x > x_start + 60.0 and absf(walled.global_position.y - landed_y) < 2.0,
+		"Ville : appelé au pied d'un immeuble, il se pose sur son toit et n'est pas coincé (y %d, x %d -> %d)" % [landed_y, x_start, walled.global_position.x])
+	caller.leave_mecha()
+	var faller: Fighter = game.fighters[1]
+	faller.global_position = Vector2(Ville.HALF_WIDTH + 300.0, -600.0)
+	var lost_mecha: Mecha = game.call_mecha(faller)
+	await step(200)
+	check(not is_instance_valid(lost_mecha) and not lost_mecha in game.mechas and faller.lives < GameSetup.lives,
+		"Ville : un mecha appelé au-dessus du vide tombe et disparaît")
+	check(not caller.take_item("balise") or not caller.is_piloting(), "Ville : on ne ramasse pas d'objet en mecha")
+
+	# Ville : les coups des joueurs à pied usent un mecha (1 pour un léger, 3 pour un lourd, une fois
+	# par coup) ; le pilote, lui, n'est pas touché.
+	GameSetup.player_characters = [GameSetup.CHARACTERS[0], GameSetup.CHARACTERS[0]]
+	await new_game()
+	game._beacon_timer = 1e9
+	game._item_spawn_timer = 1e9
+	var pilot: Fighter = game.fighters[0]
+	var hitter: Fighter = game.fighters[1]
+	var pcmd := {"stick": Vector2.ZERO, "x": false, "y": false, "yh": false}
+	pilot.input_source = Scripted.new(func(s, f):
+		s.stick = pcmd.stick
+		s.attack_pressed = pcmd.x
+		s.heavy_pressed = pcmd.y
+		s.heavy_held = pcmd.yh
+		pcmd.x = false
+		pcmd.y = false)
+	hitter.input_source = Scripted.new(func(s, f): pass)
+	var mx := Ville.building_center(Ville.TOWER) - 300.0  # sur le toit de la grande tour (960 px de large)
+	var my := Ville.roof_top(Ville.TOWER)
+	pilot.global_position = Vector2(mx, my - 40.0)
+	hitter.global_position = Vector2(mx + 400.0, my - 40.0)
+	await step(2)
+	var tank: Mecha = game.call_mecha(pilot, "roquette")
+	await step(100)
+	pilot._board(tank)
+	await step(2)
+	hitter.global_position = Vector2(tank.body_rect().end.x + hitter.stats.body_size.x / 2.0 + 4.0, my - hitter.stats.body_size.y / 2.0 - 1.0)
+	await step(5)
+	var hp0 := tank.hp
+	hitter.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 0)
+	await step(40)
+	var after_light := tank.hp
+	hitter.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 0
+		s.heavy_held = f < 4)
+	await step(70)
+	check(hp0 == Mecha.WEAR_MAX and after_light == hp0 - Game.MECHA_WEAR_LIGHT and tank.hp == after_light - Game.MECHA_WEAR_HEAVY,
+		"Ville : un coup léger use le mecha de 1, un lourd de 3 (%d -> %d -> %d)" % [hp0, after_light, tank.hp])
+	check(untouched(pilot) and pilot.is_piloting() and tank.visual.wear > 0.0, "Ville : le pilote n'est pas touché, le mecha se fissure")
+	# Le fusil d'assaut : X = une rafale de 3 balles vers l'adversaire, qui le sonne
+	hitter.input_source = Scripted.new(func(s, f): pass)
+	hitter.global_position = Vector2(mx + 350.0, my - hitter.stats.body_size.y / 2.0 - 1.0)
+	await step(90)
+	var bullets_before: int = game.projectiles.filter(func(p): return p.kind == "balle").size()
+	pcmd.x = true
+	await step(1)
+	var seen_bullets := {}  # toutes les balles vues (la première peut toucher avant que la 3e parte)
+	for i in 12:
+		await step(1)
+		for p in game.projectiles:
+			if p.kind == "balle":
+				seen_bullets[p.get_instance_id()] = true
+	var max_bullets := seen_bullets.size()
+	check(bullets_before == 0 and max_bullets == Mecha.BURST_SHOTS and tank.facing > 0.0, "Ville : X tire une rafale de %d balles vers l'adversaire" % max_bullets)
+	await step(30)
+	check(touched(hitter) and tank.hp == after_light - Game.MECHA_WEAR_HEAVY, "Ville : la rafale touche l'adversaire, pas son propre mecha")
+	await shot("ville_mecha_rafale")
+	# Le lance-roquette : Y gardé = chargée, lâché = elle part ; elle explose sur l'adversaire
+	await step(200)
+	hitter.recover()
+	hitter._invincible_timer = 0.0
+	var lives_h := hitter.lives
+	pcmd.y = true
+	pcmd.yh = true
+	await step(15)
+	check(tank.visual.turret_charge > 0.1, "Ville : Y gardé, la roquette se charge (%.2f)" % tank.visual.turret_charge)
+	pcmd.yh = false
+	await step(2)
+	var rocket_list: Array = game.projectiles.filter(func(p): return p.kind == "roquette")
+	check(rocket_list.size() == 1 and rocket_list[0].homing == null, "Ville : petite charge, Y lâché : une seule roquette part, non guidée")
+	await step(4)
+	await shot("ville_mecha_roquette")
+	await step(40)
+	check(game.projectiles.filter(func(p): return p.kind == "roquette").is_empty() and touched(hitter),
+		"Ville : la roquette explose sur l'adversaire (vies %d -> %d, sonné : %s)" % [lives_h, hitter.lives, hitter.is_stunned()])
+	# Plus de charge, plus de roquettes : 2 (gardé 0,5 s), 3 (gardé 1 s), 3 guidées (charge pleine, elles partent seules)
+	hitter._invincible_timer = 100.0  # elles le ratent : on compte juste les roquettes
+	var volleys := []
+	for hold in [40, 70, 100]:
+		await step(70)
+		var volley_old := {}  # roquettes de la salve d'avant, encore en vol
+		for p in game.projectiles:
+			volley_old[p.get_instance_id()] = true
+		pcmd.y = true
+		pcmd.yh = true
+		await step(hold)
+		pcmd.yh = false
+		var volley_seen := {}
+		var volley_guided := 0
+		for i in 30 + (hold - 90 if hold > 90 else 0):
+			await step(1)
+			for p in game.projectiles:
+				if p.kind == "roquette" and p.owner_index == tank.pilot.player_index and not volley_seen.has(p.get_instance_id()) \
+						and not volley_old.has(p.get_instance_id()):
+					volley_seen[p.get_instance_id()] = true
+					volley_guided += 1 if p.homing != null else 0
+		volleys.append([volley_seen.size(), volley_guided])
+	check(volleys == [[2, 0], [3, 0], [3, 3]], "Ville : roquettes du mecha, 1 à 3 selon la charge, guidées à charge pleine (%s)" % [volleys])
+	await step(120)
+	hitter._invincible_timer = 0.0
+	hitter.recover()
+	# Une roquette use un autre mecha (de 5 à 7) ; le mecha détruit explose, son pilote est éjecté sonné
+	# sans perdre de vie
+	await step(150)
+	hitter.recover()
+	hitter.global_position = Vector2(mx + 550.0, my - 40.0)
+	await step(2)
+	var enemy: Mecha = game.call_mecha(hitter, "roquette")
+	await step(100)
+	hitter._board(enemy)
+	await step(5)
+	pcmd.y = true
+	pcmd.yh = false
+	frames = 0
+	while enemy.hp == Mecha.WEAR_MAX and frames < 120:
+		await step(1)
+		frames += 1
+	check(enemy.hp <= Mecha.WEAR_MAX - Game.MECHA_WEAR_ROCKET[0] and enemy.hp >= Mecha.WEAR_MAX - Game.MECHA_WEAR_ROCKET[1] and hitter.is_piloting() and untouched(hitter),
+		"Ville : une roquette use l'autre mecha de %d, son pilote n'est pas touché" % (Mecha.WEAR_MAX - enemy.hp))
+	var hitter_lives := hitter.lives
+	enemy.hp = 2
+	await step(60)
+	pcmd.y = true
+	frames = 0
+	while is_instance_valid(enemy) and frames < 120:
+		await step(1)
+		frames += 1
+	await step(2)
+	await shot("ville_mecha_explosion")
+	check(not is_instance_valid(enemy) and not hitter.is_piloting() and hitter.is_stunned() and hitter.is_invincible() and hitter.lives == hitter_lives and game.mechas.size() == 1,
+		"Ville : plus de solidité, le mecha explose ; le pilote est éjecté, sonné, sans perdre de vie")
+	await step(20)
+	check(hitter.global_position.y < my - 100.0 or hitter.velocity.y < 0.0 or hitter.is_on_floor(), "Ville : le pilote éjecté part vers le haut")
+	# Une grenade use un mecha (pas le pilote)
+	var hp_before_grenade := tank.hp
+	game._explode(tank.body_rect().get_center())
+	check(tank.hp == hp_before_grenade - Game.MECHA_WEAR_GRENADE and pilot.is_piloting() and untouched(pilot), "Ville : une grenade use le mecha de 4, pas son pilote")
+	# Ville : fusil d'assaut et lance-roquette à pied, des objets à 2 mains
+	await new_game()
+	game._beacon_timer = 1e9
+	game._item_spawn_timer = 1e9
+	var gunner: Fighter = game.fighters[0]
+	var foe: Fighter = game.fighters[1]
+	game._weapon_spawn_timer = 1e9
+	var gcmd := {"x": false, "rt": false, "rb": false}
+	gunner.input_source = Scripted.new(func(s, f):
+		s.attack_pressed = gcmd.x
+		s.item_pressed = gcmd.rt
+		s.item_held = gcmd.rt
+		s.throw_pressed = gcmd.rb
+		gcmd.x = false
+		gcmd.rt = false
+		gcmd.rb = false)
+	foe.input_source = Scripted.new(func(s, f): pass)
+	gunner.global_position = Vector2(mx, my - 40.0)
+	foe.global_position = Vector2(mx + 350.0, my - 40.0)
+	await step(20)
+	check(gunner.take_item("fusil") and gunner.item_ammo == Fighter.RIFLE_AMMO and gunner.has_two_handed_item(), "Ville : le fusil d'assaut a 30 balles")
+	gcmd.x = true
+	await step(3)
+	check(not gunner.is_attacking(), "Ville : avec le fusil (2 mains), X n'attaque plus")
+	var rifle_seen := {}
+	gcmd.rt = true
+	for i in 14:
+		await step(1)
+		for p in game.projectiles:
+			if p.kind == "balle":
+				rifle_seen[p.get_instance_id()] = true
+	check(rifle_seen.size() == Fighter.RIFLE_BURST and gunner.item_ammo == Fighter.RIFLE_AMMO - Fighter.RIFLE_BURST,
+		"Ville : RT tire une rafale de 3 balles (%d vues, %d restent)" % [rifle_seen.size(), gunner.item_ammo])
+	await step(30)
+	check(touched(foe), "Ville : la rafale du fusil touche l'adversaire")
+	await shot("ville_fusil")
+	gcmd.rb = true
+	await step(2)
+	var tossed_rifle: Array = game.pickups.filter(func(p): return p.kind == "fusil")
+	check(gunner.item == "" and tossed_rifle.size() == 1 and tossed_rifle[0].ammo == Fighter.RIFLE_AMMO - Fighter.RIFLE_BURST,
+		"Ville : RB jette le fusil par terre avec ses balles, on retrouve son arme")
+	gcmd.x = true
+	await step(3)
+	check(gunner.is_attacking(), "Ville : fusil jeté, X attaque de nouveau")
+	await step(40)
+	# Il vole vers l'adversaire, qui peut le ramasser (ici il passe dessus) ; on le lui reprend.
+	check(foe.item == "fusil" and foe.item_ammo == Fighter.RIFLE_AMMO - Fighter.RIFLE_BURST, "Ville : l'adversaire ramasse le fusil jeté, avec ses balles")
+	foe.item = ""
+	gunner.take_item("fusil", Fighter.RIFLE_AMMO - Fighter.RIFLE_BURST)
+	gunner.item_ammo = 2
+	await step(30)
+	gcmd.rt = true
+	await step(12)
+	check(gunner.item == "", "Ville : fusil vide, il disparaît")
+	# Le lance-roquette : une seule roquette, très violente
+	await step(200)
+	foe.recover()
+	foe._invincible_timer = 0.0
+	foe.global_position = Vector2(mx + 350.0, my - foe.stats.body_size.y / 2.0 - 1.0)
+	gunner.global_position = Vector2(mx, my - gunner.stats.body_size.y / 2.0 - 1.0)
+	await step(5)
+	check(gunner.take_item("lance_roquette") and gunner.item_ammo == 1, "Ville : le lance-roquette a 1 roquette")
+	var foe_x := foe.global_position.x
+	gcmd.rt = true
+	await step(2)
+	var foot_rockets: Array = game.projectiles.filter(func(p): return p.kind == "roquette")
+	check(foot_rockets.size() == 1 and gunner.item == "", "Ville : RT tire la roquette, le lance-roquette disparaît")
+	await step(8)
+	await shot("ville_lance_roquette")
+	await step(20)
+	check(touched(foe) and foe.global_position.x > foe_x + 60.0, "Ville : la roquette touche et projette loin (%d px)" % (foe.global_position.x - foe_x))
+	# Les tirs s'annulent : balle contre balle, 3 balles contre une roquette ; une roquette se contre
+	# (coup ou blocage parfait), un blocage parfait dans une explosion est un contre.
+	var reset_pair := func() -> void:
+		for fi: Fighter in [gunner, foe]:
+			fi.recover()
+			fi._invincible_timer = 0.0
+			fi.velocity = Vector2.ZERO
+		gunner.global_position = Vector2(mx, my - gunner.stats.body_size.y / 2.0 - 1.0)
+		foe.global_position = Vector2(mx + 400.0, my - foe.stats.body_size.y / 2.0 - 1.0)
+		game.gauge.points = 0.0  # pas de passage de phase (son explosion casserait le toit sous eux)
+	await step(200)
+	reset_pair.call()
+	await step(5)
+	var lives_pair := [gunner.lives, foe.lives]
+	game._on_item_used(gunner, "balle", Vector2.RIGHT, 1.0, 0.0)
+	game._on_item_used(foe, "balle", Vector2.LEFT, 1.0, 0.0)
+	await step(20)
+	check(game.projectiles.filter(func(p): return p.kind == "balle").is_empty() and not gunner.is_stunned() and not foe.is_stunned()
+		and [gunner.lives, foe.lives] == lives_pair, "Ville : deux balles qui se croisent s'annulent")
+	game.gauge.points = 0.0  # la jauge a un maximum : on repart de 0 pour voir le +3
+	var gauge_cancel: float = game.gauge.points
+	game._fire_launcher(foe, Vector2.LEFT, Fighter.LAUNCHER_BLAST)
+	for i in Game.ROCKET_CANCEL_BULLETS:
+		game._on_item_used(gunner, "balle", Vector2.RIGHT, 1.0, 0.0)
+		await step(3)
+	await step(30)
+	check(game.projectiles.is_empty() and not gunner.is_stunned() and not foe.is_stunned() and game.gauge.points >= gauge_cancel + 3.0,
+		"Ville : 3 balles annulent la roquette, contre compté triple (jauge %.0f -> %.0f)" % [gauge_cancel, game.gauge.points])
+	await step(60)
+	reset_pair.call()
+	gunner.input_source = Scripted.new(func(s, f): s.block_held = f > 16)
+	await step(5)
+	game._fire_launcher(foe, Vector2.LEFT, Fighter.LAUNCHER_BLAST)
+	var parry_frames := 0
+	while not game.projectiles.is_empty() and parry_frames < 60:
+		await step(1)
+		parry_frames += 1
+	check(game.projectiles.is_empty() and not gunner.is_stunned() and gunner.shield == gunner.stats.shield_max,
+		"Ville : une roquette prise en blocage parfait est annulée, sans explosion")
+	await step(60)
+	reset_pair.call()
+	gunner.input_source = Scripted.new(func(s, f): pass)
+	await step(5)
+	game.gauge.points = 0.0  # la jauge a un maximum : on repart de 0 pour voir le +3
+	var gauge_hit: float = game.gauge.points
+	game._fire_launcher(foe, Vector2.LEFT, Fighter.LAUNCHER_BLAST)
+	await step(8)
+	var rocket_now: Array = game.projectiles.filter(func(p): return p.kind == "roquette")
+	if not rocket_now.is_empty():
+		gunner.global_position.x = rocket_now[0].tip().x - 50.0
+		light_now(gunner, Vector2.RIGHT)
+		gunner._attack_time = gunner._attack_startup()  # pile quand le coup sort : renvoi parfait
+	await step(2)
+	var sent_back: Array = game.projectiles.filter(func(p): return p.kind == "roquette")
+	check(sent_back.size() == 1 and sent_back[0].owner_index == gunner.player_index and sent_back[0].velocity.x > 0.0
+		and game.gauge.points >= gauge_hit + 3.0, "Ville : une roquette frappée pile au bon moment repart vers le tireur (contre de lourde)")
+	var foe_lives := foe.lives
+	await step(40)
+	check(not gunner.is_stunned() and (foe.is_stunned() or foe.lives < foe_lives), "Ville : la roquette renvoyée explose sur son tireur")
+	await step(60)
+	reset_pair.call()
+	gunner.input_source = Scripted.new(func(s, f): s.block_held = true)
+	await step(4)
+	var shield_parry := gunner.shield
+	game._explode(gunner.global_position + Vector2(60.0, 0.0))
+	check(not gunner.is_stunned() and gunner.shield == shield_parry, "Ville : un blocage parfait dans une explosion ne prend rien (contre)")
+	# Un gros morceau qui tombe se casse en l'air sous 3 balles, ou sous une roquette (contre de lourde)
+	var city := game.map.get_node("Ecroulement") as CityCollapse
+	var cut_building := func(index: int) -> void:
+		var left: float = Ville.building_lefts()[index]
+		var right: float = left + Ville.BUILDINGS[index][0] * Ville.BLOCK
+		for b: CityBlock in city.blocks:
+			var c := b.rect().get_center()
+			if not b.one_way and b.rect().position.y >= -Ville.FLOOR_HEIGHT - 1.0 \
+					and (absf(c.x - (left + Ville.BLOCK / 2.0)) < 1.0 or absf(c.x - (right - Ville.BLOCK / 2.0)) < 1.0):
+				b.hit(Ville.BLOCK_HP)
+	var shoot_at := func(kind: String, where: Vector2) -> void:
+		var p := Projectile.new()
+		p.kind = kind
+		p.owner_index = 0
+		p.position = where
+		p.velocity = Vector2.UP * 10.0
+		p.rotation = -PI / 2.0
+		p.length = 16.0
+		game._add_projectile(p)
+	for test in [["roquette", 0], ["balle", 2]]:
+		cut_building.call(test[1])
+		await step(36)  # il tremble 0,5 s, puis tombe
+		var falling_now: Array = city.chunks.filter(func(c): return is_instance_valid(c) and c.is_dangerous())
+		var piece: FallingChunk = falling_now[0] if falling_now.size() > 0 else null
+		game.gauge.points = 0.0  # la jauge a un maximum : on repart de 0 pour voir le +3
+		var gauge_chunk: float = game.gauge.points
+		for i in (1 if test[0] == "roquette" else FallingChunk.LIGHT_HITS):
+			if piece != null and piece.is_dangerous():
+				shoot_at.call(test[0], piece.current_rects()[0].get_center())
+			await step(2)
+		check(piece != null and piece.state == FallingChunk.State.BURST and game.gauge.points >= gauge_chunk + 3.0,
+			"Ville : un gros morceau se casse en l'air sous %s (contre de lourde)" % ("une roquette" if test[0] == "roquette" else "3 balles"))
+		await step(200)
+	# Ville : le bouclier d'énergie du mecha (B) et son coup de poing (RB)
+	await new_game()
+	game._beacon_timer = 1e9
+	game._item_spawn_timer = 1e9
+	game._weapon_spawn_timer = 1e9
+	var knight: Fighter = game.fighters[0]
+	var walker: Fighter = game.fighters[1]
+	var kcmd := {"b": false, "rb": false, "u": false, "rt": false}
+	knight.input_source = Scripted.new(func(s, f):
+		s.block_held = kcmd.b
+		s.throw_pressed = kcmd.rb
+		s.ultimate_pressed = kcmd.u
+		s.attack_pressed = kcmd.u
+		s.heavy_pressed = kcmd.u
+		s.item_pressed = kcmd.rt
+		kcmd.rb = false
+		kcmd.u = false
+		kcmd.rt = false)
+	walker.input_source = Scripted.new(func(s, f): pass)
+	knight.global_position = Vector2(mx, my - 40.0)
+	walker.global_position = Vector2(mx + 500.0, my - 40.0)
+	await step(2)
+	var guard: Mecha = game.call_mecha(knight)
+	await step(100)
+	knight._board(guard)
+	await step(5)
+	var walker_at_mecha := func() -> void:
+		walker.recover()
+		walker._invincible_timer = 0.0
+		walker.velocity = Vector2.ZERO
+		walker.global_position = Vector2(guard.body_rect().end.x + walker.stats.body_size.x / 2.0 + 4.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	walker_at_mecha.call()
+	kcmd.b = true
+	await step(20)  # bouclier levé depuis longtemps : plus de blocage parfait
+	var hp_guard := guard.hp
+	light_now(walker, Vector2.LEFT)
+	await step(3)
+	check(guard.is_shielding() and guard.hp == hp_guard and guard.shield == Mecha.SHIELD_MAX - Game.MECHA_WEAR_LIGHT,
+		"Ville : B lève le bouclier du mecha, il encaisse à sa place (bouclier %d)" % guard.shield)
+	await shot("ville_mecha_bouclier")
+	kcmd.b = false
+	await step(30)
+	walker_at_mecha.call()
+	await step(2)
+	game.gauge.points = 0.0
+	var shield_now := guard.shield
+	kcmd.b = true
+	await step(2)
+	light_now(walker, Vector2.LEFT)
+	await step(3)
+	check(guard.hp == hp_guard and guard.shield == shield_now and game.gauge.points >= 1.0 and walker.attack_cooldown_left() > 0.5,
+		"Ville : B juste avant le coup = blocage parfait du mecha (rien d'usé, contre, l'attaquant ne frappe plus)")
+	kcmd.b = false
+	await step(70)
+	# Une balle sur un blocage parfait repart vers son tireur
+	walker.recover()
+	walker.global_position = Vector2(mx + 500.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	await step(5)
+	game._on_item_used(walker, "balle", (guard.body_rect().get_center() - walker.global_position).normalized(), 1.0, 0.0)
+	var bullet_back: Projectile = null
+	for i in 30:
+		if game.projectiles.size() > 0 and bullet_back == null:
+			var b_now: Projectile = game.projectiles[0]
+			if b_now.position.distance_to(guard.body_rect().get_center()) < 260.0:
+				kcmd.b = true
+		await step(1)
+		for p in game.projectiles:
+			if p.kind == "balle" and p.owner_index == knight.player_index:
+				bullet_back = p
+		if bullet_back != null:
+			break
+	check(bullet_back != null and bullet_back.velocity.x > 0.0 and guard.hp == hp_guard, "Ville : une balle sur le blocage parfait du mecha repart vers son tireur")
+	kcmd.b = false
+	await step(40)
+	# Le bouclier vide casse pour de bon
+	guard.shield = 1
+	walker_at_mecha.call()
+	kcmd.b = true
+	await step(20)
+	light_now(walker, Vector2.LEFT)
+	await step(3)
+	kcmd.b = false
+	await step(2)
+	kcmd.b = true
+	await step(3)
+	check(guard.shield_broken and not guard.is_shielding(), "Ville : le bouclier du mecha vide casse, B ne le relève plus")
+	kcmd.b = false
+	# RB : le coup de poing sonne le joueur à pied devant lui et le projette
+	await step(60)
+	walker_at_mecha.call()
+	await step(3)
+	var walker_x := walker.global_position.x
+	kcmd.rb = true
+	await step(4)
+	await shot("ville_mecha_poing")
+	await step(10)
+	check(walker.is_stunned() and walker.global_position.x > walker_x + 40.0, "Ville : RB, le coup de poing du mecha sonne et projette (%d px)" % (walker.global_position.x - walker_x))
+	# ... un blocage parfait l'arrête : contre, le mecha est repoussé et ne frappe plus
+	await step(150)
+	walker_at_mecha.call()
+	walker.input_source = Scripted.new(func(s, f): s.block_held = true)
+	await step(3)
+	game.gauge.points = 0.0
+	kcmd.rb = true
+	await step(8)
+	check(not walker.is_stunned() and game.gauge.points >= 3.0 and guard._punch_cooldown > 0.6,
+		"Ville : un blocage parfait arrête le poing du mecha (contre, le mecha ne frappe plus)")
+	walker.input_source = Scripted.new(func(s, f): pass)
+	# ... et il use un autre mecha de 3
+	await step(70)
+	walker.recover()
+	walker.global_position = Vector2(guard.body_rect().end.x + 200.0, my - 40.0)
+	await step(2)
+	var rival: Mecha = game.call_mecha(walker)
+	await step(100)
+	walker._board(rival)
+	await step(5)
+	rival.global_position.x = guard.body_rect().end.x + Mecha.BODY.x / 2.0 + 40.0
+	await step(3)
+	var rival_hp := rival.hp
+	kcmd.rb = true
+	await step(15)
+	check(rival.hp == rival_hp - Game.MECHA_WEAR_PUNCH, "Ville : le coup de poing use l'autre mecha de 3 (%d -> %d)" % [rival_hp, rival.hp])
+	# Missiles (objet, RT en mecha) : on ne les prend qu'en mecha ; 4 missiles suivent l'ennemi
+	walker.leave_mecha()
+	rival.queue_free()
+	await step(2)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(guard.global_position.x + 700.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	walker.velocity = Vector2.ZERO
+	await step(60)
+	check(not walker.take_item("missiles"), "Ville : à pied, on ne prend pas les missiles")
+	game.spawn_pickup("missiles", guard.body_rect().get_center())
+	await step(3)
+	check(knight.item == "missiles", "Ville : en mecha, on ramasse les missiles en passant dessus")
+	var walker_lives := walker.lives
+	kcmd.rt = true
+	var missiles_seen := {}
+	for i in 40:
+		await step(1)
+		for p in game.projectiles:
+			if p.kind == "missile":
+				missiles_seen[p.get_instance_id()] = true
+		if i == 20:
+			await shot("ville_mecha_missiles")
+	check(missiles_seen.size() == Mecha.MISSILES and knight.item == "", "Ville : RT tire %d missiles" % missiles_seen.size())
+	await step(120)
+	check(walker.is_stunned() or walker.lives < walker_lives, "Ville : les missiles suivent l'ennemi et le touchent")
+	# Bug (Stain) : un joueur sorti du mecha avec ses missiles ne pouvait plus prendre aucun objet
+	knight.item = "missiles"
+	knight.leave_mecha()
+	check(knight.item == "" and knight.take_item("pistolet"), "Ville : sorti du mecha avec des missiles, on peut reprendre des objets")
+	knight.item = ""
+	knight._board(guard)
+	await step(2)
+	# Ultimes en mecha (X + Y, jauge pleine). Barre : grand laser qui gèle (à pied et en mecha)
+	await step(200)
+	for pr in game.projectiles.duplicate():
+		game._remove_projectile(pr)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(guard.global_position.x + 600.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	walker.velocity = Vector2.ZERO
+	await step(30)
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(2)
+	check(guard.ultimate == "laser" and knight.ultimate_points == 0 and game.projectiles.is_empty(),
+		"Ville : X + Y avec la jauge pleine lance l'ultime en mecha (sans tirer en plus)")
+	await step(int((Mecha.ULT_LASER_STARTUP + 0.15) * 60.0))
+	await shot("ville_mecha_ultime_laser")
+	await step(20)
+	check(walker.is_frozen(), "Ville : le grand laser du mecha gèle celui qui est à pied")
+	await step(200)
+	walker.recover()
+	walker._frozen_timer = 0.0
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(guard.global_position.x + 600.0, my - 40.0)
+	await step(2)
+	var target_mecha: Mecha = game.call_mecha(walker)
+	await step(100)
+	walker._board(target_mecha)
+	await step(5)
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(int((Mecha.ULT_LASER_STARTUP + 0.2) * 60.0))
+	check(target_mecha.is_frozen() and target_mecha.hp == Mecha.WEAR_MAX - Game.MECHA_WEAR_ULT_LASER,
+		"Ville : le grand laser gèle l'autre mecha et l'use de 10 (%d)" % target_mecha.hp)
+	# Jumb : onde de 600 px (l'autre mecha s'use de 8 et recule)
+	await step(200)
+	knight.stats = knight.stats.duplicate()
+	knight.stats.ultimate = "onde"
+	var hp_wave := target_mecha.hp
+	var x_wave := target_mecha.global_position.x
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(int((Mecha.ULT_WAVE_STARTUP + 0.2) * 60.0))
+	await shot("ville_mecha_ultime_onde")
+	await step(20)
+	check(target_mecha.hp == hp_wave - Game.MECHA_WEAR_ULT_WAVE and target_mecha.global_position.x > x_wave + 30.0,
+		"Ville : l'onde du mecha use l'autre mecha de 8 et le repousse (%d px)" % (target_mecha.global_position.x - x_wave))
+	# Jib : 3 traversées, chacune use l'autre mecha
+	await step(120)
+	knight.stats.ultimate = "eclair"
+	target_mecha.global_position = Vector2(guard.global_position.x + 500.0, my)  # l'onde l'a fait tomber du toit
+	target_mecha.velocity = Vector2.ZERO
+	await step(10)
+	var hp_bolt := target_mecha.hp
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(90)
+	check(target_mecha.hp <= hp_bolt - 2 * Game.MECHA_WEAR_ULT_BOLT and guard.ultimate == "",
+		"Ville : l'éclair du mecha traverse l'autre mecha plusieurs fois (%d -> %d)" % [hp_bolt, target_mecha.hp])
+	# Un blocage parfait (du mecha visé) arrête l'ultime : contre
+	await step(60)
+	knight.stats.ultimate = "laser"
+	target_mecha.global_position = Vector2(guard.global_position.x + 500.0, my)
+	target_mecha.velocity = Vector2.ZERO
+	await step(10)
+	var hp_parry := target_mecha.hp
+	game.gauge.points = 0.0
+	walker.input_source = Scripted.new(func(s, f): s.block_held = f >= 20)
+	knight.ultimate_points = Fighter.ULTIMATE_POINTS
+	kcmd.u = true
+	await step(int((Mecha.ULT_LASER_STARTUP + 0.15) * 60.0))
+	check(target_mecha.hp == hp_parry and not target_mecha.is_frozen() and guard.ultimate == "" and game.gauge.points >= 3.0,
+		"Ville : un blocage parfait du mecha visé arrête le grand laser (contre)")
+	walker.input_source = Scripted.new(func(s, f): pass)
+	# Canon laser de mecha (l'arme lourde est tirée au hasard à l'arrivée : roquette ou laser)
+	var weapons_seen := {}
+	for i in 20:
+		var m: Mecha = game.call_mecha(knight)
+		weapons_seen[m.heavy_weapon] = true
+		game.mechas.erase(m)
+		m.queue_free()
+	check(weapons_seen.has("roquette") and weapons_seen.has("laser"), "Ville : l'arme lourde du mecha est tirée au hasard (roquette ou laser)")
+	await step(2)
+	var lcmd := {"yh": false}
+	walker.leave_mecha()
+	await step(2)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.input_source = Scripted.new(func(s, f): pass)
+	knight.leave_mecha()
+	await step(2)
+	for m in game.mechas.duplicate():
+		game.mechas.erase(m)
+		m.queue_free()
+	knight.global_position = Vector2(mx, my - 40.0)
+	knight.velocity = Vector2.ZERO
+	walker.global_position = Vector2(mx + 700.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	walker.velocity = Vector2.ZERO
+	await step(30)
+	var gunship: Mecha = game.call_mecha(knight, "laser")
+	await step(100)
+	knight._board(gunship)
+	knight.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = lcmd.yh and f % 1000 == 0
+		s.heavy_held = lcmd.yh)
+	await step(5)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(gunship.global_position.x + 700.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	await step(5)
+	var walker_lives_l := walker.lives
+	knight.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 0
+		s.heavy_held = f < 5)
+	await step(50)
+	check(game._mecha_lasers.is_empty() and not walker.is_stunned(), "Ville : un appui sur Y, le canon laser charge 1 s avant de tirer")
+	await step(25)
+	await shot("ville_mecha_canon_laser")
+	await step(20)
+	check(walker.is_stunned() or walker.lives < walker_lives_l, "Ville : après la charge, le canon laser s'allonge et touche à distance")
+	# Plus on garde Y, plus il est rapide, long et gros
+	check(Game.MECHA_LASER_SPEED[1] > Game.MECHA_LASER_SPEED[0] and Game.MECHA_LASER_RANGE[1] > Game.MECHA_LASER_RANGE[0]
+		and Game.MECHA_LASER_RADIUS[1] > Game.MECHA_LASER_RADIUS[0] and Mecha.LASER_FULL_CHARGE > Mecha.LASER_MIN_CHARGE,
+		"Ville : canon laser gardé plus longtemps = plus rapide, plus long, plus gros")
+	# Il se contre : un coup qui touche sa pointe l'arrête (contre)
+	await step(120)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	# (sur le toit d'un autre immeuble : celui de la tour a pu être cassé par les tirs d'avant)
+	walker.global_position = Vector2(Ville.building_center(1), Ville.roof_top(1) - walker.stats.body_size.y / 2.0 - 1.0)
+	walker.velocity = Vector2.ZERO
+	await step(20)
+	game.gauge.points = 0.0
+	var laser_counter_lives := walker.lives
+	var walker_center: Vector2 = walker.body_rect().get_center()
+	var laser_from := walker_center + Vector2(-150.0, 0.0)
+	walker.input_source = Scripted.new(func(s, f):
+		s.aimed_attack_pressed = f == 0  # coup visé vers le laser (stick droit)
+		s.aim = Vector2.LEFT)
+	await step(int(walker.stats.attack_startup * 60.0) + 1)
+	var gunship_home := gunship.global_position
+	gunship.global_position += laser_from - gunship.body_rect().get_center()
+	game._fire_mecha_laser(gunship, laser_from, Vector2.RIGHT, 0.0)
+	gunship.global_position = gunship_home
+	var laser_counter_frames := 0
+	while not game._mecha_lasers.is_empty() and laser_counter_frames < 60:
+		await step(1)
+		laser_counter_frames += 1
+	walker.input_source = Scripted.new(func(s, f): pass)
+	check(not walker.is_stunned() and walker.lives == laser_counter_lives and game.gauge.points >= 3.0,
+		"Ville : un coup sur la pointe du canon laser l'arrête (contre, points %.0f)" % game.gauge.points)
+	# ... il s'arrête sur une roquette (les deux disparaissent)
+	await step(120)
+	walker.recover()
+	walker._invincible_timer = 0.0
+	walker.global_position = Vector2(gunship.global_position.x + 900.0, my - walker.stats.body_size.y / 2.0 - 1.0)
+	await step(5)
+	game._fire_launcher(walker, Vector2.LEFT, 1.0)
+	await step(6)
+	var walker_lives_r := walker.lives
+	var enemy_rocket: Projectile = game.projectiles.filter(func(p): return p.kind == "roquette")[0]
+	var laser_origin := gunship.turret_muzzle(Vector2.RIGHT)
+	var to_rocket := laser_origin.direction_to(enemy_rocket.position)
+	game._fire_mecha_laser(gunship, laser_origin, to_rocket, 1.0)
+	await step(30)
+	check(game.projectiles.filter(func(p): return p.kind == "roquette").is_empty() and not walker.is_stunned() and walker.lives == walker_lives_r,
+		"Ville : le canon laser annule une roquette sur son chemin (et s'arrête là)")
+	# ... et il traverse au plus 2 blocs de la ville
+	var laser_wall_x: float = Ville.building_lefts()[3]
+	var line_y := -Ville.FLOOR_HEIGHT * 0.5
+	var gunship_spot := gunship.global_position
+	gunship.global_position += Vector2(laser_wall_x - 200.0, line_y) - gunship.body_rect().get_center()
+	var broken_before: int = game.map.windows().filter(func(w): return w is CityBlock and w.broken).size()
+	game._fire_mecha_laser(gunship, Vector2(laser_wall_x - 200.0, line_y), Vector2.RIGHT, 1.0)
+	gunship.global_position = gunship_spot
+	await step(60)
+	var broken_after: int = game.map.windows().filter(func(w): return w is CityBlock and w.broken).size()
+	check(broken_after - broken_before == Game.MECHA_LASER_BLOCKS, "Ville : le canon laser casse %d blocs puis s'arrête" % (broken_after - broken_before))
+	# Ville : le parc d'attractions et le parc arboré (captures)
+	if shot_dir != "":
+		for place in [["ville_fete_foraine", -8000.0, -6900.0], ["ville_parc", 6900.0, 8600.0]]:
+			game.fighters[0].global_position = Vector2(place[1], -300.0)
+			game.fighters[1].global_position = Vector2(place[2], -300.0)
+			await step(120)
+			await shot(place[0])
+	# Ville : la vitrine des mechas (design) montre le même mecha avec chaque pilote, dans chaque pose
+	game.queue_free()
+	game = null
+	var showroom := (load(MechaShowroom.SCENE) as PackedScene).instantiate() as MechaShowroom
+	add_child(showroom)
+	await step(2)
+	var sizes_ok := showroom.mechas.size() == GameSetup.CHARACTERS.size() and showroom.mechas.all(
+		func(m: MechaVisual) -> bool: return m.mecha_size() == MechaVisual.SIZE)
+	check(sizes_ok, "Ville : vitrine, un mecha par perso, le même pour tous")
+	for i in MechaShowroom.POSE_NAMES.size():
+		showroom.show_pose(i)
+		await step(50 if i != MechaVisual.Pose.LAND else 60)
+		if i == MechaVisual.Pose.WORN:
+			for m in showroom.mechas:
+				m.wear = 0.9
+			await step(2)
+		await shot("mecha_%d" % i)
+	check(showroom.pose_index == MechaShowroom.POSE_NAMES.size() - 1, "Ville : vitrine, toutes les poses s'affichent")
+	showroom.queue_free()
 	GameSetup.map_path = GameSetup.MAPS[0]
 	GameSetup.player_devices = []
 	GameSetup.player_characters = []
@@ -1402,6 +2477,38 @@ func _ready() -> void:
 	for k in 10:
 		g.add_counter(true)
 	check(g.points == CounterGauge.MAX_POINTS, "Jauge : elle ne dépasse pas %.0f points" % CounterGauge.MAX_POINTS)
+	# Le contre qui fait passer une phase déclenche une explosion autour de celui qui a contré
+	# (lui n'est pas touché), de plus en plus grosse à chaque phase
+	g.points = CounterGauge.PHASE_POINTS[0] - 1
+	p1.position = Vector2(500, 540); p2.position = Vector2(580, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	game._count_counter(false, [p1])
+	check(g.phase() == 2 and not p2.is_stunned() and not p1.is_stunned() and p2.velocity.x > 500.0,
+		"Jauge : passer en phase 2 fait exploser autour de celui qui contre : l'autre est poussé fort, sans être sonné")
+	# Collé au centre (très rare), il est sonné
+	g.points = CounterGauge.PHASE_POINTS[0] - 1
+	p2._invincible_timer = 0.0
+	p2.position = p1.position
+	p2.velocity = Vector2.ZERO
+	game._count_counter(false, [p1])
+	check(p2.is_stunned() and not p1.is_stunned(), "Jauge : explosion de phase, collé à celui qui contre : sonné")
+	p2.recover()
+	await step(80)
+	g.points = CounterGauge.PHASE_POINTS[0]
+	var no_blast_lives := p2.lives
+	p2.recover()
+	p2._invincible_timer = 0.0
+	p2.position = Vector2(580, 540)
+	p2.velocity = Vector2.ZERO
+	await step(2)
+	game._count_counter(false, [p1])
+	check(not p2.is_stunned() and p2.lives == no_blast_lives, "Jauge : un contre sans changer de phase n'explose pas")
+	check(Game.PHASE_BLAST_RADIUS[0] < Game.PHASE_BLAST_RADIUS[1] and Game.PHASE_BLAST_RADIUS[1] < Game.PHASE_BLAST_RADIUS[2],
+		"Jauge : l'explosion grandit à chaque phase (%s)" % [Game.PHASE_BLAST_RADIUS])
+	g.points = 0.0
+	p2.recover()
+	await step(80)
 	# Recharge plus courte selon la phase
 	var cooldowns := []
 	for points in [0.0, CounterGauge.PHASE_POINTS[0], CounterGauge.PHASE_POINTS[1], CounterGauge.PHASE_POINTS[2]]:
@@ -1631,8 +2738,8 @@ func _ready() -> void:
 	check(game._break_focus.is_empty() and Engine.time_scale > 0.99, "Arme cassée : le ralenti est court")
 	p1.position = Vector2(640, 2000)
 	await step(2)
-	check(not p1.weapon_away and p1.weapon_counters == 0 and p1.heavy_kind() == WeaponStats.Heavy.DASH,
-		"Arme cassée : une neuve revient à la prochaine vie perdue")
+	check(p1.weapon_away and p1.is_weapon_broken() and p1.heavy_kind() == WeaponStats.Heavy.SWING,
+		"Arme cassée : perdre une vie ne la rend pas")
 	# 18d) Marteau : le coup léger projette bien plus loin ; la lourde fait une onde de choc au sol
 	GameSetup.player_weapons = [GameSetup.WEAPONS[2], GameSetup.WEAPONS[0]]
 	await new_game()
@@ -1701,16 +2808,20 @@ func _ready() -> void:
 			break
 	check(not p1.weapon_away and game.projectiles.is_empty() and is_equal_approx(p1.stats.attack_reach, base.attack_reach * spear_weapon.light_reach_mult),
 		"Lance : on la ramasse en passant dessus")
-	# 18f) Lance lancée puis chute dans le vide : on réapparaît avec sa lance
+	# 18f) Lance lancée puis perdue : on reste à mains nues, même en perdant une vie
 	p1.input_source = Scripted.new(func(s, f):
 		s.heavy_pressed = f == 2
 		s.heavy_held = f >= 2 and f < 6)
 	p1._attack_cooldown_timer = 0.0
 	await step(14)
 	check(p1.weapon_away, "Lance : relancée")
+	game.projectiles[0].position = Vector2(640, 5000)
+	await step(1)
+	check(p1.weapon_away and game.projectiles.is_empty(), "Lance : sortie de la map, elle est perdue (on reste à mains nues)")
 	p1.position = Vector2(640, 2000)
 	await step(2)
-	check(not p1.weapon_away and game.projectiles.is_empty(), "Lance : tombé de la map, on réapparaît avec sa lance")
+	check(p1.weapon_away and game.projectiles.is_empty(), "Lance : perdre une vie ne la rend pas")
+	p1.weapon_away = false
 	# 18g) Lance lancée contrée : un coup dessus la fait retomber (plus courte), 3 contres la cassent
 	p1.input_source = Scripted.new(func(s, f): pass)
 	p2.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 3)
@@ -1740,14 +2851,34 @@ func _ready() -> void:
 	check(p1.weapon_counters == 2 and not p1.is_weapon_broken() and game.projectiles.size() == 1, "Lance contrée 2 fois : pas encore cassée")
 	game._counter_spear(spear, p2)
 	check(p1.is_weapon_broken() and game.projectiles.is_empty() and p1.weapon_away, "Lance contrée 3 fois : cassée")
+	# Contrée pointe en l'air (lancée vers le haut), elle retombe et se plante : elle ne traverse
+	# pas le sol (avant, seul le bout de devant cherchait le sol).
+	var through_floor := []
+	for angle in [-150.0, -90.0, -30.0]:
+		var dropped := Projectile.new()
+		dropped.kind = "lance" if through_floor.size() % 2 == 0 else "fleche"
+		dropped.position = Vector2(500, 520)  # entre les deux joueurs (sinon J2 la ramasse)
+		dropped.rotation = deg_to_rad(angle)
+		dropped.velocity = Vector2(900, 0).rotated(dropped.rotation)
+		game._add_projectile(dropped)
+		dropped.drop()
+		for i in 120:
+			await step(1)
+			if not is_instance_valid(dropped) or dropped.state == Projectile.State.STUCK:
+				break
+		var ok := is_instance_valid(dropped) and dropped.state == Projectile.State.STUCK and dropped.tip().y < 575.0
+		through_floor.append(ok)
+		if is_instance_valid(dropped):
+			game._remove_projectile(dropped)
+	check(not false in through_floor, "Lance contrée : pointe en l'air, elle retombe sans traverser le sol (%s)" % [through_floor])
 	p1._attack_cooldown_timer = 0.0
 	p1.get_weapon_back()
 	check(p1.weapon_away and p1.heavy_kind() == WeaponStats.Heavy.SWING and is_equal_approx(p1.stats.attack_reach, base.attack_reach),
 		"Lance cassée : on reste à mains nues")
 	p1.position = Vector2(640, 2000)
 	await step(2)
-	check(not p1.weapon_away and p1.weapon_counters == 0 and is_equal_approx(p1.stats.attack_reach, base.attack_reach * spear_weapon.light_reach_mult),
-		"Lance cassée : une lance neuve revient à la prochaine vie perdue")
+	check(p1.weapon_away and p1.is_weapon_broken() and is_equal_approx(p1.stats.attack_reach, base.attack_reach),
+		"Lance cassée : perdre une vie ne la rend pas")
 	# 18h) Contrer 2 fois avec le coup léger de son arme la répare d'un cran (pas au-delà de 100 %)
 	GameSetup.player_weapons = [GameSetup.WEAPONS[1], GameSetup.WEAPONS[0]]
 	await new_game()
@@ -1811,13 +2942,13 @@ func _ready() -> void:
 	var slow_speed: float = game.projectiles[0].velocity.length()
 	await step(2)
 	check(p1.weapon_away and game.projectiles.size() == 1, "Arme projetée : on ne la rattrape pas dans la seconde")
-	game._return_weapon(p1)
-	check(not p1.weapon_away and game.projectiles.is_empty(), "Arme projetée : elle revient si on tombe de la map")
+	game._pick_up_weapon(p1, game.projectiles[0])
+	check(not p1.weapon_away and game.projectiles.is_empty(), "Arme projetée : ramassée, on l'a de nouveau en main")
 	game.gauge.points = CounterGauge.MAX_POINTS
 	game._knock_weapon(p1, Vector2.LEFT)
 	check(game.projectiles[0].velocity.length() > slow_speed * 2.0,
 		"Arme projetée : jauge berserk, elle part bien plus loin (%.0f contre %.0f)" % [game.projectiles[0].velocity.length(), slow_speed])
-	game._return_weapon(p1)
+	game._pick_up_weapon(p1, game.projectiles[0])
 	game.gauge.points = 0.0
 	# ... à mains nues rien ne s'envole, et une lourde qui casse l'arme ne la fait pas voler
 	game._knock_weapon(p2, Vector2.RIGHT)
@@ -1827,6 +2958,44 @@ func _ready() -> void:
 	p1._attack_time = 0.0
 	game._parry(p1, p2)
 	check(p1.is_weapon_broken() and game.projectiles.is_empty(), "Arme projetée : une arme qui casse sur le blocage ne s'envole pas")
+	# 18j) RB : on lance son arme vers l'adversaire, sans dégâts. Un joueur armé la fait rebondir ;
+	# un joueur à mains nues l'attrape (usée comme avant)
+	GameSetup.player_weapons = [GameSetup.WEAPONS[1], GameSetup.WEAPONS[2]]
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position.x = 400; p2.position.x = 800
+	p1.input_source = Scripted.new(func(s, f): s.throw_pressed = f == 30)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	for i in 60:
+		await step(1)
+		if p1.weapon_away:
+			break
+	check(p1.weapon_away and not p1.has_weapon_in_hand() and game.projectiles.size() == 1 and game.projectiles[0].kind == "arme"
+		and game.projectiles[0].velocity.x > 0.0, "RB : on lance son arme vers l'adversaire")
+	var tossed: Projectile = game.projectiles[0]
+	var bounced := false
+	for i in 60:
+		await step(1)
+		if tossed.velocity.x < 0.0:
+			bounced = true
+			break
+	check(bounced and untouched(p2) and p2.weapon == hammer and p2.has_weapon_in_hand(), "RB : elle rebondit sur un joueur armé, sans lui faire mal")
+	game._remove_projectile(tossed)
+	p1.equip(katana, 1)
+	p2.weapon_away = true  # p2 à mains nues
+	p1.input_source = Scripted.new(func(s, f): s.throw_pressed = f == 1)
+	await step(2)
+	check(p1.weapon_away and game.projectiles.size() == 1, "RB : relancée")
+	for i in 60:
+		await step(1)
+		if p2.has_weapon_in_hand():
+			break
+	check(p2.has_weapon_in_hand() and p2.weapon == katana and p2.weapon_counters == 1 and game.projectiles.is_empty() and untouched(p2)
+		and is_equal_approx(p2.stats.attack_reach, p2._bare_stats.attack_reach * katana.light_reach_mult * 0.8),
+		"RB : à mains nues, l'adversaire l'attrape en vol, usée comme avant")
+	p1.input_source = Scripted.new(func(s, f): s.throw_pressed = f == 1)
+	await step(3)
+	check(game.projectiles.is_empty(), "RB : à mains nues, rien à lancer")
 	GameSetup.player_weapons = []
 
 	# 19) Les objets qui tombent sur la map : pistolet, grenade, bouclier (RT pour les utiliser)
@@ -1953,6 +3122,7 @@ func _ready() -> void:
 	var long_throw: float = game.projectiles[0].velocity.length() if game.projectiles.size() == 1 else 0.0
 	check(short_throw > 0.0 and long_throw > short_throw * 1.8 and p1.item == "",
 		"Grenade : plus on garde RT, plus elle part loin (%.0f -> %.0f)" % [short_throw, long_throw])
+	check(game.projectiles[0].blast > 1.3, "Grenade : chargée à fond, son explosion projette plus fort")
 	check(game.projectiles[0].fuse < Fighter.GRENADE_FUSE - 1.0, "Grenade : la mèche a commencé dès l'appui (reste %.1f s)" % game.projectiles[0].fuse)
 	# 19f) Elle explose au bout de sa mèche : ceux qui sont autour sont touchés et éjectés
 	game.projectiles[0].position = p2.position + Vector2(-40, 0); game.projectiles[0].velocity = Vector2.ZERO
@@ -1969,6 +3139,73 @@ func _ready() -> void:
 	await step(1)
 	check(grenade.velocity.x > 500, "Grenade : un coup la repousse (vx %.0f)" % grenade.velocity.x)
 	game._remove_projectile(grenade)
+	# 19g bis) Grenade collante : elle se colle au sol, à une plateforme qui bouge (et la suit), à une
+	# liane ; sur une fenêtre, elle colle si elle va doucement, la casse si elle va trop vite
+	var sticky := func(where: Vector2, vel: Vector2) -> Projectile:
+		var sg := Projectile.new()
+		sg.kind = "grenade"; sg.fuse = 30.0; sg.length = 18.0; sg.owner_index = 1
+		sg.position = where; sg.velocity = vel
+		game._add_projectile(sg)
+		return sg
+	var sg1: Projectile = sticky.call(Vector2(150, 400), Vector2(300, 400))
+	for i in 60:
+		await step(1)
+		if sg1.state == Projectile.State.STUCK:
+			break
+	var sg1_pos := sg1.position
+	await step(10)
+	check(sg1.state == Projectile.State.STUCK and sg1.position == sg1_pos and sg1.velocity == Vector2.ZERO, "Grenade collante : elle se colle au sol")
+	game._remove_projectile(sg1)
+	var sg_ride := MovingPlatform.new()
+	sg_ride.size = Vector2(200, 16); sg_ride.travel = Vector2(300, 0); sg_ride.period = 2.0
+	sg_ride.position = Vector2(50, 200)
+	game.map.add_child(sg_ride)
+	await step(1)
+	var sg2: Projectile = sticky.call(Vector2(sg_ride.position.x, 120), Vector2(0, 300))
+	for i in 60:
+		await step(1)
+		if sg2.state == Projectile.State.STUCK:
+			break
+	var sg2_gap := sg2.position.x - sg_ride.position.x
+	await step(20)
+	check(sg2.state == Projectile.State.STUCK and absf(sg2.position.x - sg_ride.position.x - sg2_gap) < 4.0 and sg_ride.position.x > 80.0,
+		"Grenade collante : collée à une plateforme qui bouge, elle la suit")
+	game._remove_projectile(sg2)
+	sg_ride.queue_free()
+	var sg_vine := Vine.new()
+	sg_vine.position = Vector2(150, 0); sg_vine.length = 260.0
+	game.map.add_child(sg_vine)
+	await step(1)
+	var sg3: Projectile = sticky.call(Vector2(60, 150), Vector2(900, -50))
+	for i in 30:
+		await step(1)
+		if sg3.state == Projectile.State.STUCK:
+			break
+	check(sg3.state == Projectile.State.STUCK and sg3.stuck_vine == sg_vine and absf(sg3.position.x - 150.0) < 3.0, "Grenade collante : elle se colle à une liane")
+	game._remove_projectile(sg3)
+	sg_vine.queue_free()
+	var sg_pane := BreakableWindow.new()
+	sg_pane.size = Vector2(20, 200)
+	sg_pane.position = Vector2(300, 150)
+	game.map.add_child(sg_pane)
+	await step(1)
+	var sg4: Projectile = sticky.call(Vector2(200, 150), Vector2(400, 0))
+	for i in 30:
+		await step(1)
+		if sg4.state == Projectile.State.STUCK:
+			break
+	check(sg4.state == Projectile.State.STUCK and not sg_pane.broken and sg4.position.x < 300.0, "Grenade collante : lancée doucement, elle se colle à la fenêtre")
+	sg_pane.smash()
+	await step(3)
+	check(sg4.state != Projectile.State.STUCK, "Grenade collante : la fenêtre casse, elle se décolle")
+	game._remove_projectile(sg4)
+	sg_pane.set_broken(false)
+	await step(2)
+	var sg5: Projectile = sticky.call(Vector2(200, 150), Vector2(1600, 0))
+	await step(10)
+	check(sg_pane.broken and sg5.position.x > 320.0, "Grenade collante : lancée trop vite, elle casse la fenêtre et continue")
+	game._remove_projectile(sg5)
+	sg_pane.queue_free()
 	# 19h) Gardée trop longtemps : elle explose en main
 	p2.recover()  # J2 sonné par la grenade d'avant : on arrête le ralenti, pour compter la mèche en vraies frames
 	await step(1)
@@ -1998,6 +3235,260 @@ func _ready() -> void:
 	await shot("19_bouclier")
 	await step(int(Fighter.ITEM_SHIELD_TIME * 60))
 	check(not p2.is_item_shielded(), "Bouclier : il disparaît au bout de %d s" % Fighter.ITEM_SHIELD_TIME)
+	# 19i bis) Vie en plus : RT donne une vie, sans dépasser Fighter.MAX_LIVES
+	var vie_before := p2.lives
+	p2.take_item("vie")
+	p2.input_source = Scripted.new(func(s, f): s.item_pressed = f == 1)
+	await step(3)
+	check(p2.lives == vie_before + 1 and p2.item == "", "Vie en plus : RT donne une vie (%d -> %d)" % [vie_before, p2.lives])
+	p2.lives = Fighter.MAX_LIVES
+	p2.take_item("vie")
+	p2.input_source = Scripted.new(func(s, f): s.item_pressed = f == 1)
+	await step(3)
+	check(p2.lives == Fighter.MAX_LIVES and p2.item == "vie", "Vie en plus : à %d vies on la garde" % Fighter.MAX_LIVES)
+	p2.item = ""
+	# 19i ter) Grappin : RT gardé = il tire l'autre vers soi ; petite pression = on est tiré vers lui
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.position = Vector2(500, 540); p2.position = Vector2(800, 540)
+	await step(2)
+	p1.take_item("grappin")
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f >= 1)
+	var gr_p1x := p1.position.x
+	var gr_pulled := false
+	for i in 40:
+		await step(1)
+		if p2.is_grappled():
+			gr_pulled = true
+	check(gr_pulled and p2.position.x < 800 - 150 and absf(p1.position.x - gr_p1x) < 40 and p1.item_ammo == Fighter.GRAPPLE_USES - 1,
+		"Grappin gardé : il tire l'autre vers soi (J2 x %.0f)" % p2.position.x)
+	check(p1.grapple_mode == Fighter.Grapple.NONE, "Grappin gardé : arrivé, la corde se décroche")
+	await shot("19_grappin")
+	# Petite pression : c'est nous qui sommes tirés
+	p1.position = Vector2(500, 540); p2.position = Vector2(800, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f == 1)
+	var gr_p2x := p2.position.x
+	await step(25)
+	check(p1.position.x > 500 + 150 and absf(p2.position.x - gr_p2x) < 40 and p1.item_ammo == Fighter.GRAPPLE_USES - 2,
+		"Grappin, petite pression : on est tiré vers l'autre (J1 x %.0f)" % p1.position.x)
+	await step(30)
+	# Gardé puis lâché en route : l'autre est « jeté » (il garde son élan)
+	p1.position = Vector2(400, 540); p2.position = Vector2(1000, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	var gr_frame := [0]
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f >= 1 and (gr_frame[0] == 0 or f < gr_frame[0] + 4))
+	for i in 40:
+		await step(1)
+		if p2.is_grappled() and gr_frame[0] == 0:
+			gr_frame[0] = p1.input_source.frame
+		if gr_frame[0] != 0 and p1.grapple_mode == Fighter.Grapple.NONE:
+			break
+	await step(1)
+	check(gr_frame[0] != 0 and p2.velocity.x < -900, "Grappin lâché en route : l'autre part sur son élan (vx %.0f)" % p2.velocity.x)
+	check(p1.item == "", "Grappin : vide après %d lancers" % Fighter.GRAPPLE_USES)
+	# Blocage parfait à l'arrivée du crochet : contré
+	await step(60)
+	p1.position = Vector2(500, 540); p2.position = Vector2(800, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	p1.take_item("grappin")
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f >= 1)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= 1)
+	await step(20)
+	check(p1.grapple_mode == Fighter.Grapple.NONE and not p2.is_grappled() and p2.position.x > 780 and not p1.can_attack(),
+		"Grappin : un blocage parfait le contre (J1 ne frappe plus)")
+	p2.input_source = Scripted.new(func(s, f): s.block_held = true)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(70)
+	p1.input_source = Scripted.new(func(s, f):
+		s.item_pressed = f == 1
+		s.item_held = f >= 1)
+	gr_pulled = false
+	for i in 30:
+		await step(1)
+		if p2.is_grappled():
+			gr_pulled = true
+	check(gr_pulled, "Grappin : un blocage normal ne l'arrête pas")
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.item = ""
+	await step(30)
+	# 19k) Nunchaku : coups vers le bas puis vers le haut, lourde = rafale de 3 coups
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.equip(load("res://weapons/nunchaku.tres"), 0)
+	p1.position = Vector2(600, 540); p2.position = Vector2(670, 540)
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
+	var nun_vy := [0.0, 0.0]
+	for i in 30:
+		await step(1)
+		if touched(p2):
+			nun_vy[0] = p2.velocity.y
+			break
+	p2._stun_timer = 0.0; p2._invincible_timer = 0.0
+	await step(40)
+	p2._stun_timer = 0.0; p2._invincible_timer = 0.0
+	p1.position = Vector2(600, 540); p2.position = Vector2(670, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
+	for i in 30:
+		await step(1)
+		if touched(p2):
+			nun_vy[1] = p2.velocity.y
+			break
+	check(nun_vy[0] > 100.0 and nun_vy[1] < -500.0, "Nunchaku : 1er coup projette vers le bas, 2e vers le haut (vy %.0f puis %.0f)" % [nun_vy[0], nun_vy[1]])
+	# Lourde : on avance normalement en chargeant, puis 3 coups (bas / haut / bas)
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.equip(load("res://weapons/nunchaku.tres"), 0)
+	p1.position = Vector2(500, 540); p2.position = Vector2(1100, 540)
+	await step(2)
+	var nun_x := p1.position.x
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 70
+		s.stick.x = 1.0 if f < 40 else 0.0)
+	await step(40)
+	var nun_moved := p1.position.x - nun_x
+	check(p1.is_charging_heavy() and nun_moved > 0.6 * p1.stats.run_speed * 39.0 / 60.0, "Nunchaku : on avance normalement en chargeant la lourde (%.0f px)" % nun_moved)
+	var nun_index := {}
+	var nun_ups := {}
+	var nun_reach := 0.0
+	for i in 60:
+		await step(1)
+		if p1.is_attack_active():
+			nun_index[p1._burst_index] = true
+			nun_ups[p1._hit_dir().y < 0.0] = true
+			nun_reach = maxf(nun_reach, p1.attack_center().distance_to(p1.global_position))
+	check(nun_index.size() == Fighter.BURST_HITS and nun_ups.size() == 2, "Nunchaku : la lourde est une rafale de %d coups, vers le bas et vers le haut" % Fighter.BURST_HITS)
+	check(nun_reach > p1.stats.attack_reach * 1.3, "Nunchaku : chargée, la rafale va plus loin (%.0f px)" % nun_reach)
+	await shot("19_nunchaku")
+	# 19l) Arc : petit couteau rapide au coup léger, flèche à la lourde (on garde l'arc)
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.equip(load("res://weapons/arc.tres"), 0)
+	check(p1.stats.attack_reach < base.attack_reach * 0.6 and p1.stats.attack_cooldown < base.attack_cooldown * 0.5,
+		"Arc : coup léger très court et très rapide (portée %.0f, recharge %.2f s)" % [p1.stats.attack_reach, p1.stats.attack_cooldown])
+	p1.position = Vector2(500, 540); p2.position = Vector2(900, 540)
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 50)
+	var arrow_seen := false
+	for i in 120:
+		await step(1)
+		for pr in game.projectiles:
+			if pr.kind == "fleche":
+				arrow_seen = true
+		if touched(p2):
+			break
+	check(arrow_seen and touched(p2) and p1.has_weapon_in_hand() and p1.arrows == Fighter.ARROWS_MAX - 1,
+		"Arc : la lourde tire une flèche qui touche, on garde l'arc (%d flèches)" % p1.arrows)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(60)
+	var arrows_lying: Array = game.projectiles.filter(func(pr): return pr.kind == "fleche")
+	check(arrows_lying.size() == 1 and arrows_lying[0].state != Projectile.State.FLYING, "Arc : la flèche retombe après avoir touché")
+	# Un autre joueur (même avec un arc) ne ramasse pas cette flèche ; celui qui tient l'arc oui
+	p2.equip(load("res://weapons/arc.tres"), 0, 2, 99)
+	p2.position = arrows_lying[0].position + Vector2(0, -10); p2.velocity = Vector2.ZERO
+	await step(3)
+	check(arrows_lying[0] in game.projectiles and p2.arrows == 2, "Arc : la flèche d'un autre arc ne se ramasse pas")
+	p2.position = Vector2(1200, 540)
+	p1.position = arrows_lying[0].position + Vector2(0, -10); p1.velocity = Vector2.ZERO
+	await step(3)
+	check(not arrows_lying[0] in game.projectiles and p1.arrows == Fighter.ARROWS_MAX, "Arc : celui qui tient l'arc ramasse sa flèche")
+	# Arc vide : Y ne tire rien
+	p1.arrows = 0
+	p1.position = Vector2(500, 540); p2.position = Vector2(900, 540)
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 20)
+	await step(40)
+	check(game.projectiles.filter(func(pr): return pr.kind == "fleche").is_empty(), "Arc : sans flèche, la lourde ne tire rien")
+	# Une flèche frappée par un coup est contrée : elle casse
+	p1.arrows = 3
+	p2._stun_timer = 0.0; p2._invincible_timer = 0.0
+	p2.equip(load(GameSetup.WEAPONS[0]), 0)
+	p1.position = Vector2(400, 540); p2.position = Vector2(800, 540)
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 30)
+	var arrow_cut := false
+	for i in 90:
+		await step(1)
+		var flying: Array = game.projectiles.filter(func(pr): return pr.kind == "fleche")
+		if not flying.is_empty() and flying[0].position.distance_to(p2.global_position) < 140.0 and not p2.is_attacking():
+			light_now(p2, Vector2.LEFT)
+		if p1.arrows == 2 and flying.is_empty():
+			arrow_cut = true
+			break
+	check(arrow_cut and untouched(p2), "Arc : une flèche frappée par un coup casse")
+	check(p1.weapon_counters == 0, "Arc : contrée de loin, l'arc ne s'use pas")
+	# Contrée de très près : l'arc s'use comme une arme contrée
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(60)
+	p2._stun_timer = 0.0; p2._invincible_timer = 0.0
+	p1.position = Vector2(500, 540); p2.position = Vector2(620, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	var bow_arrows := p1.arrows
+	p1.input_source = Scripted.new(func(s, f):
+		s.heavy_pressed = f == 1
+		s.heavy_held = f >= 1 and f < 20)
+	for i in 60:
+		await step(1)
+		if not p2.is_attacking() and not game.projectiles.filter(func(pr): return pr.kind == "fleche").is_empty():
+			light_now(p2, Vector2.LEFT)
+		if p1.arrows < bow_arrows and game.projectiles.filter(func(pr): return pr.kind == "fleche").is_empty():
+			break
+	check(p1.weapon_counters == 1 and untouched(p2), "Arc : une flèche contrée de très près abîme l'arc")
+	p1.weapon_counters = 0
+	# L'arc lancé (RB) et rattrapé : le nouveau porteur a les flèches qui restaient
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	var bow_before := p1.bow_id
+	var arrows_before := p1.arrows
+	p1.position = Vector2(500, 540); p2.position = Vector2(700, 540)
+	p1.velocity = Vector2.ZERO; p2.velocity = Vector2.ZERO
+	await step(2)
+	p1.input_source = Scripted.new(func(s, f): s.throw_pressed = f == 1)
+	for i in 60:
+		await step(1)
+		if p2.has_weapon_in_hand():
+			break
+	check(p2.has_weapon_in_hand() and p2.weapon.heavy == WeaponStats.Heavy.SHOOT and p2.arrows == arrows_before and p2.bow_id == bow_before,
+		"Arc : rattrapé par un autre, il garde ses flèches (%d) et ses flèches par terre sont à lui" % p2.arrows)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.equip(load(GameSetup.WEAPONS[0]), 0)  # la suite des tests est à mains nues
+	p2.equip(load(GameSetup.WEAPONS[0]), 0)
+	await step(30)
 	# 19j) Un objet tombe toutes les 10 s, au plus 2 par terre
 	for pickup in game.pickups.duplicate():
 		game._remove_pickup(pickup)
@@ -2010,6 +3501,104 @@ func _ready() -> void:
 	for pickup in game.pickups:
 		all_landed = all_landed and pickup.landed
 	check(all_landed, "Objets : ils se posent sur le décor")
+	# 19l) Armes qui apparaissent : une toutes les 12 s (pas plus de 2 par terre), sans propriétaire ;
+	# un joueur à mains nues la prend en passant dessus
+	var weapons_before: int = game.projectiles.size()
+	game._weapon_spawn_timer = 0.0
+	await step(1)
+	var appeared: Array = game.projectiles.filter(func(w): return w.kind == "arme" and w.owner_index == -1)
+	check(game.projectiles.size() == weapons_before + 1 and appeared.size() == 1 and appeared[0].weapon != null
+		and not appeared[0].weapon.is_bare_hands(), "Armes qui apparaissent : une arme au hasard tombe")
+	for i in 120:
+		await step(1)
+		if appeared[0].state == Projectile.State.STUCK:
+			break
+	check(appeared[0].state == Projectile.State.STUCK, "Armes qui apparaissent : elle se pose")
+	for i in 3:
+		game._weapon_spawn_timer = 0.0
+		await step(1)
+	check(game.projectiles.filter(func(w): return w.kind == "arme").size() == game.MAX_LOOSE_WEAPONS,
+		"Armes qui apparaissent : au plus %d qui traînent" % game.MAX_LOOSE_WEAPONS)
+	var free_weapon: Projectile = appeared[0]
+	var free_kind: WeaponStats = free_weapon.weapon
+	p2.weapon_away = true
+	p2.position = free_weapon.position + Vector2(0, -20)
+	await step(2)
+	check(p2.has_weapon_in_hand() and p2.weapon == free_kind and not free_weapon in game.projectiles,
+		"Armes qui apparaissent : à mains nues, on la prend en passant dessus")
+	# 19k) Physique : posé sur une plateforme qui bouge, l'objet est transporté ; elle part, il retombe ;
+	# un coup le fait valdinguer dans le sens du coup ; une grenade le souffle ; une fenêtre qui casse le lâche
+	for pickup in game.pickups.duplicate():
+		game._remove_pickup(pickup)
+	game._item_spawn_timer = 999.0
+	p1.take_item("pistolet"); p2.take_item("pistolet")  # mains pleines : ils ne ramassent rien
+	p1.position = Vector2(900, 540); p2.position = Vector2(1100, 540)
+	var ride := MovingPlatform.new()
+	ride.size = Vector2(200, 16); ride.travel = Vector2(300, 0); ride.period = 2.0
+	ride.position = Vector2(50, 200)
+	game.map.add_child(ride)
+	await step(1)
+	var rider: ItemPickup = game.spawn_pickup("bouclier", Vector2(ride.position.x, 120))
+	for i in 60:
+		await step(1)
+		if rider.landed:
+			break
+	var gap := rider.position.x - ride.position.x
+	await step(20)
+	check(rider.landed and ride.position.x > 120.0 and absf(rider.position.x - ride.position.x - gap) < 4.0 and absf(rider.position.y - 179.0) < 3.0,
+		"Objets : posé sur une plateforme qui bouge, il est transporté (écart %.1f)" % (rider.position.x - ride.position.x - gap))
+	ride.queue_free()
+	await step(10)
+	check(not rider.landed and rider.position.y > 185.0, "Objets : la plateforme partie, il retombe")
+	for i in 90:
+		await step(1)
+		if rider.landed:
+			break
+	check(rider.landed, "Objets : il se repose plus bas")
+	p1.position = rider.position + Vector2(-50, 0)
+	p1._invincible_timer = 0.0
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	check(not rider.landed and rider.velocity.x > 500.0 and rider.velocity.y < 0.0, "Objets : un coup le fait valdinguer dans le sens du coup (vx %.0f)" % rider.velocity.x)
+	var light_speed := rider.velocity.length()
+	await step(1)
+	check(rider.velocity.length() < light_speed * 1.2, "Objets : le même coup ne le refrappe pas à chaque frame")
+	await step(120)
+	game._explode(rider.position + Vector2(60, 10))
+	check(rider.velocity.x < -300.0 and rider.velocity.y < 0.0, "Objets : une grenade le souffle")
+	await step(120)
+	var pane := BreakableWindow.new()
+	pane.size = Vector2(120, 20)
+	pane.position = Vector2(150, 200)
+	game.map.add_child(pane)
+	await step(1)
+	for pickup in game.pickups.duplicate():
+		game._remove_pickup(pickup)
+	rider = game.spawn_pickup("bouclier", Vector2(150, 150))
+	await step(40)
+	check(rider.landed and absf(rider.position.y - 177.0) < 3.0, "Objets : il se pose sur une fenêtre")
+	pane.smash()
+	await step(10)
+	check(not rider.landed and rider.position.y > 185.0, "Objets : la fenêtre casse, il tombe")
+	# ... pareil pour une arme qui traîne par terre
+	var lying := Projectile.new()
+	lying.kind = "arme"; lying.state = Projectile.State.DROPPED; lying.length = 40.0; lying.color = Color.RED
+	lying.position = Vector2(700, 400)
+	game._add_projectile(lying)
+	for i in 90:
+		await step(1)
+		if lying.state == Projectile.State.STUCK:
+			break
+	check(lying.state == Projectile.State.STUCK, "Arme par terre : elle se pose")
+	p1.position = lying.position + Vector2(50, -20)
+	p1._attack_cooldown_timer = 0.0
+	light_now(p1, Vector2.LEFT)
+	await step(1)
+	check(lying.state == Projectile.State.DROPPED and lying.velocity.x < -500.0, "Arme par terre : un coup la fait valdinguer (vx %.0f)" % lying.velocity.x)
+	lying.position = Vector2(700, 3000)
+	await step(1)
+	check(not lying in game.projectiles, "Arme par terre : sortie de la map, elle est perdue")
+	p1.item = ""; p2.item = ""
 
 	# 17) Le toit de l'Arène (le labo) : on ne le traverse pas par en dessous ; on y monte par l'échelle
 	# (à gauche, très rapide, on est éjecté en haut) ou par l'ascenseur (à droite)
@@ -2417,6 +4006,7 @@ func _ready() -> void:
 	editor.add_from_catalog("liane", Vector2(1100, 100))
 	editor.add_from_catalog("fenetre", Vector2(900, 300))
 	editor.add_from_catalog("spawn_objet", Vector2(640, 200))
+	editor.add_from_catalog("spawn_arme", Vector2(500, 200))
 	var resp_count: int = editor.data.elements.filter(func(e): return e.type == "reapparition").size()
 	editor.add_from_catalog("reapparition", Vector2(600, 100))
 	check(editor.data.elements.filter(func(e): return e.type == "reapparition").size() == resp_count,
@@ -2605,6 +4195,8 @@ func _ready() -> void:
 		and get_tree().get_nodes_in_group("echelles").size() == 1 and get_tree().get_nodes_in_group("lianes").size() == 1,
 		"Éditeur : la navette roule, l'échelle, la liane et la fenêtre sont là")
 	check(game.map.item_spawn_points().size() == 1, "Éditeur : les objets tombent depuis le point posé")
+	check(game.map.has_node("WeaponSpawns") and game.map.weapon_spawn_points().size() == 1,
+		"Éditeur : les armes tombent depuis le « Spawn d'arme » posé")
 	var saved_map := GameSetup.make_map("carte:_test_editeur")
 	check(saved_map.map_name == "_test_editeur", "Éditeur : une map sauvée se charge par son nom")
 	saved_map.free()
@@ -2671,6 +4263,261 @@ func _ready() -> void:
 	GameSetup.editor_map = {}
 	GameSetup.return_scene = ""
 	GameSetup.player_devices = []
+
+	# Attaque ultime, étape 1 : jauge perso remplie par SES contres, X + Y quand elle est pleine
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position = Vector2(600, 500); p2.position = Vector2(650, 500)
+	await step(30)
+	game._clash(p1, p2, p1.position, p1)
+	check(p1.ultimate_points == 1 and p2.ultimate_points == 0, "Ultime : un contre remplit la jauge de celui qui contre seulement (%d / %d)" % [p1.ultimate_points, p2.ultimate_points])
+	p1.ultimate_points = 0
+	light_now(p1, Vector2.RIGHT)
+	p2._attack_heavy = true; p2._attack_time = p2.stats.heavy_startup; p2._heavy_charging = false
+	game._clash(p1, p2, p1.position)
+	check(p1.ultimate_points == Fighter.ULTIMATE_HEAVY_POINTS and p2.ultimate_points == 0, "Ultime : contrer une lourde compte double (%d / %d)" % [p1.ultimate_points, p2.ultimate_points])
+	p1._cancel_attack(); p2._cancel_attack()
+	game._parry(p1, p2)
+	check(p2.ultimate_points == 1, "Ultime : un blocage parfait remplit la jauge de celui qui bloque")
+	var round_trip := InputState.from_dict(InputState.new().to_dict())
+	var ult_in := InputState.new(); ult_in.ultimate_pressed = true
+	check(not round_trip.ultimate_pressed and InputState.from_dict(ult_in.to_dict()).ultimate_pressed, "Ultime : X + Y passe par le réseau")
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position = Vector2(500, 500); p2.position = Vector2(900, 500)
+	var ult_used := [0]
+	p1.ultimate_used.connect(func(_f): ult_used[0] += 1)
+	p1.input_source = Scripted.new(func(s, f): pass)
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS - 1
+	p1.input_source = Scripted.new(func(s, f):
+		s.attack_pressed = f == 1; s.heavy_pressed = f == 3; s.heavy_held = f >= 3 and f < 6)
+	await step(6)
+	check(ult_used[0] == 0 and p1.ultimate_points == Fighter.ULTIMATE_POINTS - 1, "Ultime : jauge pas pleine, X + Y ne lance rien")
+	await step(60)
+	p1._attack_cooldown_timer = 0.0
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f):
+		s.attack_pressed = f == 1; s.heavy_pressed = f == 3; s.heavy_held = f >= 3 and f < 6
+		s.ultimate_pressed = f == 3)
+	await step(5)
+	check(ult_used[0] == 1 and p1.ultimate_points == 0 and not p1.is_attacking() and p1._ultimate_flash_timer > 0.0,
+		"Ultime : X puis Y avec la jauge pleine lance l'ultime, vide la jauge et annule le coup léger")
+	await step(60)
+	p1._attack_cooldown_timer = 0.0
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1._stun_timer = 1.0
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(3)
+	check(ult_used[0] == 1 and p1.is_ultimate_ready(), "Ultime : pas d'ultime en étant sonné")
+
+	# Attaque ultime, étape 2 : le laser gelant de la Barre
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 500; p2.position.x = 900
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(3)
+	check(p1.is_lasering() and not p1.is_laser_active() and not p2.is_frozen(), "Laser : il se prépare d'abord (personne n'est gelé)")
+	await step(int(Fighter.LASER_STARTUP * 60.0) + 3)
+	check(p2.is_frozen() and p2.is_stunned() and p2.lives == p2.max_lives, "Laser : J2, à 400 px, est gelé (et sonné), sans perdre de vie")
+	var frozen_x := p2.position.x
+	p2.input_source = Scripted.new(func(s, f): s.stick.x = -1.0; s.attack_pressed = f % 5 == 0; s.jump_pressed = f == 2)
+	await step(60)
+	check(p2.is_frozen() and absf(p2.position.x - frozen_x) < 2.0 and not p2.is_attacking(), "Laser : gelé, J2 ne bouge pas, ne saute pas et n'attaque pas")
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = p2.position.x - 50
+	p1._attack_cooldown_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f): s.attack_pressed = f == 1)
+	await step(2 + light_frames)
+	check(p2.lives == p2.max_lives - 1 and not p2.is_frozen(), "Laser : gelé puis frappé, J2 perd une vie et n'est plus gelé")
+	await step(Fighter.FREEZE_TIME * 60.0 as int)
+	# Blocage parfait : le laser s'arrête, c'est un contre (et la Barre ne frappe plus pendant 1 s)
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 500; p2.position.x = 900
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	var laser_frames := int(Fighter.LASER_STARTUP * 60.0)
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= laser_frames - 2)
+	await step(laser_frames + 4)
+	check(not p2.is_frozen() and not p1.is_lasering() and p1.attack_cooldown_left() > 0.5 and p2.ultimate_points == Fighter.ULTIMATE_HEAVY_POINTS,
+		"Laser : un blocage parfait l'arrête, c'est un contre (Barre privée d'attaque, J2 +%d)" % p2.ultimate_points)
+	# Bloquer normalement ne protège pas
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = true)
+	p1.position.x = 500; p2.position.x = 900
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(laser_frames + 4)
+	check(p2.is_frozen(), "Laser : un blocage normal ne protège pas")
+	# Les autres persos n'ont pas de laser
+	GameSetup.player_characters = ["res://characters/jib.tres", ""]
+	await new_game()
+	GameSetup.player_characters = []
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 500; p2.position.x = 900
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(laser_frames + 4)
+	check(p1.ultimate_points == 0 and not p1.is_lasering() and not p2.is_frozen(), "Laser : seule la Barre tire le laser")
+
+	# Attaque ultime, étape 3 : l'onde de choc de Jumb
+	GameSetup.player_characters = ["res://characters/jumb.tres", "", ""]
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}], [{"type": "joypad", "id": 5}]]
+	await new_game()
+	GameSetup.player_characters = []
+	GameSetup.player_devices = []
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	var wave_p3: Fighter = game.fighters[2]
+	for fi in game.fighters:
+		fi.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 640; p2.position.x = 840; wave_p3.position.x = 1040
+	await step(40)
+	var wave_from := p2.position.x
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(3)
+	check(p1.is_waving() and p1.wave_radius() == 0.0 and untouched(p2), "Onde : Jumb se ramasse d'abord (personne n'est touché)")
+	await step(int((Fighter.WAVE_STARTUP + Fighter.WAVE_ACTIVE) * 60.0) + 2)
+	check(p2.is_stunned() and p2.lives == p2.max_lives and untouched(wave_p3), "Onde : J2, à 200 px, est frappé (sonné) ; J3, à 400 px, est trop loin")
+	await step(20)
+	check(p2.position.x - wave_from > 250.0, "Onde : J2 est projeté très loin (%.0f px)" % (p2.position.x - wave_from))
+	# Sonné (ou gelé) puis pris dans l'onde : une vie en moins
+	await step(20)
+	p2.position.x = 840; p2.velocity = Vector2.ZERO
+	p2._invincible_timer = 0.0
+	p2.freeze()
+	p2._invincible_timer = 0.0
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1._attack_cooldown_timer = 0.0
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(int((Fighter.WAVE_STARTUP + Fighter.WAVE_ACTIVE) * 60.0) + 4)
+	check(p2.lives == p2.max_lives - 1, "Onde : gelé par un laser puis pris dans l'onde, J2 perd une vie")
+	# Blocage parfait : c'est un contre
+	GameSetup.player_characters = ["res://characters/jumb.tres", ""]
+	await new_game()
+	GameSetup.player_characters = []
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 640; p2.position.x = 760
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	var wave_frames := int(Fighter.WAVE_STARTUP * 60.0)
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= wave_frames + 3)
+	await step(wave_frames + 12)
+	check(untouched(p2) and not p1.is_waving() and p1.attack_cooldown_left() > 0.5 and p2.ultimate_points == Fighter.ULTIMATE_HEAVY_POINTS,
+		"Onde : un blocage parfait l'arrête, c'est un contre (touché %s, onde %s, recharge %.2f, J2 +%d)" % [touched(p2), p1.is_waving(), p1.attack_cooldown_left(), p2.ultimate_points])
+
+	# Attaque ultime, étape 4 : l'éclair de Jib
+	GameSetup.player_characters = ["res://characters/jib.tres", ""]
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 500; p2.position.x = 760
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	await step(int((Fighter.BOLT_STARTUP + Fighter.BOLT_PASS_TIME) * 60.0) + 3)
+	check(p2.is_stunned() and p2.lives == p2.max_lives and p1.position.x > p2.position.x - 40,
+		"Éclair : 1re traversée, Jib passe à travers J2 et le sonne (Jib x=%.0f, J2 x=%.0f)" % [p1.position.x, p2.position.x])
+	await step(60)  # (le jeu ralentit pendant que J2 est sonné)
+	check(p2.lives == p2.max_lives - 1 and not p1.is_bolting(), "Éclair : les traversées suivantes lui font perdre une vie")
+	# Blocage parfait dès la 1re traversée : c'est un contre
+	await new_game()
+	GameSetup.player_characters = []
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p1.position.x = 500; p2.position.x = 760
+	await step(40)
+	p1.ultimate_points = Fighter.ULTIMATE_POINTS
+	var bolt_frames := int(Fighter.BOLT_STARTUP * 60.0)
+	p1.input_source = Scripted.new(func(s, f): s.ultimate_pressed = f == 1)
+	p2.input_source = Scripted.new(func(s, f): s.block_held = f >= bolt_frames)
+	await step(bolt_frames + 12)
+	check(untouched(p2) and not p1.is_bolting() and p1.attack_cooldown_left() > 0.5 and p2.ultimate_points == Fighter.ULTIMATE_HEAVY_POINTS,
+		"Éclair : un blocage parfait l'arrête, c'est un contre")
+
+	# Les persos ne se traversent plus : ils se bloquent en se touchant, sauf en dash
+	GameSetup.map_path = GameSetup.MAPS[0]
+	GameSetup.player_characters = []
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.position = Vector2(450, 520); p2.position = Vector2(650, 520)
+	p1.input_source = Scripted.new(func(s, f): s.stick = Vector2.RIGHT)
+	p2.input_source = Scripted.new(func(s, f): s.stick = Vector2.LEFT)
+	await step(90)
+	var bump_gap := p2.body_rect().position.x - p1.body_rect().end.x
+	check(absf(bump_gap) < 4.0 and p1.position.x < p2.position.x,
+		"Collision : deux persos qui marchent l'un vers l'autre se bloquent (écart %.1f)" % bump_gap)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	p1.input_source = Scripted.new(func(s, f):
+		s.stick = Vector2.RIGHT
+		s.dash_pressed = f == 0)
+	await step(30)
+	check(p1.position.x > p2.position.x, "Collision : en dash, on passe à travers (J1 x=%.0f, J2 x=%.0f)" % [p1.position.x, p2.position.x])
+	# Les mechas aussi se bloquent entre eux ; un mecha qui tombe de haut casse plus les blocs
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	await new_game()
+	game._beacon_timer = 1e9
+	game._item_spawn_timer = 1e9
+	game._weapon_spawn_timer = 1e9
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	var bump_cmd := {"stick": Vector2.ZERO}
+	p1.input_source = Scripted.new(func(s, f): s.stick = bump_cmd.stick)
+	p2.input_source = Scripted.new(func(s, f): s.stick = -bump_cmd.stick)
+	var bump_x := Ville.building_center(Ville.TOWER)
+	var bump_y := Ville.roof_top(Ville.TOWER)
+	p1.global_position = Vector2(bump_x - 300.0, bump_y - 40.0)
+	p2.global_position = Vector2(bump_x + 300.0, bump_y - 40.0)
+	await step(2)
+	var bump_m1: Mecha = game.call_mecha(p1)
+	var bump_m2: Mecha = game.call_mecha(p2)
+	await step(100)
+	p1._board(bump_m1)
+	p2._board(bump_m2)
+	await step(5)
+	bump_cmd.stick = Vector2.RIGHT
+	await step(90)
+	bump_cmd.stick = Vector2.ZERO
+	var mecha_gap := bump_m2.body_rect().position.x - bump_m1.body_rect().end.x
+	check(absf(mecha_gap) < 6.0, "Collision : deux mechas qui avancent l'un vers l'autre se bloquent (écart %.1f)" % mecha_gap)
+	# De haut : il casse le toit en retombant ; de pas haut, rien ne casse
+	var roof_blocks := func(m: Mecha) -> Array:
+		var feet := Rect2(m.body_rect().position.x, m.body_rect().end.y, m.body_rect().size.x, 30.0)
+		return game.map.windows().filter(func(w): return w is CityBlock and not w.broken and w.rect().intersects(feet))
+	var low_under: Array = roof_blocks.call(bump_m1)
+	var low_hp: Array = low_under.map(func(w): return w.hp)
+	bump_m1.velocity = Vector2(0.0, -600.0)  # un petit saut
+	await step(60)
+	check(low_under.all(func(w): return not w.broken) and low_under.map(func(w): return w.hp) == low_hp,
+		"Collision : un mecha qui retombe d'un petit saut n'abîme pas le toit")
+	var high_under: Array = roof_blocks.call(bump_m1)
+	bump_m1.global_position.y -= 700.0
+	bump_m1.velocity = Vector2.ZERO
+	await step(60)
+	var high_worn := high_under.filter(func(w): return w.broken or w.hp < w.max_hp).size()
+	bump_m1.global_position.y -= 700.0
+	bump_m1.velocity = Vector2.ZERO
+	await step(60)
+	check(high_under.size() > 0 and high_worn > 0 and high_under.any(func(w): return w.broken),
+		"Collision : un mecha qui retombe de haut abîme le toit, la 2e fois il le casse (%d blocs dessous)" % high_under.size())
 
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
