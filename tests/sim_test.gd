@@ -4116,6 +4116,28 @@ func _ready() -> void:
 		"En ligne (copain) : un tonneau touché chez l'hôte saute ici, sans créer un 2e tonneau qui vole")
 	Ville.variety = false
 	GameSetup.map_path = map_before_city
+	# 15e) Une map faite dans l'éditeur de l'hôte : il peut la choisir en ligne et l'envoie aux copains
+	var net_map := MapData.new_map("_test_en_ligne")
+	MapData.add_element(net_map, "plateforme", Vector2(300, 250))
+	MapData.save(net_map)
+	var net_path := GameSetup.SAVED_MAP_PREFIX + MapData.file_name("_test_en_ligne").get_basename()
+	check(net_path in GameSetup.online_maps(), "En ligne : les maps de l'éditeur de l'hôte sont dans le choix de la map")
+	Online.is_host = true
+	var net_packed := Online.packed_map(net_path)
+	check(Online.map_from_host(net_path, net_packed) == net_path and Online.packed_map(GameSetup.MAPS[0]).is_empty(),
+		"En ligne (hôte) : il joue sa map, compressée pour les copains (%d octets)" % net_packed.size())
+	Online.is_host = false
+	var guest_path := Online.map_from_host(net_path, net_packed)
+	var net_received := GameSetup.make_map(guest_path)
+	check(guest_path == GameSetup.ONLINE_MAP and GameSetup.online_map.elements.size() == net_map.elements.size()
+		and net_received.map_name == "_test_en_ligne" and GameSetup.editor_map.is_empty(),
+		"En ligne (copain) : il reçoit la map de l'hôte (%d éléments), sans toucher à son éditeur" % GameSetup.online_map.elements.size())
+	net_received.free()
+	check(Online.map_from_host("res://scenes/menu.tscn", PackedByteArray()) == GameSetup.MAPS[0]
+		and Online.map_from_host(GameSetup.VILLE_MAP, PackedByteArray()) == GameSetup.VILLE_MAP,
+		"En ligne (copain) : seulement une map du jeu, la Ville ou celle envoyée (sinon la première)")
+	MapData.delete_saved("_test_en_ligne")
+	GameSetup.online_map = {}
 	Online.leave()
 	GameSetup.player_devices = []
 	GameSetup.player_characters = []
