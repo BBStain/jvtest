@@ -29,6 +29,9 @@ var _shadow := Rect2()
 var _collapse: CityCollapse
 var _box := Rect2()             ## le rectangle qui englobe le morceau (position de départ)
 var _shadow_rect: ColorRect     ## l'ombre rouge, qui reste où le morceau va tomber
+var id := 0                     ## son n° (le même chez l'hôte et chez les copains en ligne)
+var remote := false             ## chez un copain en ligne : l'hôte dit où il en est (rien n'est calculé)
+var net_seen := false           ## (copain) l'hôte l'a déjà envoyé au moins une fois
 
 
 func setup(group: Array[CityBlock], collapse: CityCollapse) -> void:
@@ -109,6 +112,18 @@ func burst() -> void:
 	queue_redraw()
 
 
+## (copain en ligne) Où il en est chez l'hôte : sa descente et son état.
+func apply_net_state(down: float, net_state: int) -> void:
+	net_seen = true
+	if net_state == State.BURST:
+		burst()
+		return
+	if state == State.BURST:
+		return
+	offset.y = down
+	state = net_state as State
+
+
 ## Le morceau se dessine une fois : en tombant, c'est le nœud qui descend (avec "offset"),
 ## ce qui évite de redessiner des centaines de blocs à chaque image. L'éclatement, lui, se redessine.
 func _physics_process(delta: float) -> void:
@@ -116,7 +131,7 @@ func _physics_process(delta: float) -> void:
 		State.WARN:
 			_timer -= delta
 			position = offset + Vector2(randf_range(-4.0, 4.0), randf_range(-2.0, 2.0))  # il tremble
-			if _timer <= 0.0:
+			if _timer <= 0.0 and not remote:
 				state = State.FALL
 		State.BURST:
 			_timer -= delta
@@ -124,6 +139,9 @@ func _physics_process(delta: float) -> void:
 			if _timer <= 0.0:
 				queue_free()
 		State.FALL:
+			if remote:
+				position = offset  # chez un copain : la descente vient de l'hôte
+				return
 			_speed = minf(_speed + GRAVITY * delta, MAX_FALL)
 			var step := _speed * delta
 			var landed := _land_distance(step)

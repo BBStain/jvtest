@@ -791,7 +791,7 @@ func _show_online() -> void:
 			_content.add_child(UiKit.label(hint, 18, UiKit.TEXT_DIM))
 		Screen.ONLINE_MAP:
 			_content.add_child(UiKit.label("CHOISIS LA MAP", 40))
-			_maps.assign(GameSetup.MAPS)  # en ligne : seulement les maps du jeu (pour l'instant)
+			_maps.assign(GameSetup.online_maps())  # en ligne : les maps du jeu et la Ville
 			_map_choice = Online.map_index
 			_content.add_child(_map_card())
 			_content.add_child(UiKit.label("gauche / droite pour choisir, A pour lancer la partie, B pour revenir", 18, UiKit.TEXT_DIM))

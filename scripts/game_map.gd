@@ -107,6 +107,14 @@ func windows() -> Array[BreakableWindow]:
 	return _windows
 
 
+## Les fenêtres qui ne sont pas des blocs de la Ville.
+## (Cherchées une seule fois, comme pour windows_near.)
+func _plain_windows() -> Array[BreakableWindow]:
+	if not _near_ready:
+		windows_near(Rect2())
+	return _few_windows
+
+
 ## Les fenêtres et blocs qui peuvent toucher le rectangle r. Dans la Ville (des milliers de blocs),
 ## on ne regarde que ceux d'à côté ; sinon toutes les fenêtres (il y en a peu).
 func windows_near(r: Rect2) -> Array[BreakableWindow]:
@@ -140,12 +148,13 @@ func smash_windows_in(center: Vector2, radius: float) -> void:
 
 
 ## Jeu en ligne (hôte) : quelles fenêtres sont cassées.
+## (Les blocs de la Ville n'y sont pas : il y en a des milliers, ils partent à part, voir Game.)
 func window_state() -> Array:
-	return windows().map(func(w: BreakableWindow) -> bool: return w.broken)
+	return _plain_windows().map(func(w: BreakableWindow) -> bool: return w.broken)
 
 
 ## Jeu en ligne (copain) : on casse / répare les fenêtres comme chez l'hôte.
 func apply_window_state(states: Array) -> void:
-	var list := windows()
+	var list := _plain_windows()
 	for i in mini(states.size(), list.size()):
 		list[i].set_broken(states[i])

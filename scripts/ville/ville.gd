@@ -103,7 +103,10 @@ static func building_center(index: int) -> float:
 static func build() -> GameMap:
 	_next_id = 0
 	_all_blocks = []
-	_rng.randomize()
+	if GameSetup.ville_seed >= 0:
+		_rng.seed = GameSetup.ville_seed  # en ligne : la même ville chez tout le monde
+	else:
+		_rng.randomize()
 	var map := GameMap.new()
 	map.name = "Ville"
 	map.map_name = "Ville"

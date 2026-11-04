@@ -14,7 +14,7 @@ const MAPS := [
 const SAVED_MAP_PREFIX := "carte:"
 const EDITOR_MAP := "editeur"
 ## La Ville : construite en code (voir Ville.build), pas dans MAPS ; elle est dans le choix de la map
-## hors ligne (all_maps), pas encore en ligne.
+## hors ligne (all_maps) et en ligne (online_maps).
 const VILLE_MAP := "ville"
 const MENU_SCENE := "res://scenes/menu.tscn"
 
@@ -50,6 +50,9 @@ static var editor_map: Dictionary = {}
 static var return_scene := ""
 ## Le nombre de vies de chaque joueur (réglable dans OPTIONS).
 static var lives := 3
+## La graine de la Ville (murs fins, fenêtres, tonneaux au hasard). En ligne, l'hôte la tire et
+## l'envoie : tout le monde construit la même ville. -1 = au hasard (hors ligne).
+static var ville_seed := -1
 
 
 ## Si on lance directement la scène de combat (F6 dans l'éditeur), sans passer par le
@@ -88,7 +91,15 @@ static func all_maps() -> Array[String]:
 		var official := "%s/%s.json" % [MapData.BUNDLED_DIR, saved] in MAPS
 		if not official or FileAccess.file_exists(MapData.file_path(saved)):
 			maps.append(SAVED_MAP_PREFIX + saved)
-	maps.append(VILLE_MAP)  # la Ville : une map comme les autres (hors ligne pour l'instant)
+	maps.append(VILLE_MAP)  # la Ville : une map comme les autres
+	return maps
+
+
+## Les maps qu'on peut choisir en ligne : celles du jeu, puis la Ville.
+static func online_maps() -> Array[String]:
+	var maps: Array[String] = []
+	maps.assign(MAPS)
+	maps.append(VILLE_MAP)
 	return maps
 
 
