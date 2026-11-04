@@ -4008,6 +4008,88 @@ func _ready() -> void:
 	await step(1)
 	check(game._match_over and game._end_screen.visible and game._winner_label.text == "Joueur 1 gagne !",
 		"En ligne (copain) : l'écran de fin s'affiche quand l'hôte le dit")
+	# 15d) La Ville en ligne : la même ville chez tout le monde (graine tirée par l'hôte), et les blocs
+	# abîmés, cassés ou qui tombent chez l'hôte sont envoyés aux copains
+	check(GameSetup.VILLE_MAP in GameSetup.online_maps(), "En ligne : la Ville est dans le choix de la map")
+	var map_before_city := GameSetup.map_path
+	Online.is_host = true
+	Online.my_id = 1
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], []]
+	GameSetup.map_path = GameSetup.VILLE_MAP
+	GameSetup.ville_seed = 4242
+	Ville.variety = true
+	await new_game()
+	var host_city: CityCollapse = game._city
+	var city_look := func(city: CityCollapse) -> Array:
+		return [city.blocks.size(), city.blocks.filter(func(b): return b is ExplosiveBarrel).map(func(b): return b.position),
+			city.blocks.filter(func(b): return b.max_hp == Ville.THIN_WALL_HP).size()]
+	var host_look: Array = city_look.call(host_city)
+	check(host_city.track and not host_city.remote, "En ligne (hôte) : la Ville note ce qui casse")
+	game._city = null  # (pour le test, on lit nous-mêmes ce que l'hôte enverrait)
+	var city_walls := func(city: CityCollapse, index: int, side: int) -> Array:
+		var left: float = Ville.building_lefts()[index]
+		var right: float = left + Ville.BUILDINGS[index][0] * Ville.BLOCK
+		var x: float = left + 4.0 if side < 0 else right - 4.0  # (un mur fin est moins épais)
+		return city.blocks.filter(func(b: CityBlock) -> bool:
+			return not b.one_way and b.rect().has_point(Vector2(x, b.rect().get_center().y)) and b.rect().position.y >= -Ville.FLOOR_HEIGHT - 1.0)
+	var worn: CityBlock = city_walls.call(host_city, 1, -1)[0]
+	var worn_index := host_city.blocks.find(worn)
+	worn.hit(2)
+	var cut: Array = city_walls.call(host_city, 0, -1) + city_walls.call(host_city, 0, 1)
+	for b in cut:
+		b.hit(Ville.BLOCK_HP)
+	var cut_indices: Array = cut.map(func(b): return host_city.blocks.find(b))
+	var worn_hp := worn.hp
+	var city_changes := host_city.take_changes()
+	await step(3)
+	var chunk_changes := host_city.take_changes()
+	var host_chunk: FallingChunk = host_city.chunks[0] if host_city.chunks.size() == 1 else null
+	check(city_changes.get("b", []).size() == (cut.size() + 1) * 2 and chunk_changes.get("m", []).size() == 1 and host_chunk != null,
+		"En ligne (hôte) : un bloc abîmé, %d cassés et un morceau qui tombe, à envoyer" % cut.size())
+	var host_chunk_id: int = host_chunk.id if host_chunk != null else -1
+	var host_chunk_size: int = host_chunk.rects.size() if host_chunk != null else -1
+	await step(33)
+	game._city = host_city
+	var city_state: Array = game.online_state()
+	var host_offset: float = host_chunk.offset.y if host_chunk != null else 0.0
+	var host_chunk_state: int = host_chunk.state if host_chunk != null else -1
+	var host_wheel: float = game.map.get_node("Decor/GrandeRoue")._time
+	# Chez un copain : la même ville, puis ce que l'hôte envoie
+	Online.is_host = false
+	Online.my_id = 2
+	GameSetup.player_devices = [[], [{"type": "keyboard", "layout": 1}]]
+	await new_game()
+	var guest_city: CityCollapse = game._city
+	check(city_look.call(guest_city) == host_look and guest_city.remote,
+		"En ligne (copain) : la même Ville que chez l'hôte (%d blocs, %d tonneaux, %d murs fins)" % [host_look[0], host_look[1].size(), host_look[2]])
+	city_changes["k"] = "ville"
+	chunk_changes["k"] = "ville"
+	game.spawn_online_effect(city_changes)
+	game.spawn_online_effect(chunk_changes)
+	var guest_chunk: FallingChunk = guest_city.chunks[0] if guest_city.chunks.size() == 1 else null
+	check(guest_city.blocks[worn_index].hp == worn_hp and cut_indices.all(func(i): return guest_city.blocks[i].broken)
+		and guest_chunk != null and guest_chunk.id == host_chunk_id and guest_chunk.rects.size() == host_chunk_size,
+		"En ligne (copain) : le bloc abîmé, les blocs cassés et le morceau qui tombe comme chez l'hôte")
+	await step(10)
+	check(guest_chunk != null and guest_chunk.offset.y == 0.0, "En ligne (copain) : le morceau ne tombe pas tout seul (c'est l'hôte qui calcule)")
+	game.receive_online_state(city_state)
+	await step(1)
+	check(guest_chunk != null and is_equal_approx(guest_chunk.offset.y, host_offset) and guest_chunk.state == host_chunk_state
+		and host_chunk_state == FallingChunk.State.FALL and host_offset > 0.0
+		and absf(game.map.get_node("Decor/GrandeRoue")._time - host_wheel) < 0.05,
+		"En ligne (copain) : le morceau descend comme chez l'hôte (%.0f px), la grande roue aussi" % host_offset)
+	var burst_state := city_state.duplicate()
+	burst_state[11] = [[], city_state[11][1]]
+	game.receive_online_state(burst_state)
+	await step(1)
+	check(guest_chunk != null and guest_chunk.state == FallingChunk.State.BURST, "En ligne (copain) : l'hôte ne l'envoie plus, il éclate")
+	var guest_barrel: int = guest_city.blocks.find(guest_city.blocks.filter(func(b): return b is ExplosiveBarrel)[0])
+	game.spawn_online_effect({"k": "ville", "b": [guest_barrel, 0], "m": []})
+	await step(1)
+	check(guest_city.blocks[guest_barrel].broken and game.projectiles.filter(func(p): return p.kind == "tonneau").is_empty(),
+		"En ligne (copain) : un tonneau touché chez l'hôte saute ici, sans créer un 2e tonneau qui vole")
+	Ville.variety = false
+	GameSetup.map_path = map_before_city
 	Online.leave()
 	GameSetup.player_devices = []
 	GameSetup.player_characters = []

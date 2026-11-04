@@ -154,7 +154,7 @@ const LOOSE_HIT_LIFT := 300.0              ## ... un peu vers le haut, pour qu'i
 const LOOSE_HIT_LOCK := 0.3                ## le même coup ne le refrappe pas à chaque frame
 const LOOSE_BLAST_SPEED := 1100.0          ## soufflé par une grenade
 
-const ONLINE_HEADER := 11                  ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
+const ONLINE_HEADER := 12                  ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
 var fighters: Array[Fighter] = []
 var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
@@ -177,6 +177,7 @@ var _ultimate_test := false                ## ?ultime=plein dans l'adresse : jau
 var _online_state: Array = []              ## (copain) le dernier état du jeu reçu de l'hôte
 
 var map: GameMap
+var _city: CityCollapse  ## Ville : l'écroulement des immeubles (null sur les autres maps)
 const BODY_MIN_OVERLAP := 10.0             ## deux corps qui se chevauchent moins que ça en hauteur ne se bloquent pas
 var _mecha_lasers: Array = []              ## canons laser de mecha en train de s'allonger (voir _advance_laser)
 var projectiles: Array[Projectile] = []    ## ce qui vole : lances lancées, balles, grenades
@@ -205,6 +206,10 @@ func _ready() -> void:
 	for window in map.windows():
 		if window is ExplosiveBarrel:
 			(window as ExplosiveBarrel).exploded.connect(_on_barrel_exploded)
+	_city = map.get_node_or_null("Ecroulement") as CityCollapse
+	if online and _city != null:
+		_city.track = Online.is_host     # l'hôte note ce qui casse et ce qui tombe...
+		_city.remote = not Online.is_host  # ... et chez les copains, on l'applique
 	if map.item_spawn_time > 0.0:
 		_item_spawn_timer = map.item_spawn_time
 	if map.weapon_spawn_time > 0.0:
@@ -293,6 +298,7 @@ func _physics_process(delta: float) -> void:
 			if projectile.finished:
 				_remove_projectile(projectile)
 		if online:
+			_send_city_changes()
 			Online.send_state(online_state())
 		return
 
@@ -338,6 +344,7 @@ func _physics_process(delta: float) -> void:
 	_shake_on_life_loss()
 	_check_end_of_match()
 	if online:
+		_send_city_changes()
 		Online.send_state(online_state())
 
 
@@ -378,6 +385,7 @@ func _guest_tick() -> void:
 	_break_focus.clear()
 	for index in state[10]:
 		_break_focus.append(fighters[index])
+	_apply_city_state(state[11])
 	if state[2] != "" and not _match_over:
 		_show_end(state[2], fighters[state[3]].color if state[3] >= 0 else Color.WHITE)
 	for i in mini(fighters.size(), state.size() - ONLINE_HEADER):
@@ -403,10 +411,44 @@ func online_state() -> Array:
 			winner = i
 	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, stun_focus, gauge.points,
 		map.moving_state(), projectiles.map(func(p: Projectile) -> Array: return p.net_state()),
-		pickups.map(func(p: ItemPickup) -> Array: return p.net_state()), map.window_state(), break_focus]
+		pickups.map(func(p: ItemPickup) -> Array: return p.net_state()), map.window_state(), break_focus,
+		_city_state()]
 	for fighter in fighters:
 		state.append(fighter.net_state())
 	return state
+
+
+## (hôte) Ville : les morceaux qui tombent, la grande roue et le grand huit ([] sur les autres maps).
+## Les blocs abîmés et les morceaux qui se détachent, eux, partent à part (_send_city_changes).
+func _city_state() -> Array:
+	if _city == null:
+		return []
+	var rides := []
+	for ride in [map.get_node_or_null("Decor/GrandeRoue"), map.get_node_or_null("Decor/GrandHuit")]:
+		rides.append(ride._time if ride != null else 0.0)
+	return [_city.chunk_state(), rides]
+
+
+## (copain) Ville : les morceaux et les manèges comme chez l'hôte.
+func _apply_city_state(data: Array) -> void:
+	if _city == null or data.size() < 2:
+		return
+	_city.apply_chunk_state(data[0])
+	var rides := [map.get_node_or_null("Decor/GrandeRoue"), map.get_node_or_null("Decor/GrandHuit")]
+	for i in mini(rides.size(), data[1].size()):
+		if rides[i] != null:
+			rides[i]._time = data[1][i]
+
+
+## (hôte) Ville : les blocs abîmés ou cassés et les morceaux qui se détachent depuis la dernière image,
+## envoyés sans risque de perte (un bloc cassé chez l'hôte doit l'être chez tout le monde).
+func _send_city_changes() -> void:
+	if _city == null:
+		return
+	var changes := _city.take_changes()
+	if not changes.is_empty():
+		changes["k"] = "ville"
+		Online.send_effect(changes)
 
 
 ## (copain) L'hôte a envoyé l'état du jeu : on l'affichera à la prochaine frame.
@@ -437,6 +479,9 @@ func spawn_online_effect(data: Dictionary) -> void:
 			_spawn_clash_mark(data.p, false, data.c)
 		"explosion":
 			_spawn_explosion(data.p, data.c)
+		"ville":
+			if _city != null:
+				_city.apply_changes(data)
 
 
 ## Start (manette), Échap ou P (clavier) : ouvre le menu pause.
@@ -2366,6 +2411,8 @@ func _explode(where: Vector2, knockback := GRENADE_KNOCKBACK, radius := GRENADE_
 ## Ville : un tonneau explosif a pris un dégât. Il explose à l'image suivante (une explosion qui en
 ## touche d'autres les fait sauter à leur tour, image après image : une réaction en chaîne).
 func _on_barrel_exploded(barrel: ExplosiveBarrel) -> void:
+	if _is_online_guest():
+		return  # chez un copain, le tonneau qui vole vient de l'hôte (avec ce qui vole)
 	# Il devient un tonneau qui vole : le coup (ou l'explosion) qui l'a touché le projette tout de
 	# suite après (voir _hit_loose_objects et _explode), sa mèche brûle, puis il explose.
 	var flying := Projectile.new()
@@ -2569,7 +2616,7 @@ func _tick_pickups(delta: float) -> void:
 			var points := map.item_spawn_points()
 			var kinds: Array = ItemPickup.KINDS + ItemPickup.VILLE_KINDS if map.has_mechas else ItemPickup.KINDS
 			spawn_pickup(kinds[rng.randi() % kinds.size()], points[rng.randi() % points.size()])
-	if map.has_mechas:
+	if map.has_mechas and not online:  # les mechas en ligne : la prochaine étape
 		_tick_beacons(delta)
 	for pickup: ItemPickup in pickups.duplicate():
 		if not map.blast_zone.has_point(pickup.position):

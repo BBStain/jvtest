@@ -61,9 +61,26 @@ func hit(damage: int) -> bool:
 	if hp == 0:
 		set_broken(true)
 		return true
+	if collapse != null:
+		collapse.block_changed(self)
 	refresh_look()
 	queue_redraw()
 	return false
+
+
+## (copain en ligne) L'hôte dit qu'il ne reste que "value" PV : le bloc s'assombrit (avec son petit
+## éclair), ou casse à 0.
+func show_hp(value: int) -> void:
+	if broken or value >= hp:
+		return
+	hp = value
+	_flash = 0.12
+	set_physics_process(true)
+	if hp == 0:
+		set_broken(true)
+		return
+	refresh_look()
+	queue_redraw()
 
 
 func set_broken(value: bool) -> void:
@@ -78,6 +95,7 @@ func set_broken(value: bool) -> void:
 	set_physics_process(true)
 	refresh_look()
 	if value and collapse != null:
+		collapse.block_changed(self)
 		collapse.block_broken(self)
 
 

@@ -107,6 +107,7 @@ func _reset() -> void:
 	my_id = 0
 	message = ""
 	game = null
+	GameSetup.ville_seed = -1  # hors ligne, la Ville change à chaque partie
 
 
 func _end(reason: String) -> void:
@@ -389,7 +390,7 @@ func _apply_choice(id: int, character: int, ready: bool, weapon := 0) -> void:
 ## (hôte) La map choisie.
 func choose_map(index: int) -> void:
 	if is_host:
-		map_index = posmod(index, GameSetup.MAPS.size())
+		map_index = posmod(index, GameSetup.online_maps().size())
 		_share_lobby()
 
 
@@ -416,11 +417,13 @@ func _lobby_from_host(new_players: Array, new_map: int) -> void:
 ## (hôte) Tout le monde est prêt : on lance la partie chez tout le monde.
 func start_game() -> void:
 	if is_host and all_ready():
-		_start_from_host.rpc(players, map_index, GameSetup.lives)
+		_start_from_host.rpc(players, map_index, GameSetup.lives, randi() % 1000000000)
 
 
+## Le jeu commence chez tout le monde (seed : la graine de la Ville, la même pour tous).
 @rpc("authority", "call_local", "reliable")
-func _start_from_host(final_players: Array, map: int, lives: int) -> void:
+func _start_from_host(final_players: Array, map: int, lives: int, seed := -1) -> void:
+	GameSetup.ville_seed = seed
 	players = final_players
 	map_index = map
 	status = Status.PLAYING
@@ -431,7 +434,8 @@ func _start_from_host(final_players: Array, map: int, lives: int) -> void:
 		GameSetup.player_devices.append([local_device] if players[i].id == my_id else [])
 		GameSetup.player_characters.append(GameSetup.CHARACTERS[players[i].character])
 		GameSetup.player_weapons.append(GameSetup.WEAPONS[players[i].get("weapon", 0)])
-	GameSetup.map_path = GameSetup.MAPS[map_index]
+	var maps := GameSetup.online_maps()
+	GameSetup.map_path = maps[clampi(map_index, 0, maps.size() - 1)]
 	GameSetup.lives = lives
 	get_tree().paused = false
 	get_tree().change_scene_to_file(GAME_SCENE)
@@ -440,11 +444,12 @@ func _start_from_host(final_players: Array, map: int, lives: int) -> void:
 ## (hôte) Rejouer avec les mêmes joueurs.
 func restart() -> void:
 	if is_host:
-		_restart_from_host.rpc()
+		_restart_from_host.rpc(randi() % 1000000000)
 
 
 @rpc("authority", "call_local", "reliable")
-func _restart_from_host() -> void:
+func _restart_from_host(seed := -1) -> void:
+	GameSetup.ville_seed = seed  # une nouvelle Ville, la même pour tous
 	get_tree().paused = false
 	get_tree().reload_current_scene()
 
