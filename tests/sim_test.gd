@@ -4054,6 +4054,15 @@ func _ready() -> void:
 	var host_offset: float = host_chunk.offset.y if host_chunk != null else 0.0
 	var host_chunk_state: int = host_chunk.state if host_chunk != null else -1
 	var host_wheel: float = game.map.get_node("Decor/GrandeRoue")._time
+	# Un mecha piloté qui tire au laser (et s'use), chez l'hôte
+	var net_mecha: Mecha = game.call_mecha(game.fighters[0], "laser")
+	await step(int(Mecha.CALL_TIME * 60.0) + 5)
+	game.fighters[0]._board(net_mecha)
+	net_mecha.damage(5)
+	game._fire_mecha_laser(net_mecha, net_mecha.turret_muzzle(Vector2.RIGHT), Vector2.RIGHT, 1.0)
+	await step(1)
+	var mecha_state: Array = game.online_state()
+	var host_mecha_look := [net_mecha.position, net_mecha.hp, net_mecha.heavy_weapon, net_mecha.visual.color]
 	# Chez un copain : la même ville, puis ce que l'hôte envoie
 	Online.is_host = false
 	Online.my_id = 2
@@ -4083,6 +4092,23 @@ func _ready() -> void:
 	game.receive_online_state(burst_state)
 	await step(1)
 	check(guest_chunk != null and guest_chunk.state == FallingChunk.State.BURST, "En ligne (copain) : l'hôte ne l'envoie plus, il éclate")
+	# Le mecha : affiché comme chez l'hôte, avec son pilote dans le cockpit et le trait du laser
+	game.receive_online_state(mecha_state)
+	await step(1)
+	var guest_mecha: Mecha = game.mechas[0] if game.mechas.size() == 1 else null
+	check(guest_mecha != null and [guest_mecha.position, guest_mecha.hp, guest_mecha.heavy_weapon, guest_mecha.visual.color] == host_mecha_look
+		and guest_mecha.pilot == game.fighters[0] and game.fighters[0].mecha == guest_mecha and guest_mecha.is_ready(),
+		"En ligne (copain) : le mecha piloté par J1 est affiché comme chez l'hôte (usé, avec son canon laser)")
+	check(game._traces.size() == 1 and game._traces[0].remote, "En ligne (copain) : le trait du canon laser s'affiche aussi")
+	var no_mecha_state := mecha_state.duplicate()
+	no_mecha_state[12] = []
+	no_mecha_state[13] = []
+	game.receive_online_state(no_mecha_state)
+	game.spawn_online_effect({"k": "epave", "p": Vector2(0, -300), "c": Color.RED})
+	await step(1)
+	var wrecks := game.get_children().filter(func(c): return c is MechaVisual).size()
+	check(game.mechas.is_empty() and game.fighters[0].mecha == null and game._traces.is_empty() and wrecks == 1,
+		"En ligne (copain) : le mecha détruit chez l'hôte disparaît, J1 en sort, son explosion s'affiche")
 	var guest_barrel: int = guest_city.blocks.find(guest_city.blocks.filter(func(b): return b is ExplosiveBarrel)[0])
 	game.spawn_online_effect({"k": "ville", "b": [guest_barrel, 0], "m": []})
 	await step(1)

@@ -163,6 +163,44 @@ var _bolt_pass := -1
 var _dash_speed := DASH_SPEED                     ## ce que ce coup de poing a déjà touché (une fois chacun)
 
 
+## Jeu en ligne : ce que l'hôte envoie de chaque mecha (chez un copain, rien n'est calculé).
+const NET_VARS := [
+	"position", "velocity", "state", "facing", "fuel", "heavy_weapon", "hp", "_state_time", "_dash_timer",
+	"_dash_dir", "_exit_hold", "_empty_tank", "_fuel_show_timer", "_thrusting", "_hit_flash", "_burst_left",
+	"_burst_dir", "shield", "shield_broken", "_shielding", "_shield_hold", "_shield_flash", "_punch_time",
+	"_punch_charge", "punch_power", "punch_reach", "ultimate", "ult_time", "ult_dir", "frozen_timer", "_charge",
+]
+const NET_VISUAL_VARS := [
+	"pose", "pose_time", "facing", "aim", "wear", "flames", "visible", "modulate", "gun_shot_time",
+	"turret_charge", "turret_shot_time", "turret_barrel", "heavy_weapon",
+]
+
+
+## (hôte) L'état du mecha : son pilote (n° du joueur, -1 = vide), ses variables, puis son dessin.
+func net_state() -> Array:
+	var data := [pilot.player_index if pilot != null else -1]
+	for v in NET_VARS:
+		data.append(get(v))
+	for v in NET_VISUAL_VARS:
+		data.append(visual.get(v))
+	return data
+
+
+## (copain) Le mecha tel que l'hôte l'a envoyé. Le pilote est relié par game.gd (pilot_of).
+func apply_net_state(data: Array) -> void:
+	for i in mini(data.size() - 1, NET_VARS.size()):
+		set(NET_VARS[i], data[1 + i])
+	var start := 1 + NET_VARS.size()
+	for i in mini(data.size() - start, NET_VISUAL_VARS.size()):
+		visual.set(NET_VISUAL_VARS[i], data[start + i])
+	queue_redraw()
+
+
+## Le n° du joueur aux commandes dans un état envoyé par l'hôte (-1 = vide).
+static func pilot_of(data: Array) -> int:
+	return data[0] if not data.is_empty() else -1
+
+
 func _ready() -> void:
 	add_to_group("mechas")
 	collision_layer = 0

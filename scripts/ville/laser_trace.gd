@@ -7,24 +7,27 @@ const LIFETIME := 0.25
 var from := Vector2.ZERO                ## dans la map
 var to := Vector2.ZERO
 var width := 14.0
-var _age := 0.0
+var age := 0.0
+var remote := false                     ## chez un copain en ligne : c'est l'hôte qui dit quand il disparaît
 
 
 ## Le rayon avance encore : il reste bien visible.
 func restart() -> void:
-	_age = 0.0
+	age = 0.0
 	queue_redraw()
 
 
 func _process(delta: float) -> void:
-	_age += delta
-	if _age >= LIFETIME:
+	if remote:
+		return
+	age += delta
+	if age >= LIFETIME:
 		queue_free()
 		return
 	queue_redraw()
 
 
 func _draw() -> void:
-	var alpha := 1.0 - _age / LIFETIME
+	var alpha := clampf(1.0 - age / LIFETIME, 0.0, 1.0)
 	draw_line(to_local(from), to_local(to), Color(Fighter.LASER_COLOR, 0.6 * alpha), width * 2.0)
 	draw_line(to_local(from), to_local(to), Color(1, 1, 1, alpha), width * 0.6)

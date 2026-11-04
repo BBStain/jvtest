@@ -154,7 +154,7 @@ const LOOSE_HIT_LIFT := 300.0              ## ... un peu vers le haut, pour qu'i
 const LOOSE_HIT_LOCK := 0.3                ## le même coup ne le refrappe pas à chaque frame
 const LOOSE_BLAST_SPEED := 1100.0          ## soufflé par une grenade
 
-const ONLINE_HEADER := 12                  ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
+const ONLINE_HEADER := 15                  ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
 var fighters: Array[Fighter] = []
 var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
@@ -179,6 +179,7 @@ var _online_state: Array = []              ## (copain) le dernier état du jeu r
 var map: GameMap
 var _city: CityCollapse  ## Ville : l'écroulement des immeubles (null sur les autres maps)
 const BODY_MIN_OVERLAP := 10.0             ## deux corps qui se chevauchent moins que ça en hauteur ne se bloquent pas
+var _traces: Array[LaserTrace] = []       ## les traits de canon laser de mecha affichés (envoyés aux copains en ligne)
 var _mecha_lasers: Array = []              ## canons laser de mecha en train de s'allonger (voir _advance_laser)
 var projectiles: Array[Projectile] = []    ## ce qui vole : lances lancées, balles, grenades
 var pickups: Array[ItemPickup] = []        ## les objets tombés sur la map, pas encore ramassés
@@ -386,6 +387,9 @@ func _guest_tick() -> void:
 	for index in state[10]:
 		_break_focus.append(fighters[index])
 	_apply_city_state(state[11])
+	_apply_mechas(state[12])
+	_apply_traces(state[13])
+	_shake_left = maxf(_shake_left, state[14])  # l'écran tremble comme chez l'hôte (explosions, chutes...)
 	if state[2] != "" and not _match_over:
 		_show_end(state[2], fighters[state[3]].color if state[3] >= 0 else Color.WHITE)
 	for i in mini(fighters.size(), state.size() - ONLINE_HEADER):
@@ -412,7 +416,7 @@ func online_state() -> Array:
 	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, stun_focus, gauge.points,
 		map.moving_state(), projectiles.map(func(p: Projectile) -> Array: return p.net_state()),
 		pickups.map(func(p: ItemPickup) -> Array: return p.net_state()), map.window_state(), break_focus,
-		_city_state()]
+		_city_state(), mechas.map(func(m: Mecha) -> Array: return m.net_state()), _trace_state(), _shake_left]
 	for fighter in fighters:
 		state.append(fighter.net_state())
 	return state
@@ -438,6 +442,69 @@ func _apply_city_state(data: Array) -> void:
 	for i in mini(rides.size(), data[1].size()):
 		if rides[i] != null:
 			rides[i]._time = data[1][i]
+
+
+## (hôte) Les traits de canon laser des mechas : [début, fin, épaisseur, âge] pour chacun.
+func _trace_state() -> Array:
+	var list := []
+	for trace in _traces.duplicate():
+		if not is_instance_valid(trace) or trace.is_queued_for_deletion():
+			_traces.erase(trace)
+			continue
+		list.append([trace.from, trace.to, trace.width, trace.age])
+	return list
+
+
+## (copain) Les traits de laser comme chez l'hôte (on en crée ou on en retire pour avoir les mêmes).
+func _apply_traces(list: Array) -> void:
+	while _traces.size() > list.size():
+		_traces.pop_back().queue_free()
+	while _traces.size() < list.size():
+		var trace := LaserTrace.new()
+		trace.remote = true
+		add_child(trace)
+		_traces.append(trace)
+	for i in list.size():
+		_traces[i].from = list[i][0]
+		_traces[i].to = list[i][1]
+		_traces[i].width = list[i][2]
+		_traces[i].age = list[i][3]
+		_traces[i].queue_redraw()
+
+
+## (copain) Les mechas comme chez l'hôte : on en crée ou on en retire pour avoir les mêmes, puis
+## chacun prend son état et son pilote (celui qui pilote ne se dessine pas : il est dans le cockpit).
+func _apply_mechas(list: Array) -> void:
+	while mechas.size() > list.size():
+		var gone: Mecha = mechas.pop_back()
+		if gone.pilot != null:
+			gone.pilot.mecha = null
+		gone.queue_free()
+	while mechas.size() < list.size():
+		var mecha := Mecha.new()
+		mechas.append(mecha)
+		add_child(mecha)
+		move_child(mecha, 1)  # derrière les joueurs, devant le décor
+	var piloting := {}
+	for i in list.size():
+		var mecha := mechas[i]
+		mecha.apply_net_state(list[i])
+		var index := Mecha.pilot_of(list[i])
+		var pilot: Fighter = fighters[index] if index >= 0 and index < fighters.size() else null
+		if pilot != mecha.pilot:
+			if mecha.pilot != null:
+				mecha.pilot.mecha = null
+			if pilot != null:
+				mecha.board(pilot)
+			else:
+				mecha.leave()
+		if pilot != null:
+			pilot.mecha = mecha
+			piloting[pilot] = true
+	for fighter in fighters:
+		if fighter.mecha != null and not piloting.has(fighter):
+			fighter.mecha = null
+			fighter.queue_redraw()
 
 
 ## (hôte) Ville : les blocs abîmés ou cassés et les morceaux qui se détachent depuis la dernière image,
@@ -482,6 +549,8 @@ func spawn_online_effect(data: Dictionary) -> void:
 		"ville":
 			if _city != null:
 				_city.apply_changes(data)
+		"epave":
+			_spawn_wreck(data.p, data.c)
 
 
 ## Start (manette), Échap ou P (clavier) : ouvre le menu pause.
@@ -2025,6 +2094,7 @@ func _fire_mecha_laser(mecha: Mecha, origin: Vector2, direction: Vector2, power:
 	trace.to = from
 	trace.width = lerpf(MECHA_LASER_RADIUS[0], MECHA_LASER_RADIUS[1], power)
 	add_child(trace)
+	_traces.append(trace)
 	var beam := {"mecha": mecha, "shooter": mecha.pilot, "origin": from, "dir": direction, "power": power,
 		"reach": 0.0, "range": lerpf(MECHA_LASER_RANGE[0], MECHA_LASER_RANGE[1], power),
 		"speed": lerpf(MECHA_LASER_SPEED[0], MECHA_LASER_SPEED[1], power), "radius": trace.width,
@@ -2251,13 +2321,9 @@ func _on_mecha_destroyed(mecha: Mecha) -> void:
 		pilot.eject_from_mecha()
 		if _alive_count() == 2:
 			_stun_focus = [pilot, _closest_opponent(pilot)]
-	var wreck := MechaVisual.new()  # le dessin de l'explosion reste un instant à sa place
-	wreck.color = mecha.visual.color
-	wreck.hover = false
-	wreck.position = mecha.global_position
-	wreck.set_pose(MechaVisual.Pose.EXPLODE)
-	add_child(wreck)
-	get_tree().create_timer(MechaVisual.EXPLODE_TIME).timeout.connect(wreck.queue_free)
+	_spawn_wreck(mecha.global_position, mecha.visual.color)
+	if online:
+		Online.send_effect({"k": "epave", "p": mecha.global_position, "c": mecha.visual.color})
 	mecha.queue_free()
 	_spawn_explosion(center, Color(1.0, 0.55, 0.2))
 	_shake_left = SHAKE_TIME
@@ -2275,6 +2341,17 @@ func _on_mecha_destroyed(mecha: Mecha) -> void:
 		if _rect_distance(fighter.body_rect(), center) <= MECHA_BLAST_RADIUS:
 			var side := signf(fighter.global_position.x - center.x)
 			fighter.clash(Vector2(side if side != 0.0 else 1.0, -0.3).normalized() * MECHA_BLAST_PUSH, Fighter.CLASH_LOCKOUT, 300.0)
+
+
+## Le dessin de l'explosion d'un mecha, qui reste un instant à sa place.
+func _spawn_wreck(where: Vector2, color: Color) -> void:
+	var wreck := MechaVisual.new()
+	wreck.color = color
+	wreck.hover = false
+	wreck.position = where
+	wreck.set_pose(MechaVisual.Pose.EXPLODE)
+	add_child(wreck)
+	get_tree().create_timer(MechaVisual.EXPLODE_TIME).timeout.connect(wreck.queue_free)
 
 
 ## Distance entre un point et le bord d'un rectangle (0 s'il est dedans).
@@ -2616,7 +2693,7 @@ func _tick_pickups(delta: float) -> void:
 			var points := map.item_spawn_points()
 			var kinds: Array = ItemPickup.KINDS + ItemPickup.VILLE_KINDS if map.has_mechas else ItemPickup.KINDS
 			spawn_pickup(kinds[rng.randi() % kinds.size()], points[rng.randi() % points.size()])
-	if map.has_mechas and not online:  # les mechas en ligne : la prochaine étape
+	if map.has_mechas:
 		_tick_beacons(delta)
 	for pickup: ItemPickup in pickups.duplicate():
 		if not map.blast_zone.has_point(pickup.position):
