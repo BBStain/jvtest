@@ -108,6 +108,7 @@ func _reset() -> void:
 	message = ""
 	game = null
 	GameSetup.ville_seed = -1  # hors ligne, la Ville change à chaque partie
+	GameSetup.online_map = {}
 
 
 func _end(reason: String) -> void:
@@ -417,12 +418,24 @@ func _lobby_from_host(new_players: Array, new_map: int) -> void:
 ## (hôte) Tout le monde est prêt : on lance la partie chez tout le monde.
 func start_game() -> void:
 	if is_host and all_ready():
-		_start_from_host.rpc(players, map_index, GameSetup.lives, randi() % 1000000000)
+		var maps := GameSetup.online_maps()
+		var path: String = maps[clampi(map_index, 0, maps.size() - 1)]
+		_start_from_host.rpc(players, map_index, GameSetup.lives, randi() % 1000000000, path, packed_map(path))
 
 
-## Le jeu commence chez tout le monde (seed : la graine de la Ville, la même pour tous).
+## (hôte) Une map de l'éditeur, compressée pour l'envoyer aux copains (ils ne l'ont pas). Vide sinon.
+func packed_map(path: String) -> PackedByteArray:
+	if path.begins_with(GameSetup.SAVED_MAP_PREFIX):
+		var data := MapData.load_saved(path.trim_prefix(GameSetup.SAVED_MAP_PREFIX))
+		if not data.is_empty():
+			return MapData.to_json(data).to_utf8_buffer().compress(FileAccess.COMPRESSION_GZIP)
+	return PackedByteArray()
+
+
+## Le jeu commence chez tout le monde. seed : la graine de la Ville (la même pour tous) ; path : la
+## map choisie par l'hôte ; packed : une map de son éditeur (compressée), que les copains n'ont pas.
 @rpc("authority", "call_local", "reliable")
-func _start_from_host(final_players: Array, map: int, lives: int, seed := -1) -> void:
+func _start_from_host(final_players: Array, map: int, lives: int, seed := -1, path := "", packed := PackedByteArray()) -> void:
 	GameSetup.ville_seed = seed
 	players = final_players
 	map_index = map
@@ -434,11 +447,25 @@ func _start_from_host(final_players: Array, map: int, lives: int, seed := -1) ->
 		GameSetup.player_devices.append([local_device] if players[i].id == my_id else [])
 		GameSetup.player_characters.append(GameSetup.CHARACTERS[players[i].character])
 		GameSetup.player_weapons.append(GameSetup.WEAPONS[players[i].get("weapon", 0)])
-	var maps := GameSetup.online_maps()
-	GameSetup.map_path = maps[clampi(map_index, 0, maps.size() - 1)]
+	GameSetup.map_path = map_from_host(path, packed)
 	GameSetup.lives = lives
 	get_tree().paused = false
 	get_tree().change_scene_to_file(GAME_SCENE)
+
+
+## La map à jouer, d'après ce que l'hôte a choisi. L'hôte joue sa map ; un copain prend la map
+## envoyée (map de l'éditeur de l'hôte), ou celle du jeu du même nom (rien d'autre : sinon la première).
+func map_from_host(path: String, packed: PackedByteArray) -> String:
+	if is_host:
+		return path
+	if not packed.is_empty():
+		var data := MapData.from_json(packed.decompress_dynamic(4 * 1024 * 1024, FileAccess.COMPRESSION_GZIP).get_string_from_utf8())
+		if not data.is_empty():
+			GameSetup.online_map = data
+			return GameSetup.ONLINE_MAP
+	if path in GameSetup.MAPS or path == GameSetup.VILLE_MAP:
+		return path
+	return GameSetup.MAPS[0]
 
 
 ## (hôte) Rejouer avec les mêmes joueurs.

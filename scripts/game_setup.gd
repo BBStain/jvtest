@@ -13,6 +13,8 @@ const MAPS := [
 ]
 const SAVED_MAP_PREFIX := "carte:"
 const EDITOR_MAP := "editeur"
+## En ligne, chez un copain : la map de l'éditeur de l'hôte (il l'envoie au début, voir online_map).
+const ONLINE_MAP := "en_ligne"
 ## La Ville : construite en code (voir Ville.build), pas dans MAPS ; elle est dans le choix de la map
 ## hors ligne (all_maps) et en ligne (online_maps).
 const VILLE_MAP := "ville"
@@ -46,6 +48,8 @@ static var player_weapons: Array = []
 static var map_path: String = MAPS[0]
 ## La map qu'on teste depuis l'éditeur (les données de MapData), quand map_path == EDITOR_MAP.
 static var editor_map: Dictionary = {}
+## En ligne, chez un copain : la map de l'éditeur envoyée par l'hôte, quand map_path == ONLINE_MAP.
+static var online_map: Dictionary = {}
 ## Où revient-on en quittant la partie (vide = le menu). L'éditeur y met sa scène quand on teste.
 static var return_scene := ""
 ## Le nombre de vies de chaque joueur (réglable dans OPTIONS).
@@ -95,12 +99,10 @@ static func all_maps() -> Array[String]:
 	return maps
 
 
-## Les maps qu'on peut choisir en ligne : celles du jeu, puis la Ville.
+## Les maps que l'hôte peut choisir en ligne : les mêmes que hors ligne (celles du jeu, les siennes
+## faites dans l'éditeur, qu'il envoie aux copains au début de la partie, et la Ville).
 static func online_maps() -> Array[String]:
-	var maps: Array[String] = []
-	maps.assign(MAPS)
-	maps.append(VILLE_MAP)
-	return maps
+	return all_maps()
 
 
 ## Crée la map d'un chemin de all_maps() (ou EDITOR_MAP). Une map de l'éditeur introuvable
@@ -108,6 +110,8 @@ static func online_maps() -> Array[String]:
 static func make_map(path: String) -> GameMap:
 	if path == EDITOR_MAP and not editor_map.is_empty():
 		return MapBuilder.build(editor_map)
+	if path == ONLINE_MAP and not online_map.is_empty():
+		return MapBuilder.build(online_map)
 	if path == VILLE_MAP:
 		return Ville.build()
 	if path.begins_with(SAVED_MAP_PREFIX):
