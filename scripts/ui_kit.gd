@@ -23,11 +23,11 @@ static func spacer(height: float) -> Control:
 	return spacer
 
 
-static func menu_button(text: String, selected: bool, on_click: Callable) -> Button:
+static func menu_button(text: String, selected: bool, on_click: Callable, height := 70.0) -> Button:
 	var button := Button.new()
 	button.text = text
 	button.focus_mode = Control.FOCUS_NONE
-	button.custom_minimum_size = Vector2(380, 70)
+	button.custom_minimum_size = Vector2(380, height)
 	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	button.add_theme_font_size_override("font_size", 30)
 	var style := StyleBoxFlat.new()
@@ -85,3 +85,39 @@ static func device_icon(device: Dictionary, color: Color, icon_size: Vector2) ->
 			icon.draw_rect(Rect2(s.x * 0.3, s.y * 0.68, s.x * 0.4, key.y * 0.8), color)
 	)
 	return icon
+
+
+## Les cases d'un code de 4 lettres (salon en ligne, tournoi) ; la case du curseur est surlignée.
+static func code_boxes(letters: Array[String], cursor: int) -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 14)
+	for i in 4:
+		var box := PanelContainer.new()
+		box.custom_minimum_size = Vector2(80, 96)
+		box.add_theme_stylebox_override("panel", slot_style(HIGHLIGHT if i == cursor else Color(1, 1, 1, 0.4), i == cursor))
+		var letter := label(letters[i] if i < letters.size() else "", 56)
+		letter.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		box.add_child(letter)
+		row.add_child(box)
+	return row
+
+
+## Une petite case de tableau qu'on peut sélectionner (et cliquer), comme un petit bouton.
+static func cell_button(text: String, selected: bool, on_click: Callable, width: float, color := Color.WHITE) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.focus_mode = Control.FOCUS_NONE
+	button.custom_minimum_size = Vector2(width, 34)
+	button.add_theme_font_size_override("font_size", 18)
+	var style := StyleBoxFlat.new()
+	style.set_corner_radius_all(6)
+	style.bg_color = Color(HIGHLIGHT, 0.22) if selected else Color(1, 1, 1, 0.05)
+	style.border_color = HIGHLIGHT
+	style.set_border_width_all(2 if selected else 0)
+	for state in ["normal", "hover", "pressed", "disabled"]:
+		button.add_theme_stylebox_override(state, style)
+	for state in ["font_color", "font_hover_color", "font_pressed_color", "font_disabled_color"]:
+		button.add_theme_color_override(state, HIGHLIGHT if selected else color)
+	button.pressed.connect(on_click, CONNECT_DEFERRED)
+	return button
