@@ -281,6 +281,7 @@ var _vine_regrab_timer := 0.0
 var _dash_timer := 0.0
 var _dash_cooldown_timer := 0.0
 var _dash_dir := Vector2.RIGHT
+var _dodge_used := false                ## ce dash a déjà fait une esquive parfaite (une seule par dash)
 
 var _attack_time := -1.0                ## temps écoulé depuis le début de l'attaque (-1 = pas d'attaque)
 var _attack_dir := Vector2.RIGHT
@@ -1094,6 +1095,7 @@ func _try_start_dash(input: InputState, on_floor: bool) -> void:
 		_air_dashes_left -= 1
 	_dash_timer = stats.dash_time
 	_dash_cooldown_timer = stats.dash_cooldown
+	_dodge_used = false
 	_jump_rising = false
 	_cancel_attack()
 
@@ -1681,6 +1683,16 @@ func attack_direction() -> Vector2:
 ## Le dash du katana peut quand même être contré (voir game.gd).
 func can_be_hit() -> bool:
 	return not eliminated and mecha == null and not is_dashing() and not is_katana_dashing() and not is_invincible()
+
+
+## Esquive parfaite : un coup (ou un tir) qui nous aurait touchés passe à travers notre dash.
+## Une seule par dash ; pas pendant l'invincibilité après une vie perdue, ni dans un mecha.
+func can_perfect_dodge() -> bool:
+	return is_dashing() and not _dodge_used and not eliminated and mecha == null and not is_invincible()
+
+
+func mark_perfect_dodge() -> void:
+	_dodge_used = true
 
 
 ## En train d'esquiver (dash, dash du katana) : ce qui vole (balle, lance) passe au travers.
