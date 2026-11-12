@@ -4754,6 +4754,34 @@ func _ready() -> void:
 	check(high_under.size() > 0 and high_worn > 0 and high_under.any(func(w): return w.broken),
 		"Collision : un mecha qui retombe de haut abîme le toit, la 2e fois il le casse (%d blocs dessous)" % high_under.size())
 
+	# Esquive parfaite : un coup qui passe à travers un dash remet nos recharges à zéro, petit zoom + léger ralenti
+	await new_game()
+	p1 = game.fighters[0]; p2 = game.fighters[1]
+	p1.input_source = Scripted.new(func(s, f): pass)
+	p2.input_source = Scripted.new(func(s, f): pass)
+	await step(30)
+	p1.position.x = 600; p2.position.x = 660
+	p2._dash_timer = 0.5; p2._dash_dir = Vector2.UP; p2._dodge_used = false
+	p2._attack_cooldown_timer = 0.4
+	await step(1)
+	check(not p2._dodge_used and Engine.time_scale == 1.0, "Esquive parfaite : un dash sans coup ne ralentit rien")
+	p2.global_position.x = 660; p2._dash_timer = 0.5
+	light_now(p1, Vector2.RIGHT)
+	await step(1)
+	check(untouched(p2) and p2._dodge_used, "Esquive parfaite : le coup passe à travers le dash (vies = %d)" % p2.lives)
+	check(p2._attack_cooldown_timer <= 0.0, "Esquive parfaite : les recharges d'attaque repartent de zéro")
+	check(Engine.time_scale < 1.0 and game._dodge_focus.size() == 2, "Esquive parfaite : léger ralenti (x%.2f) et zoom sur les deux joueurs" % Engine.time_scale)
+	check(game.gauge.points == 0.0, "Esquive parfaite : pas un contre, la jauge ne bouge pas (%.1f)" % game.gauge.points)
+	var dodge_effect: int = game._dodge_slowmo
+	p2._attack_cooldown_timer = 0.4
+	await step(1)
+	check(game._dodge_slowmo == dodge_effect and p2._attack_cooldown_timer > 0.0, "Esquive parfaite : une seule par dash")
+	p2._dash_timer = 0.0
+	await step(60)
+	check(Engine.time_scale == 1.0 and game._dodge_focus.is_empty(), "Esquive parfaite : le ralenti et le zoom finissent vite")
+	var guest_state: Array = game.online_state()
+	check(guest_state.size() >= game.ONLINE_HEADER and guest_state[15] is Array, "Esquive parfaite : le zoom est envoyé aux copains en ligne")
+
 	print("ECHECS: %d" % failures)
 	get_tree().quit(1 if failures > 0 else 0)
 

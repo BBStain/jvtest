@@ -95,6 +95,11 @@ const WEAPON_BREAK_TIME_SCALE := 0.25       ## arme cassée (3e contre de sa lou
 const WEAPON_BREAK_SLOWMO := 0.8            ## ... pendant 0,8 vraie seconde...
 const WEAPON_BREAK_CAMERA_MARGIN := Vector2(260, 180)  ## ... et la caméra zoome fort sur l'arme qui casse
 const WEAPON_BREAK_ZOOM_MAX := 2.4
+const DODGE_TIME_SCALE := 0.5               ## esquive parfaite : léger ralenti...
+const DODGE_SLOWMO := 0.35                  ## ... pendant 0,35 vraie seconde...
+const DODGE_CAMERA_MARGIN := Vector2(520, 340)  ## ... et petit zoom sur les deux joueurs (1 contre 1)
+const DODGE_ZOOM_MAX := 1.5
+const DODGE_COLOR := Color(0.7, 1.0, 0.75)  ## la marque d'une esquive parfaite
 
 # --- 1 contre 1 : tant qu'un joueur est sonné, la caméra serre les deux joueurs et le temps ralentit un peu ---
 const STUN_TIME_SCALE := 0.75              ## le jeu va un peu moins vite (2 s sonné = 2,7 vraies secondes)
@@ -154,7 +159,7 @@ const LOOSE_HIT_LIFT := 300.0              ## ... un peu vers le haut, pour qu'i
 const LOOSE_HIT_LOCK := 0.3                ## le même coup ne le refrappe pas à chaque frame
 const LOOSE_BLAST_SPEED := 1100.0          ## soufflé par une grenade
 
-const ONLINE_HEADER := 15                  ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
+const ONLINE_HEADER := 16                  ## jeu en ligne : nombre de cases avant l'état des joueurs (voir online_state)
 
 var fighters: Array[Fighter] = []
 var player_devices: Array = []             ## les appareils de chaque joueur (voir InputBindings)
@@ -167,6 +172,8 @@ var _duel: Array[Fighter] = []             ## les deux joueurs du micro-duel en 
 var _duel_slowmo := -1                     ## le ralenti du micro-duel en cours (voir TimeEngine.play())
 var _stun_focus: Array[Fighter] = []       ## 1 contre 1 : celui qui a sonné et le joueur sonné
 var _stun_slowmo := -1                     ## le ralenti lancé pour le joueur sonné (voir TimeEngine.play())
+var _dodge_focus: Array[Fighter] = []      ## esquive parfaite : celui qui esquive et celui qui frappe
+var _dodge_slowmo := -1                    ## le léger ralenti de l'esquive parfaite (voir TimeEngine.play())
 var _break_focus: Array[Fighter] = []      ## arme qui vient de casser : son porteur et celui qui l'a contré
 var _break_slowmo := -1                    ## le court ralenti de l'arme cassée (voir TimeEngine.play())
 var _shake_left := 0.0                     ## l'écran tremble encore pendant ce temps (vraies secondes)
@@ -271,6 +278,8 @@ func _process(delta: float) -> void:
 		_duel.clear()  # le ralenti du duel est fini (ou un autre ralenti a pris sa place) : plus de duel
 	if not _is_online_guest() and not _time_engine.is_playing(_break_slowmo):
 		_break_focus.clear()
+	if not _is_online_guest() and not _time_engine.is_playing(_dodge_slowmo):
+		_dodge_focus.clear()
 	_update_camera(real_delta, false)
 	_update_shake(real_delta)
 
@@ -390,6 +399,9 @@ func _guest_tick() -> void:
 	_apply_mechas(state[12])
 	_apply_traces(state[13])
 	_shake_left = maxf(_shake_left, state[14])  # l'écran tremble comme chez l'hôte (explosions, chutes...)
+	_dodge_focus.clear()
+	for index in state[15]:
+		_dodge_focus.append(fighters[index])
 	if state[2] != "" and not _match_over:
 		_show_end(state[2], fighters[state[3]].color if state[3] >= 0 else Color.WHITE)
 	for i in mini(fighters.size(), state.size() - ONLINE_HEADER):
@@ -409,6 +421,9 @@ func online_state() -> Array:
 	var break_focus := []
 	for fighter in _break_focus:
 		break_focus.append(fighters.find(fighter))
+	var dodge_focus := []
+	for fighter in _dodge_focus:
+		dodge_focus.append(fighters.find(fighter))
 	var winner := -1
 	for i in fighters.size():
 		if _match_over and not fighters[i].eliminated:
@@ -416,7 +431,7 @@ func online_state() -> Array:
 	var state := [Engine.time_scale, duel, _winner_label.text if _match_over else "", winner, stun_focus, gauge.points,
 		map.moving_state(), projectiles.map(func(p: Projectile) -> Array: return p.net_state()),
 		pickups.map(func(p: ItemPickup) -> Array: return p.net_state()), map.window_state(), break_focus,
-		_city_state(), mechas.map(func(m: Mecha) -> Array: return m.net_state()), _trace_state(), _shake_left]
+		_city_state(), mechas.map(func(m: Mecha) -> Array: return m.net_state()), _trace_state(), _shake_left, dodge_focus]
 	for fighter in fighters:
 		state.append(fighter.net_state())
 	return state
@@ -616,9 +631,11 @@ func _update_camera(delta: float, instant: bool) -> void:
 	var first := true
 	var one_on_one := _alive_count() <= 2
 	var break_zoom := not _break_focus.is_empty() and one_on_one
-	var stun_zoom := not break_zoom and not _stun_focus.is_empty() and one_on_one
-	var duel_zoom := not break_zoom and not stun_zoom and not _duel.is_empty() and one_on_one
-	var framed := _break_focus if break_zoom else _stun_focus if stun_zoom else _duel if duel_zoom else fighters
+	var dodge_zoom := not break_zoom and not _dodge_focus.is_empty() and one_on_one
+	var stun_zoom := not break_zoom and not dodge_zoom and not _stun_focus.is_empty() and one_on_one
+	var duel_zoom := not break_zoom and not dodge_zoom and not stun_zoom and not _duel.is_empty() and one_on_one
+	var framed := _break_focus if break_zoom else _dodge_focus if dodge_zoom else _stun_focus if stun_zoom \
+		else _duel if duel_zoom else fighters
 	for fighter in framed:
 		if fighter.eliminated:
 			continue
@@ -636,6 +653,10 @@ func _update_camera(delta: float, instant: bool) -> void:
 	if break_zoom:
 		margin = WEAPON_BREAK_CAMERA_MARGIN
 		zoom_max = WEAPON_BREAK_ZOOM_MAX
+		smoothing = STUN_CAMERA_SMOOTHING
+	elif dodge_zoom:
+		margin = DODGE_CAMERA_MARGIN
+		zoom_max = DODGE_ZOOM_MAX
 		smoothing = STUN_CAMERA_SMOOTHING
 	elif stun_zoom:
 		margin = STUN_CAMERA_MARGIN
@@ -1099,9 +1120,13 @@ func _resolve_hits() -> void:
 					window.smash()
 		reached[attacker] = []
 		for victim in fighters:
-			if victim != attacker and victim.can_be_hit() and _segment_hits_rect(
+			if victim == attacker or not _segment_hits_rect(
 					attacker.attack_start(), attacker.attack_center(), attacker.attack_radius(), victim.body_rect()):
+				continue
+			if victim.can_be_hit():
 				reached[attacker].append(victim)
+			elif victim.can_perfect_dodge():
+				_perfect_dodge(victim, attacker, victim.global_position)
 	# Une attaque touche un seul joueur : de préférence celui qui la frappe en retour (c'est alors
 	# un choc), sinon le premier. Ainsi, à 3 ou 4, l'ordre des joueurs ne change rien.
 	var landed: Array[Dictionary] = []
@@ -2518,10 +2543,29 @@ func _resolve_barrel(barrel: Projectile) -> void:
 ## la balle le traversait lentement pendant les ralentis et semblait coincée dans le perso.
 func _projectile_victim(projectile: Projectile) -> Fighter:
 	for victim in fighters:
-		if victim.player_index != projectile.owner_index and not victim.eliminated and not victim.is_dodging() and _segment_hits_rect(
+		if victim.player_index == projectile.owner_index or victim.eliminated or not _segment_hits_rect(
 				projectile.tail(), projectile.tip(), Projectile.RADIUS, victim.body_rect()):
+			continue
+		if not victim.is_dodging():
 			return victim
+		if victim.can_perfect_dodge() and projectile.owner_index >= 0 and projectile.owner_index < fighters.size():
+			_perfect_dodge(victim, fighters[projectile.owner_index], projectile.tip())
 	return null
+
+
+## Esquive parfaite : un coup ou un tir qui nous aurait touchés passe à travers notre dash.
+## Récompense (choix de Stain) : nos recharges d'attaque repartent de zéro, petit zoom et léger
+## ralenti. Le ralenti ne coupe pas un ralenti plus fort (micro-duel, arme cassée) ; celui d'un
+## joueur sonné reprend après. Pas un contre : la jauge ne bouge pas.
+func _perfect_dodge(dodger: Fighter, attacker: Fighter, where: Vector2) -> void:
+	dodger.mark_perfect_dodge()
+	dodger.reset_cooldown()
+	_spawn_clash_mark(where, false, DODGE_COLOR)
+	if _is_online_guest():
+		return
+	if not _time_engine.is_active() or _time_engine.is_playing(_stun_slowmo) or _time_engine.is_playing(_dodge_slowmo):
+		_dodge_focus = [dodger, attacker]
+		_dodge_slowmo = _time_engine.play(DODGE_TIME_SCALE, DODGE_SLOWMO, false)
 
 
 ## La zone qui touche du coup de "fighter" passe-t-elle sur l'objet en vol ?
