@@ -39,6 +39,12 @@ var _peer: HybridPeer
 var _connections := {}              ## id réseau -> WebRTCPeerConnection (essai en direct)
 var _connect_time := 0.0
 var _host_retries := 0
+var _sent_seq := 0                  ## numéro du dernier message de jeu envoyé (touches ou état)
+var _received_seq := {}             ## id réseau -> numéro du dernier message de jeu reçu de lui
+var _ping := {}                     ## id réseau -> temps d'aller-retour mesuré (ms)
+var _ping_clock := 0.0
+
+const PING_EVERY := 0.5             ## secondes entre deux mesures du ping
 
 
 func _ready() -> void:
@@ -105,6 +111,9 @@ func _reset() -> void:
 	players = []
 	map_index = 0
 	my_id = 0
+	_sent_seq = 0
+	_received_seq.clear()
+	_ping.clear()
 	message = ""
 	game = null
 	GameSetup.ville_seed = -1  # hors ligne, la Ville change à chaque partie
@@ -145,6 +154,7 @@ func _open_socket(path: String, waiting_text: String) -> void:
 
 
 func _process(delta: float) -> void:
+	_send_pings(delta)
 	if _ws == null:
 		return
 	_ws.poll()
@@ -221,10 +231,18 @@ func _send_relay(target: int, data: PackedByteArray) -> void:
 		_ws.send(packet)
 
 
+## Octets en attente d'envoi vers le serveur (relais) : s'il y en a trop, la connexion n'arrive pas à suivre.
+func _relay_backlog() -> int:
+	if _ws != null and _ws.get_ready_state() == WebSocketPeer.STATE_OPEN:
+		return _ws.get_current_outbound_buffered_amount()
+	return 0
+
+
 func _on_welcome(id: int) -> void:
 	my_id = id
 	_peer = HybridPeer.new()
 	_peer.send_relay = _send_relay
+	_peer.relay_backlog = _relay_backlog
 	if is_host:
 		_host_retries = 0
 		_peer.create_server()
@@ -501,28 +519,77 @@ func _back_from_host() -> void:
 
 # --- Pendant la partie ---
 
+## Touches et état du jeu partent en « unreliable » : un message perdu n'est pas renvoyé, et les
+## suivants ne l'attendent pas (avec « unreliable_ordered », un message perdu bloquait les suivants
+## le temps d'être renvoyé). Chaque message porte un numéro : un message arrivé après un plus
+## récent est trop vieux, on le jette.
+
 ## (copain) Mes touches de cette frame, envoyées à l'hôte.
 func send_input(data: Dictionary) -> void:
 	if _connected():
-		_input_to_host.rpc_id(1, data)
+		_sent_seq += 1
+		_input_to_host.rpc_id(1, _sent_seq, data)
 
 
-@rpc("any_peer", "call_remote", "unreliable_ordered")
-func _input_to_host(data: Dictionary) -> void:
+@rpc("any_peer", "call_remote", "unreliable")
+func _input_to_host(seq: int, data: Dictionary) -> void:
+	var from := multiplayer.get_remote_sender_id()
+	if seq <= _received_seq.get(from, 0):
+		return  # plus vieux qu'un message déjà reçu
+	_received_seq[from] = seq
 	if is_host and game != null:
-		game.receive_online_input(index_of(multiplayer.get_remote_sender_id()), data)
+		game.receive_online_input(index_of(from), data)
 
 
-## (hôte) L'état du jeu de cette frame, envoyé à tous les copains.
+## (hôte) L'état du jeu de cette frame, envoyé à chaque copain. Si un copain n'a pas encore reçu
+## les états d'avant (sa connexion ou celle de l'hôte est trop lente), on ne lui en empile pas
+## un de plus : il les recevrait de plus en plus en retard. Il aura celui de la frame suivante.
 func send_state(data: Array) -> void:
-	if _connected():
-		_state_from_host.rpc(data)
+	if not _connected():
+		return
+	_sent_seq += 1
+	for p in players:
+		if p.id != my_id and not _peer.is_congested(p.id):
+			_state_from_host.rpc_id(p.id, _sent_seq, data)
 
 
-@rpc("authority", "call_remote", "unreliable_ordered")
-func _state_from_host(data: Array) -> void:
+@rpc("authority", "call_remote", "unreliable")
+func _state_from_host(seq: int, data: Array) -> void:
+	if seq <= _received_seq.get(1, 0):
+		return  # plus vieux qu'un état déjà reçu
+	_received_seq[1] = seq
 	if game != null:
 		game.receive_online_state(data)
+
+
+## Le temps d'un aller-retour jusqu'à l'autre joueur (le plus lent), en millisecondes (-1 : inconnu).
+## Affiché avec ?fps dans l'adresse du jeu.
+func ping_ms() -> int:
+	var worst := -1
+	for id in _ping:
+		worst = maxi(worst, _ping[id])
+	return worst
+
+
+func _send_pings(delta: float) -> void:
+	_ping_clock -= delta
+	if _ping_clock > 0.0 or status != Status.PLAYING or not _connected():
+		return
+	_ping_clock = PING_EVERY
+	if is_host:
+		_ping_request.rpc(Time.get_ticks_msec())  # chaque copain
+	else:
+		_ping_request.rpc_id(1, Time.get_ticks_msec())  # seulement l'hôte
+
+
+@rpc("any_peer", "call_remote", "unreliable")
+func _ping_request(sent_at: int) -> void:
+	_ping_answer.rpc_id(multiplayer.get_remote_sender_id(), sent_at)
+
+
+@rpc("any_peer", "call_remote", "unreliable")
+func _ping_answer(sent_at: int) -> void:
+	_ping[multiplayer.get_remote_sender_id()] = Time.get_ticks_msec() - sent_at
 
 
 ## (hôte) Un effet visuel (marque de choc, explosion) à afficher chez tous les copains.

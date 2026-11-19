@@ -1901,16 +1901,12 @@ func forfeit() -> void:
 
 ## Jeu en ligne (hôte) : l'état de ce joueur à envoyer aux copains.
 func net_state() -> Array:
-	var state := []
-	for v in NET_VARS:
-		state.append(get(v))
-	return state
+	return NetPack.pack(self, NET_VARS)  # tassé : environ 330 octets au lieu de 560 (voir NetPack)
 
 
 ## Jeu en ligne (copain) : on affiche le joueur tel que l'hôte l'a envoyé.
 func apply_net_state(state: Array) -> void:
-	for i in mini(state.size(), NET_VARS.size()):
-		set(NET_VARS[i], state[i])
+	NetPack.unpack(self, NET_VARS, state)
 	queue_redraw()
 
 
