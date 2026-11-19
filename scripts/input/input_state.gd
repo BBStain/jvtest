@@ -23,6 +23,11 @@ var throw_held := false     ## RB maintenu (en mecha : on charge le coup de poin
 var ultimate_pressed := false  ## X + Y appuyés ensemble cette frame : l'attaque ultime (si sa jauge est pleine)
 
 
+## Les boutons « appuyé cette frame » (un appui compte une seule fois, même en ligne).
+const PRESSED := ["down_pressed", "jump_pressed", "attack_pressed", "aimed_attack_pressed", "heavy_pressed", "dash_pressed",
+	"item_pressed", "throw_pressed", "ultimate_pressed"]
+
+
 func to_dict() -> Dictionary:
 	return {
 		"sx": stick.x, "sy": stick.y, "dp": down_pressed,

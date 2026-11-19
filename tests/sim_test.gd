@@ -3922,6 +3922,49 @@ func _ready() -> void:
 	var polled_again := net.poll()
 	check(polled.jump_pressed and polled.jump_held and polled.stick.x == 1.0 and not polled_again.jump_pressed and polled_again.jump_held,
 		"En ligne : un saut envoyé par un copain compte une fois, même si deux messages arrivent ensemble")
+	# 15a bis) Un message de touches perdu en route ne fait perdre aucun appui (compteurs d'appuis)
+	var counted := NetworkInputSource.new()
+	var counts := PackedByteArray(); counts.resize(InputState.PRESSED.size())
+	counted.push({"pc": counts.duplicate()})
+	counted.poll()
+	counts[InputState.PRESSED.find("jump_pressed")] = 1  # le message avec le saut appuyé s'est perdu...
+	counts[InputState.PRESSED.find("throw_pressed")] = 1
+	counted.push({"pc": counts.duplicate(), "jh": true})  # ... le suivant arrive : le compteur a bougé
+	var after_loss := counted.poll()
+	counted.push({"pc": counts.duplicate(), "jh": true})
+	check(after_loss.jump_pressed and after_loss.throw_pressed and not counted.poll().jump_pressed,
+		"En ligne : un saut (ou un lancer d'arme) dont le message s'est perdu compte quand même, une seule fois")
+	# 15a ter) L'état d'un joueur est tassé (nombres sur 4 octets) et se relit à l'identique
+	GameSetup.player_devices = []
+	GameSetup.player_characters = []
+	await new_game()
+	var packed_from: Fighter = game.fighters[0]
+	var packed_to: Fighter = game.fighters[1]
+	packed_from.position = Vector2(123.5, -456.25); packed_from.velocity = Vector2(300, -20); packed_from.lives = 2
+	packed_from._blocking = true; packed_from.shield = 7; packed_from.item = "pistolet"; packed_from.item_ammo = 3
+	packed_from._attack_dir = Vector2(0.6, -0.8)
+	var packed := packed_from.net_state()
+	packed_to.apply_net_state(packed)
+	check(packed_to.position == packed_from.position and packed_to.lives == 2 and packed_to._blocking and packed_to.shield == 7 \
+		and packed_to.item == "pistolet" and packed_to.item_ammo == 3 and packed_to._attack_dir.is_equal_approx(Vector2(0.6, -0.8)) \
+		and packed_to.velocity == Vector2(300, -20), "En ligne : l'état d'un joueur tassé se relit à l'identique")
+	check(var_to_bytes(packed).size() < 400, "En ligne : l'état d'un joueur tient en moins de 400 octets (%d)" % var_to_bytes(packed).size())
+	# Latence à 4 : un micro-duel entre deux joueurs ne ralentit plus tout le jeu (les autres sentaient
+	# leurs touches en retard) ; le duel existe quand même. En 1 contre 1, le ralenti reste.
+	GameSetup.player_devices = [[{"type": "keyboard", "layout": 0}], [{"type": "keyboard", "layout": 1}],
+		[{"type": "joypad", "id": 5}], [{"type": "joypad", "id": 6}]]
+	await new_game()
+	game._start_duel(game.fighters[0], game.fighters[1])
+	await step(2)
+	check(is_equal_approx(Engine.time_scale, 1.0) and game._duel.size() == 2,
+		"À 4 joueurs : un micro-duel ne ralentit pas tout le jeu (vitesse %.2f)" % Engine.time_scale)
+	game._time_engine.stop(true)
+	GameSetup.player_devices = []
+	await new_game()
+	game._start_duel(game.fighters[0], game.fighters[1])
+	await step(2)
+	check(Engine.time_scale < 0.6, "En 1 contre 1 : le micro-duel ralentit toujours (vitesse %.2f)" % Engine.time_scale)
+	game._time_engine.stop(true)
 	# 15b) Chez l'hôte : le copain (J2) est piloté par ses touches reçues
 	Online.status = Online.Status.PLAYING
 	Online.is_host = true

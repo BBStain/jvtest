@@ -182,6 +182,11 @@ var gauge := CounterGauge.new()            ## la jauge de contre, une seule pour
 var online := false                        ## partie en ligne
 var _ultimate_test := false                ## ?ultime=plein dans l'adresse : jauges d'ultime toujours pleines
 var _online_state: Array = []              ## (copain) le dernier état du jeu reçu de l'hôte
+var _press_counts := PackedByteArray()     ## (copain) combien de fois chaque bouton a été appuyé (envoyé à l'hôte)
+var _last_aim := Vector2.ZERO              ## (copain) direction du dernier coup visé (envoyée à l'hôte)
+var _perf_label: Label                     ## ?fps dans l'adresse : FPS et ping (voir _update_perf_label)
+var _perf_frames := 0
+var _perf_clock := 0.0
 
 var map: GameMap
 var _city: CityCollapse  ## Ville : l'écroulement des immeubles (null sur les autres maps)
@@ -261,7 +266,41 @@ func _ready() -> void:
 	gauge_bar.gauge = gauge
 	$UI.add_child(gauge_bar)
 	$UI.move_child(gauge_bar, 0)  # sous l'écran de fin et le menu pause
+	if _url_flag("fps"):
+		_perf_label = Label.new()
+		_perf_label.position = Vector2(12, 8)
+		_perf_label.add_theme_font_size_override("font_size", 16)
+		_perf_label.add_theme_color_override("font_outline_color", Color.BLACK)
+		_perf_label.add_theme_constant_override("outline_size", 4)
+		$UI.add_child(_perf_label)
 	_update_camera(1.0, true)
+
+
+## Un mot dans l'adresse du jeu, par exemple https://bbstain.github.io/jvtest/?fps (version web seulement).
+func _url_flag(flag: String) -> bool:
+	if not OS.has_feature("web"):
+		return false
+	return bool(JavaScriptBridge.eval("new URLSearchParams(window.location.search).has('%s')" % flag))
+
+
+## Avec ?fps dans l'adresse : images par seconde, pas de jeu par seconde et ping en ligne, en haut
+## à gauche. Pour voir d'où vient un retard : le jeu qui rame (moins de 60) ou le réseau (ping).
+func _update_perf_label(delta: float) -> void:
+	if _perf_label == null:
+		return
+	_perf_frames += 1
+	_perf_clock += delta
+	if _perf_clock < 0.5:
+		return
+	var text := "FPS %d" % roundi(_perf_frames / _perf_clock)
+	if Engine.time_scale < 0.99:
+		text += "   ralenti x%.2f" % Engine.time_scale
+	if online:
+		var ping := Online.ping_ms()
+		text += "   ping %s" % ("…" if ping < 0 else "%d ms" % ping)
+	_perf_label.text = text
+	_perf_frames = 0
+	_perf_clock = 0.0
 
 
 ## Pour essayer l'ultime sans faire 20 contres : https://bbstain.github.io/jvtest/?ultime=plein
@@ -274,6 +313,8 @@ func _ultimate_full_for_tests() -> bool:
 
 func _process(delta: float) -> void:
 	var real_delta := delta / Engine.time_scale  # la caméra garde sa vitesse pendant un ralenti
+	if _is_online_guest():
+		_apply_online_state()
 	if not _is_online_guest() and not _time_engine.is_playing(_duel_slowmo):
 		_duel.clear()  # le ralenti du duel est fini (ou un autre ralenti a pris sa place) : plus de duel
 	if not _is_online_guest() and not _time_engine.is_playing(_break_slowmo):
@@ -282,6 +323,7 @@ func _process(delta: float) -> void:
 		_dodge_focus.clear()
 	_update_camera(real_delta, false)
 	_update_shake(real_delta)
+	_update_perf_label(real_delta)
 
 
 func _physics_process(delta: float) -> void:
@@ -372,9 +414,28 @@ func _guest_tick() -> void:
 		var input := fighters[me].input_source.poll()
 		if pause_menu != null or _match_over:
 			input = InputState.new()  # menu ouvert : le perso ne bouge pas
-		Online.send_input(input.to_dict())
+		var data := input.to_dict()
+		# Un message peut se perdre : on envoie, pour chaque bouton, combien de fois il a été appuyé
+		# depuis le début (voir NetworkInputSource), et la direction du dernier coup visé.
+		if _press_counts.size() != InputState.PRESSED.size():
+			_press_counts.resize(InputState.PRESSED.size())
+		for i in InputState.PRESSED.size():
+			if input.get(InputState.PRESSED[i]):
+				_press_counts[i] = (_press_counts[i] + 1) % 256
+		if input.aimed_attack_pressed:
+			_last_aim = input.aim
+		data.pc = _press_counts.duplicate()
+		data.ax = _last_aim.x
+		data.ay = _last_aim.y
+		Online.send_input(data)
 	for fighter in fighters:
 		fighter.target = _closest_opponent(fighter)
+	_apply_online_state()
+
+
+## (copain) Affiche le dernier état reçu de l'hôte (s'il y en a un nouveau). Appelé dès la frame
+## où il arrive (_process), sans attendre le pas de jeu suivant : une frame de retard en moins.
+func _apply_online_state() -> void:
 	if _online_state.is_empty():
 		return
 	var state := _online_state
@@ -698,6 +759,17 @@ func _update_shake(delta: float) -> void:
 
 
 ## Nombre de joueurs encore en jeu (pas éliminés).
+## Un ralenti de tout le jeu (micro-duel, bouclier ou arme cassés, esquive parfaite...). À 3 ou 4
+## joueurs, le jeu garde sa vitesse : un ralenti entre deux joueurs ralentissait aussi les autres,
+## qui sentaient leurs touches répondre en retard (le jeu ne lit les touches qu'une fois par pas
+## de jeu, et il y en a 2 à 4 fois moins pendant un ralenti). L'effet garde sa durée (le duel reste
+## un duel), seul le ralenti saute. En 1 contre 1, rien ne change.
+func _slowmo(time_scale: float, duration: float, renewable := true) -> int:
+	if _alive_count() > 2:
+		time_scale = 1.0
+	return _time_engine.play(time_scale, duration, renewable)
+
+
 func _alive_count() -> int:
 	var count := 0
 	for fighter in fighters:
@@ -1038,7 +1110,7 @@ func _wear_weapon(holder: Fighter, by: Fighter) -> bool:
 func _weapon_break_effect(where: Vector2, color: Color, holder: Fighter, by: Fighter) -> void:
 	_spawn_explosion(where, color)
 	_break_focus = [holder, by]
-	_break_slowmo = _time_engine.play(WEAPON_BREAK_TIME_SCALE, WEAPON_BREAK_SLOWMO, false)
+	_break_slowmo = _slowmo(WEAPON_BREAK_TIME_SCALE, WEAPON_BREAK_SLOWMO, false)
 
 
 ## Un contre relance le ralenti en cours pour toute sa durée. Pendant un micro-duel, il faut
@@ -1070,7 +1142,7 @@ func _push_dir(a: Fighter, b: Fighter) -> Vector2:
 ## Micro-duel : la caméra serre les deux joueurs et le jeu ralentit pendant quelques secondes.
 func _start_duel(a: Fighter, b: Fighter) -> void:
 	_duel = [a, b]
-	_duel_slowmo = _time_engine.play(DUEL_TIME_SCALE, DUEL_DURATION)
+	_duel_slowmo = _slowmo(DUEL_TIME_SCALE, DUEL_DURATION)
 
 
 ## Un duelliste touché ou tombé : le duel est tranché, le temps revient à la normale.
@@ -1214,7 +1286,7 @@ func _hit_shield(attacker: Fighter, victim: Fighter, heavy: bool) -> void:
 	attacker.shield_burst(-push, false)
 	_spawn_explosion(victim.global_position, Color(0.75, 0.9, 1.0))
 	if _duel.is_empty():
-		_time_engine.play(SHIELD_BREAK_TIME_SCALE, SHIELD_BREAK_SLOWMO)
+		_slowmo(SHIELD_BREAK_TIME_SCALE, SHIELD_BREAK_SLOWMO)
 	else:
 		_renew_slowmo(attacker, victim)  # avec un duelliste, le duel continue (et repart pour toute sa durée)
 
@@ -1962,7 +2034,7 @@ func _counter_punch(mecha: Mecha, counterer: Fighter, zone: Rect2) -> void:
 		_break_focus.append(counterer)
 		if by >= 0:
 			_break_focus.append(fighters[by])
-		_break_slowmo = _time_engine.play(PUNCH_COUNTER_TIME_SCALE, PUNCH_COUNTER_SLOWMO, false)
+		_break_slowmo = _slowmo(PUNCH_COUNTER_TIME_SCALE, PUNCH_COUNTER_SLOWMO, false)
 
 
 ## Les tirs s'annulent, comme les coups qui se croisent : deux balles de joueurs différents qui se
@@ -2565,7 +2637,7 @@ func _perfect_dodge(dodger: Fighter, attacker: Fighter, where: Vector2) -> void:
 		return
 	if not _time_engine.is_active() or _time_engine.is_playing(_stun_slowmo) or _time_engine.is_playing(_dodge_slowmo):
 		_dodge_focus = [dodger, attacker]
-		_dodge_slowmo = _time_engine.play(DODGE_TIME_SCALE, DODGE_SLOWMO, false)
+		_dodge_slowmo = _slowmo(DODGE_TIME_SCALE, DODGE_SLOWMO, false)
 
 
 ## La zone qui touche du coup de "fighter" passe-t-elle sur l'objet en vol ?

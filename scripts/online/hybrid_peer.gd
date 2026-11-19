@@ -10,8 +10,10 @@ extends MultiplayerPeerExtension
 const DIRECT := "direct"
 const RELAY := "relais"
 const MAX_PACKET := 16000           ## le serveur refuse les messages de plus de 16 Ko
+const MAX_BACKLOG := 6000           ## octets en attente d'envoi au-delà desquels la connexion ne suit plus
 
 var send_relay: Callable            ## envoie un paquet par le serveur : func(target: int, data: PackedByteArray)
+var relay_backlog: Callable         ## octets en attente d'envoi vers le serveur : func() -> int
 
 var _rtc := WebRTCMultiplayerPeer.new()
 var _id := 0
@@ -63,6 +65,19 @@ func is_direct(id: int) -> bool:
 
 func is_relay(id: int) -> bool:
 	return _routes.get(id) == RELAY
+
+
+## Les paquets vers ce joueur s'empilent sans partir (connexion trop lente pour tout envoyer) ?
+## Le jeu saute alors l'envoi de l'état de cette frame, pour que le suivant n'arrive pas en retard.
+func is_congested(id: int) -> bool:
+	if _routes.get(id) == RELAY:
+		return relay_backlog.is_valid() and relay_backlog.call() > MAX_BACKLOG
+	if not _rtc.has_peer(id):
+		return false
+	for channel in _rtc.get_peer(id).get("channels", []):
+		if channel is WebRTCDataChannel and channel.get_buffered_amount() > MAX_BACKLOG:
+			return true
+	return false
 
 
 ## Ce joueur passe par le serveur (la connexion directe a échoué ou n'est pas possible).
